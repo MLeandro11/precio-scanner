@@ -16,7 +16,7 @@ export default function HighlightedName({ nombre, ranges }) {
     parts.push(
       <mark
         key={`m${start}`}
-        className="rounded bg-amber-200/70 text-slate-900"
+        className="rounded-sm bg-highlight text-text-primary"
       >
         {nombre.slice(start, end)}
       </mark>,

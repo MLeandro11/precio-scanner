@@ -1,8 +1,13 @@
+import { RotateCcw } from 'lucide-react'
 import { formatPrice } from './ProductCard.jsx'
+import Button from './ui/Button.jsx'
+import Input from './ui/Input.jsx'
 
 /**
- * Category chips + price range inputs, populated from build-time facets
- * (spec FR-3.2: never derived by scanning the catalog in the main thread).
+ * Filter content (design-system §7): category chips + price range + clear + count.
+ * It renders inside the bottom Sheet owned by App; the public prop contract is
+ * unchanged so the session wiring stays identical.
+ *
  * Both filters apply immediately (session handles the worker run).
  */
 export default function FilterBar({ facets, filters, onFiltersChange, total }) {
@@ -22,63 +27,79 @@ export default function FilterBar({ facets, filters, onFiltersChange, total }) {
     })
   }
 
+  const hasActiveFilters = Boolean(categoria) || priceMin != null || priceMax != null
+
   return (
-    <div className="mb-3 space-y-3">
-      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filtrar por categoría">
-        {facets.categories.map((c) => (
-          <button
-            key={c}
-            type="button"
-            onClick={() => toggleCategory(c)}
-            aria-pressed={categoria === c}
-            className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-              categoria === c
-                ? 'border-slate-800 bg-slate-800 text-white'
-                : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
-            }`}
-          >
-            {c}
-          </button>
-        ))}
+    <div className="space-y-5">
+      <div>
+        <p className="mb-2 text-xs font-medium text-text-secondary">Categoría</p>
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filtrar por categoría">
+          {facets.categories.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => toggleCategory(c)}
+              aria-pressed={categoria === c}
+              className={`inline-flex min-h-11 items-center rounded-full border px-4 text-xs font-medium transition ${
+                categoria === c
+                  ? 'border-surface-sunken bg-surface-sunken text-surface-raised'
+                  : 'border-border bg-surface-raised text-text-primary hover:bg-surface'
+              }`}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="flex items-center gap-2 text-xs text-slate-600">
-        <label htmlFor="price-min">Precio</label>
-        <input
-          id="price-min"
-          type="number"
-          inputMode="numeric"
-          min="0"
-          placeholder={formatPrice(facets.priceBounds.min)}
-          value={priceMin ?? ''}
-          onChange={(e) => commitPrice({ priceMin: e.target.value, priceMax })}
-          className="w-24 rounded border border-slate-300 bg-white px-2 py-1 outline-none focus:border-slate-500"
-        />
-        <span>–</span>
-        <input
-          id="price-max"
-          type="number"
-          inputMode="numeric"
-          min="0"
-          placeholder={formatPrice(facets.priceBounds.max)}
-          value={priceMax ?? ''}
-          onChange={(e) => commitPrice({ priceMin, priceMax: e.target.value })}
-          className="w-24 rounded border border-slate-300 bg-white px-2 py-1 outline-none focus:border-slate-500"
-        />
-        {(categoria || priceMin != null || priceMax != null) && (
-          <button
-            type="button"
-            onClick={() => onFiltersChange({ categoria: '', priceMin: null, priceMax: null })}
-            className="ml-auto text-slate-500 underline hover:text-slate-700"
-          >
-            Limpiar filtros
-          </button>
-        )}
+      <div>
+        <p className="mb-2 text-xs font-medium text-text-secondary">Precio</p>
+        <div className="flex items-center gap-2">
+          <label htmlFor="price-min" className="sr-only">
+            Precio mínimo
+          </label>
+          <Input
+            id="price-min"
+            type="number"
+            inputMode="numeric"
+            min="0"
+            placeholder={formatPrice(facets.priceBounds.min)}
+            value={priceMin ?? ''}
+            onChange={(e) => commitPrice({ priceMin: e.target.value, priceMax })}
+            className="w-full"
+          />
+          <span aria-hidden="true" className="text-text-secondary">
+            –
+          </span>
+          <label htmlFor="price-max" className="sr-only">
+            Precio máximo
+          </label>
+          <Input
+            id="price-max"
+            type="number"
+            inputMode="numeric"
+            min="0"
+            placeholder={formatPrice(facets.priceBounds.max)}
+            value={priceMax ?? ''}
+            onChange={(e) => commitPrice({ priceMin, priceMax: e.target.value })}
+            className="w-full"
+          />
+        </div>
       </div>
 
-      <p className="text-xs text-slate-500" aria-live="polite">
-        {total.toLocaleString('es-AR')} productos
-      </p>
+      <div className="flex items-center justify-between gap-2 border-t border-border pt-4">
+        <p className="text-xs font-medium text-text-secondary tnum" aria-live="polite">
+          {total.toLocaleString('es-AR')} productos
+        </p>
+        <Button
+          variant="ghost"
+          onClick={() => onFiltersChange({ categoria: '', priceMin: null, priceMax: null })}
+          disabled={!hasActiveFilters}
+        >
+          <RotateCcw size={16} aria-hidden="true" />
+          Limpiar filtros
+        </Button>
+      </div>
     </div>
   )
 }

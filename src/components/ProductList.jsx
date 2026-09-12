@@ -1,11 +1,17 @@
+import { PackageSearch, SearchX } from 'lucide-react'
 import ProductCard from './ProductCard.jsx'
+import Button from './ui/Button.jsx'
+import SkeletonList from './ui/Skeleton.jsx'
 
 export default function ProductList({ search, isFavorite, onToggleFavorite }) {
   const { results, total, loading, error, hasMore, query, categoria, priceMin, priceMax } = search
 
   if (error) {
     return (
-      <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      <p
+        role="alert"
+        className="rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger"
+      >
         Ocurrió un error al buscar. Reintentá.
       </p>
     )
@@ -15,9 +21,14 @@ export default function ProductList({ search, isFavorite, onToggleFavorite }) {
   const hasFilters = Boolean(categoria) || priceMin != null || priceMax != null
   const inFavorites = Array.isArray(search.ids) && search.ids.length > 0
 
+  // First load has nothing to show yet -> skeleton rows (§5).
+  const showSkeleton = loading && results.length === 0
+  const showEmpty = !loading && total === 0 && (hasQuery || hasFilters || inFavorites)
+  const EmptyIcon = hasQuery ? SearchX : PackageSearch
+
   return (
     <div>
-      <p className="mb-3 text-xs text-slate-500" aria-live="polite">
+      <p className="tnum mb-3 text-xs text-text-secondary" aria-live="polite">
         {loading && !hasQuery
           ? 'Buscando…'
           : total === 0
@@ -25,13 +36,13 @@ export default function ProductList({ search, isFavorite, onToggleFavorite }) {
             : `Mostrando ${results.length} de ${total.toLocaleString('es-AR')} productos`}
       </p>
 
-      {total === 0 && (hasQuery || hasFilters || inFavorites) ? (
-        <div className="rounded-xl border border-slate-200 bg-white px-6 py-10 text-center">
-          <p className="text-4xl" aria-hidden="true">
-            🔍
-          </p>
-          <p className="mt-3 font-medium text-slate-800">Sin resultados</p>
-          <p className="mt-1 text-sm text-slate-500">
+      {showSkeleton ? <SkeletonList /> : null}
+
+      {showEmpty ? (
+        <div className="rounded-md border border-border bg-surface-raised px-6 py-10 text-center">
+          <EmptyIcon size={40} aria-hidden="true" className="mx-auto text-text-muted" />
+          <p className="mt-3 text-[15px] font-semibold text-text-primary">Sin resultados</p>
+          <p className="mt-1 text-sm text-text-secondary">
             {inFavorites ? (
               <>Ninguno de tus favoritos está en el catálogo actual.</>
             ) : hasQuery ? (
@@ -45,48 +56,41 @@ export default function ProductList({ search, isFavorite, onToggleFavorite }) {
           </p>
           <div className="mt-5 flex flex-wrap justify-center gap-2">
             {hasQuery && (
-              <button
-                type="button"
-                onClick={() => search.setQuery('')}
-                className="rounded-lg border border-slate-300 bg-white px-4 py-1.5 text-sm text-slate-700 hover:bg-slate-100"
-              >
+              <Button variant="secondary" onClick={() => search.setQuery('')}>
                 Limpiar búsqueda
-              </button>
+              </Button>
             )}
             {hasFilters && (
-              <button
-                type="button"
-                onClick={() => search.setFilters({})}
-                className="rounded-lg border border-slate-300 bg-white px-4 py-1.5 text-sm text-slate-700 hover:bg-slate-100"
-              >
+              <Button variant="secondary" onClick={() => search.setFilters({})}>
                 Quitar filtros
-              </button>
+              </Button>
             )}
           </div>
         </div>
       ) : null}
 
-      <ul className="space-y-2">
-        {results.map((p) => (
-          <ProductCard
-            key={p.id}
-            product={p}
-            isFavorite={isFavorite?.(p.id) ?? false}
-            onToggleFavorite={onToggleFavorite}
-          />
-        ))}
-      </ul>
+      {results.length > 0 ? (
+        <ul className="space-y-2">
+          {results.map((p) => (
+            <ProductCard
+              key={p.id}
+              product={p}
+              isFavorite={isFavorite?.(p.id) ?? false}
+              onToggleFavorite={onToggleFavorite}
+            />
+          ))}
+        </ul>
+      ) : null}
 
-      {hasMore && (
-        <button
-          type="button"
-          onClick={search.loadMore}
-          disabled={loading}
-          className="mt-4 w-full rounded-lg border border-slate-300 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
-        >
-          {loading ? 'Cargando…' : `Ver más (${(total - results.length).toLocaleString('es-AR')} restantes)`}
-        </button>
-      )}
+      {hasMore ? (
+        <div className="safe-bottom mt-4">
+          <Button variant="secondary" onClick={search.loadMore} disabled={loading} className="w-full">
+            {loading
+              ? 'Cargando…'
+              : `Ver más (${(total - results.length).toLocaleString('es-AR')} restantes)`}
+          </Button>
+        </div>
+      ) : null}
     </div>
   )
 }

@@ -1,1 +1,186 @@
 @import "tailwindcss";
+
+/*
+ * precio-scanner design tokens — see docs/design-system.md (§2 Color tokens).
+ *
+ * Components consume the semantic token (bg-surface, text-text-primary, ...) and
+ * never a bare hex. Light is the default theme; the dark block below is defined
+ * ahead of time so activating dark mode is a mapping change, not a refactor.
+ */
+:root {
+  color-scheme: light;
+
+  /* Surfaces */
+  --surface: #f8fafc; /* page background (slate-50) */
+  --surface-raised: #ffffff; /* cards, inputs, chips */
+  --surface-sunken: #0f172a; /* selected chip (slate-900) */
+
+  /* Borders */
+  --border: #e2e8f0; /* slate-200 */
+
+  /* Text */
+  --text-primary: #0f172a; /* slate-900 */
+  --text-secondary: #64748b; /* slate-500 */
+  --text-muted: #94a3b8; /* slate-400 */
+
+  /* Brand & status */
+  --accent: #15803d; /* price emphasis, primary actions — green-700, 5.02:1 on white (AA) */
+  --accent-contrast: #ffffff; /* text/icon on accent */
+  --favorite: #b45309; /* favorite star — amber-700, 5.02:1 on white (AA) */
+  --danger: #dc2626; /* errors (red-600) */
+  --highlight: #fef08a; /* fuse match <mark> background (yellow-200) */
+}
+
+/*
+ * Dark tokens — DEFINED BUT NOT ACTIVATED.
+ * To enable later: add `class="dark"` to <html> (or a color-scheme media query).
+ */
+.dark {
+  color-scheme: dark;
+  --surface: #0f172a; /* slate-900 */
+  --surface-raised: #1e293b; /* slate-800 */
+  --surface-sunken: #e2e8f0; /* slate-200 */
+  --border: #334155; /* slate-700 */
+  --text-primary: #f8fafc; /* slate-50 */
+  --text-secondary: #94a3b8; /* slate-400 */
+  --text-muted: #64748b; /* slate-500 */
+  --accent: #4ade80; /* green-400 */
+  --accent-contrast: #052e16; /* green-950 */
+  --favorite: #fbbf24; /* amber-400 */
+  --danger: #f87171; /* red-400 */
+  --highlight: #78350f; /* amber-900 */
+}
+
+/*
+ * Tailwind v4 theme mapping. `@theme inline` emits the referenced var() directly
+ * into the generated utilities, so redefining a token (e.g. under .dark) flips
+ * every `bg-*`/`text-*` utility with no component change.
+ */
+@theme {
+  /* §3 Typography — system stack, no web font download */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+
+  /* §4 Radius — 4px rhythm */
+  --radius-sm: 6px; /* chips, inputs */
+  --radius-md: 8px; /* cards */
+  --radius-full: 999px; /* search input, category chips */
+}
+
+@theme inline {
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-border: var(--border);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-contrast: var(--accent-contrast);
+  --color-favorite: var(--favorite);
+  --color-danger: var(--danger);
+  --color-highlight: var(--highlight);
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--surface);
+    color: var(--text-primary);
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /*
+   * §5/§9 Visible focus ring on every interactive element (2px, offset 2px,
+   * accent). Programmatic focus targets ([tabindex="-1"]) are excluded.
+   */
+  :where(a, button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"])):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* §8 Motion — honor prefers-reduced-motion */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer utilities {
+  /* §3 Prices never wiggle while scrolling. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+
+  /* §0/§7 Device chrome: notch + home indicator. */
+  .safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  .safe-bottom {
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@layer components {
+  /* §5 Loading results: skeleton rows (shimmer), not a text spinner. */
+  .skeleton {
+    background-color: var(--border);
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      var(--surface-raised) 50%,
+      transparent 100%
+    );
+    background-repeat: no-repeat;
+    background-size: 200% 100%;
+    animation: ps-shimmer 1.4s ease-in-out infinite;
+  }
+
+  /* §7 Bottom sheet entry (§8: transform/opacity only). */
+  .sheet-backdrop {
+    animation: ps-fade-in 200ms ease-out;
+  }
+
+  .sheet-panel {
+    animation: ps-sheet-in 240ms ease-out;
+  }
+}
+
+@keyframes ps-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes ps-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes ps-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}

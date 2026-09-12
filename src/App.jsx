@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { ArrowLeft, ScanBarcode, SlidersHorizontal, Star } from 'lucide-react'
 import { loadCatalog } from './lib/catalogLoader.mjs'
 import { createWorkerClient } from './lib/workerClient.mjs'
 import { createSearchSession } from './lib/searchSession.mjs'
@@ -9,8 +10,23 @@ import SearchBar from './components/SearchBar.jsx'
 import FilterBar from './components/FilterBar.jsx'
 import SortSelect from './components/SortSelect.jsx'
 import ProductList from './components/ProductList.jsx'
+import Button from './components/ui/Button.jsx'
+import Sheet from './components/ui/Sheet.jsx'
+import SkeletonList from './components/ui/Skeleton.jsx'
+
+function AppIdentity({ titleId }) {
+  return (
+    <div className="flex items-center gap-2 pt-4">
+      <ScanBarcode size={22} aria-hidden="true" className="text-accent" />
+      <h1 id={titleId} className="text-xl font-bold leading-none text-text-primary">
+        precio-scanner
+      </h1>
+    </div>
+  )
+}
 
 function CatalogView({ client, facets }) {
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const { recents, addRecent } = useRecents()
   // `addRecent` is stable, so this session is created once per client and still
   // sees the latest recents list when it commits a query.
@@ -41,75 +57,135 @@ function CatalogView({ client, facets }) {
 
   if (!search) return null
 
+  const activeFilterCount =
+    (search.categoria ? 1 : 0) + (search.priceMin != null ? 1 : 0) + (search.priceMax != null ? 1 : 0)
+
   return (
-    <div className="mx-auto max-w-2xl px-4 pb-10">
-      <h1 className="pt-4 text-xl font-bold text-slate-900">precio-scanner</h1>
-      <SearchBar query={search.query} onQueryChange={search.setQuery} />
+    <>
+      <header className="safe-top sticky top-0 z-20 border-b border-border bg-surface/95 backdrop-blur">
+        <div className="mx-auto w-full max-w-lg px-4">
+          <AppIdentity />
+          <div className="pb-3 pt-3">
+            <SearchBar query={search.query} onQueryChange={search.setQuery} />
+          </div>
+          <div className="flex items-center justify-between gap-2 pb-3">
+            <Button
+              variant="secondary"
+              onClick={() => setFiltersOpen(true)}
+              aria-haspopup="dialog"
+              aria-expanded={filtersOpen}
+              className="rounded-full"
+            >
+              <SlidersHorizontal size={18} aria-hidden="true" />
+              Filtros
+              {activeFilterCount > 0 && (
+                <span className="tnum inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-xs font-semibold text-accent-contrast">
+                  {activeFilterCount}
+                </span>
+              )}
+            </Button>
+            <SortSelect sort={search.sort} onSortChange={search.setSort} />
+          </div>
+        </div>
+      </header>
 
-      <div className="mt-2 flex items-center justify-between gap-2">
-        <SortSelect sort={search.sort} onSortChange={search.setSort} />
-      </div>
+      <main className="mx-auto w-full max-w-lg px-4 pb-6">
+        {search.query.trim() === '' &&
+          (favorites.favorites.length > 0 || recents.length > 0) && (
+            <div className="pt-3">
+              {favorites.favorites.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => search.showFavorites(favorites.favorites)}
+                  className="mb-2 inline-flex min-h-11 items-center gap-1.5 rounded-full border border-favorite/40 bg-favorite/10 px-4 text-xs font-medium text-text-primary transition hover:bg-favorite/15"
+                >
+                  <Star size={16} aria-hidden="true" fill="currentColor" className="text-favorite" />
+                  Favoritos ({favorites.favorites.length})
+                </button>
+              )}
+              {recents.length > 0 && (
+                <>
+                  <p className="mb-1.5 text-xs font-medium text-text-secondary">Búsquedas recientes</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {recents.map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => search.setQuery(r)}
+                        className="inline-flex min-h-11 items-center rounded-full border border-border bg-surface-raised px-4 text-xs text-text-primary transition hover:bg-surface"
+                      >
+                        {r}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
-      <FilterBar
-        facets={facets}
-        filters={{
-          categoria: search.categoria,
-          priceMin: search.priceMin,
-          priceMax: search.priceMax,
-        }}
-        onFiltersChange={search.setFilters}
-        total={search.total}
-      />
-
-      {search.query.trim() === '' &&
-        (favorites.favorites.length > 0 || recents.length > 0) && (
-          <div className="mb-3">
-            {favorites.favorites.length > 0 && (
-              <button
-                type="button"
-                onClick={() => search.showFavorites(favorites.favorites)}
-                className="mb-2 rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100"
-              >
-                ★ Favoritos ({favorites.favorites.length})
-              </button>
-            )}
-            {recents.length > 0 && (
-              <>
-                <p className="mb-1.5 text-xs font-medium text-slate-500">Búsquedas recientes</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {recents.map((r) => (
-                    <button
-                      key={r}
-                      type="button"
-                      onClick={() => search.setQuery(r)}
-                      className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 hover:bg-slate-100"
-                    >
-                      {r}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
+        {inFavorites && (
+          <div className="pt-3">
+            <Button variant="secondary" onClick={() => search.showFavorites(null)}>
+              <ArrowLeft size={16} aria-hidden="true" />
+              Volver
+            </Button>
           </div>
         )}
 
-      {inFavorites && (
-        <div className="mb-3">
-          <button
-            type="button"
-            onClick={() => search.showFavorites(null)}
-            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
-          >
-            Volver
-          </button>
+        <div className="pt-3">
+          <ProductList
+            search={search}
+            isFavorite={favorites.isFavorite}
+            onToggleFavorite={favorites.toggleFavorite}
+          />
         </div>
-      )}
+      </main>
 
-      <ProductList
-        search={search}
-        isFavorite={favorites.isFavorite}
-        onToggleFavorite={favorites.toggleFavorite}
-      />
+      <Sheet open={filtersOpen} onClose={() => setFiltersOpen(false)} title="Filtros">
+        <FilterBar
+          facets={facets}
+          filters={{
+            categoria: search.categoria,
+            priceMin: search.priceMin,
+            priceMax: search.priceMax,
+          }}
+          onFiltersChange={search.setFilters}
+          total={search.total}
+        />
+      </Sheet>
+    </>
+  )
+}
+
+function BootScreen() {
+  return (
+    <div className="min-h-dvh bg-surface">
+      <div className="safe-top mx-auto w-full max-w-lg px-4">
+        <AppIdentity />
+        <div className="pb-3 pt-3" role="status" aria-live="polite">
+          <span className="sr-only">Cargando catálogo…</span>
+          <div className="skeleton h-11 w-full rounded-full" />
+        </div>
+        <SkeletonList />
+      </div>
+    </div>
+  )
+}
+
+function ErrorScreen() {
+  return (
+    <div className="safe-top flex min-h-dvh items-center justify-center bg-surface px-4">
+      <div className="text-center">
+        <AppIdentity />
+        <p className="mt-3 text-sm text-danger">No se pudo cargar el catálogo.</p>
+        <Button
+          variant="primary"
+          className="mt-4"
+          onClick={() => window.location.reload()}
+        >
+          Reintentar
+        </Button>
+      </div>
     </div>
   )
 }
@@ -149,39 +225,11 @@ export default function App() {
     }
   }, [])
 
-  if (phase === 'loading') {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
-        <div className="text-center" role="status" aria-live="polite">
-          <h1 className="text-2xl font-semibold text-slate-800">precio-scanner</h1>
-          <p className="mt-3 text-slate-500 animate-pulse">Cargando catálogo…</p>
-          <div className="mt-4 h-1 w-48 mx-auto overflow-hidden rounded bg-slate-200">
-            <div className="h-full w-1/2 bg-slate-400 animate-pulse" />
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  if (phase === 'error') {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
-        <div className="text-center">
-          <h1 className="text-2xl font-semibold text-slate-800">precio-scanner</h1>
-          <p className="mt-3 text-red-600">No se pudo cargar el catálogo.</p>
-          <button
-            className="mt-4 rounded bg-slate-800 px-4 py-2 text-white hover:bg-slate-700"
-            onClick={() => window.location.reload()}
-          >
-            Reintentar
-          </button>
-        </div>
-      </div>
-    )
-  }
+  if (phase === 'loading') return <BootScreen />
+  if (phase === 'error') return <ErrorScreen />
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-dvh bg-surface">
       <CatalogView client={boot.client} facets={boot.facets} />
     </div>
   )

@@ -63,9 +63,9 @@ mapping change, not a component refactor.
 | `text-primary` | Product names, headings | `#0f172a` (slate-900) | `#f8fafc` (slate-50) |
 | `text-secondary` | Metadata, counts | `#64748b` (slate-500) | `#94a3b8` (slate-400) |
 | `text-muted` | Placeholders, hints | `#94a3b8` (slate-400) | `#64748b` (slate-500) |
-| `accent` | Price emphasis, primary actions | `#16a34a` (green-600) | `#4ade80` (green-400) |
+| `accent` | Price emphasis, primary actions | `#15803d` (green-700) | `#4ade80` (green-400) |
 | `accent-contrast` | Text/icon on accent | `#ffffff` | `#052e16` (green-950) |
-| `favorite` | Favorite star (kept distinct from accent) | `#d97706` (amber-600) | `#fbbf24` (amber-400) |
+| `favorite` | Favorite star (kept distinct from accent) | `#b45309` (amber-700) | `#fbbf24` (amber-400) |
 | `danger` | Errors | `#dc2626` (red-600) | `#f87171` (red-400) |
 | `highlight` | Fuse match `<mark>` background | `#fef08a` (yellow-200) | `#78350f` (amber-900) |
 
