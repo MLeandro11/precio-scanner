@@ -1,5 +1,10 @@
 # Design: precio-scanner (Phase 1)
 
+> Reconciled 2026-09-12 against commit `a75ba32`. Corrected against the code: the lib
+> modules are `.mjs`, the Fuse index keys are `nombre`/`categoria`, the skeleton is inline
+> in `App.jsx` rather than a component, and `barcode` was missing from the data model and
+> the search pipeline (FR-2.8).
+
 ## Architecture overview
 
 ```
@@ -13,8 +18,8 @@
                      ▼
         Vite React SPA (static, GH Pages)
         ├─ catalog.worker.js     (owns catalog + index: search, filters, sort)
-        ├─ lib/catalogLoader.js  (fetch + Cache API + version check)
-        ├─ lib/storage.js        (localStorage wrapper)
+        ├─ lib/catalogLoader.mjs (fetch + Cache API + version check)
+        ├─ lib/storage.mjs       (localStorage wrapper)
         ├─ hooks/useSearch.js    (debounce + worker messaging)
         └─ components/           (SearchBar, FilterBar, ProductList, ProductCard)
 ```
@@ -31,9 +36,10 @@ public/data/          catalogo.json, catalogo-index.json, catalogo-facets.json
 scripts/              normalize-catalog.mjs, generate-index.mjs (build-time, Node)
 src/
   workers/catalog.worker.js
-  lib/                catalogLoader.js, workerClient.js, storage.js
+  lib/                catalogLoader.mjs, workerClient.mjs, storage.mjs
   hooks/              useSearch.js, useFavorites.js
-  components/         SearchBar, FilterBar, ProductList, ProductCard, Skeleton
+  components/         SearchBar, FilterBar, ProductList, ProductCard, HighlightedName
+                      (loading skeleton is inline in App.jsx, not a component)
 ```
 
 ## Data model
@@ -44,12 +50,14 @@ type Product = {
   nombre: string;
   marca: string;     // always '' for now (source has no brand field)
   categoria: string;
+  barcode: string;   // EAN/code, '' when the source row has none; exact-match key (FR-2.8)
   precio: number;
 };
 ```
 
 Deliberately minimal. No unit fields, no `raw` duplication. Fewer bytes → faster
-first load, smaller index, lower memory in the worker.
+first load, smaller index, lower memory in the worker. `barcode` is carried despite
+being unindexed because exact code lookup needs it on every record.
 
 ## Data pipeline (build time)
 
@@ -69,7 +77,7 @@ Both scripts are pure Node, tested with fixture catalogs (valid, truncated, corr
 
 ## Large-catalog client handling
 
-### Loading and caching (`lib/catalogLoader.js`)
+### Loading and caching (`lib/catalogLoader.mjs`)
 - Parallel `fetch` of the three data files, each stored in the Cache API under a
   key that includes `data.version`.
 - On boot: if cache hit → hydrate the worker from cached bytes (no network);
@@ -93,14 +101,19 @@ Both scripts are pure Node, tested with fixture catalogs (valid, truncated, corr
 1. Boot: `catalogLoader` hydrates worker (cache or network) → skeleton until ready.
 2. `useSearch(query)`: debounce 150 ms → post to worker → results replace current
    page; generation counter drops stale responses.
-3. Highlight via Fuse match positions on `nombre`/`marca`.
+3. Highlight via Fuse match positions on `nombre`/`categoria`.
 4. Filters/sort ride in the same worker message; the worker applies them over the
    match set before returning the page.
+5. Barcode-like queries (≥6 digits, no letters) short-circuit fuzzy search entirely:
+   `createEngine` builds a `Map<barcode, Product[]>`, and an exact hit is returned with
+   priority. No exact hit falls through to normal search, never to a fuzzy code
+   near-miss (FR-2.8). Codes are the one query class where a wrong answer is worse than
+   no answer.
 
 ## State management
 
 Local React state + two hooks (`useSearch`, `useFavorites`). No global store.
-`lib/storage.js` wraps localStorage with a `precio-scanner:` prefix and JSON-safe
+`lib/storage.mjs` wraps localStorage with a `precio-scanner:` prefix and JSON-safe
 read/write.
 
 ## Styling

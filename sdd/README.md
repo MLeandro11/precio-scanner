@@ -19,6 +19,5 @@ Open work: favorites (WU6.1/6.2), recents persistence (WU6.3), the AC-1..AC-7
 acceptance pass (WU7.4), and the GitHub remote — without it the deploy path
 (items 1.4, AC-4, AC-6) stays unverifiable.
 
-Known artifact drift, not yet fixed: `03-design.md` still names `catalogLoader.js`,
-`workerClient.js`, `storage.js` (real files are `.mjs`), lists a `useFavorites` hook
-and a `Skeleton` component that do not exist, and its `Product` type omits `barcode`.
+`03-design.md` was reconciled in the same pass (`.mjs` module names, `nombre`/`categoria`
+index keys, inline skeleton, `barcode` in the data model and search pipeline).
