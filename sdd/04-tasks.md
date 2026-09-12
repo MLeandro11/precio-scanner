@@ -15,14 +15,14 @@ Ordered by dependency. Each work unit = one commit (reviewable, tests included).
 
 | Work unit | Done | Partial | Pending |
 | --- | --- | --- | --- |
-| WU1 Skeleton + deploy | 3 | 0 | 1 |
+| WU1 Skeleton + deploy | 4 | 0 | 0 |
 | WU2 Data pipeline | 6 | 0 | 1 |
 | WU3 Loading + worker | 3 | 1 | 0 |
 | WU4 Search | 3 | 1 | 1 |
 | WU5 Filters + sorting | 2 | 1 | 1 |
 | WU6 Persistence | 4 | 0 | 0 |
 | WU7 Hardening + docs | 3 | 1 | 0 |
-| **Total (32 items)** | **24** | **4** | **4** |
+| **Total (32 items)** | **25** | **4** | **3** |
 
 Test suite at WU6 delivery: `npx vitest run` → **9 files, 78 tests, all green**
 (49 across 8 files at the reconciliation above).
@@ -40,8 +40,8 @@ because there is no git remote to push to.
 - [x] 1.3 Add `.github/workflows/deploy.yml` (build + deploy to GH Pages on push to `main`).
       — Evidence: workflow present: checkout → node 20 → `npm ci` → `npm run build` →
       `upload-pages-artifact@v3` → `deploy-pages@v4`.
-- [ ] 1.4 Verify: push → site live at `https://MLeandro11.github.io/precio-scanner/`.
-              - **In progress (deployment wiring).** Owner confirmed as `MLeandro11`; placeholder replaced and `origin` remote wired to `MLeandro11/precio-scanner`. Remaining steps are outside the repo: create the GitHub repo, push `main`, and set `Pages -> Source = "GitHub Actions"` in repo settings.
+    - [x] 1.4 Verify: push → site live at `https://MLeandro11.github.io/precio-scanner/`.
+          — **Done.** Pushed `main` to `MLeandro11/precio-scanner` (public repo, GH Pages free plan).
 ## Work Unit 2 — Data pipeline (normalizer + index)
 
 - [x] 2.1 Add Vitest; RED tests for `scripts/normalize-catalog.mjs` contract:

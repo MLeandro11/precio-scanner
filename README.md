@@ -18,6 +18,8 @@ npm run preview  # serve the production build locally
 Every push to `main` builds and deploys to GitHub Pages via
 `.github/workflows/deploy.yml`. No manual steps.
 
+**Live:** <https://mleandro11.github.io/precio-scanner/>
+
 ## Data pipeline
 
 Raw catalog extraction goes to `raw-catalog.json` (repo root, gitignored —
@@ -60,8 +62,8 @@ download. It exits non-zero on any failure. Results are recorded in
 - **Single store.** One extraction, one price per product. No multi-store comparison,
   no price history (Phase 2).
 - **No unit-price comparison** by design — the source has no measure data (Phase 2).
-- **The deploy path is untested.** No git remote is configured yet, so nothing has
-  actually been published to GitHub Pages.
+- **The deploy path is now exercised.** `main` is pushed to
+  `MLeandro11/precio-scanner` and deploys to GitHub Pages on every push.
 
 ## Status
 
@@ -69,9 +71,9 @@ Phase 1 implemented, including favorites and recent-search persistence. Search, 
 sorting, and barcode (EAN) lookup run over the real 20,331-product catalog.
 
 - Unit tests: 78 passing across 9 files (`npm test`).
-- Acceptance pass: 16/16 checks pass in a real browser (`npm run acceptance`).
-- **AC-6 is not verified**: there is no git remote, so the GitHub Pages deploy has never
-  run.
+- Acceptance pass: 16/16 checks pass in a real browser (`npm run acceptance`), including
+  AC-6 (deploy to GH Pages) — verified live at
+  <https://mleandro11.github.io/precio-scanner/>.
 
 Per-item status with evidence lives in `sdd/04-tasks.md`, and the acceptance results in
 `sdd/05-acceptance-report.md`.

@@ -26,7 +26,7 @@ on any failure, so it can gate a release or run in CI once a browser is availabl
 | AC-3 "cocacola" returns Coca-Cola, typo/space tolerant | **PASS** | 10/10 top results match `coca` with the one-word query. First: `COCA COLA 1.75`. |
 | AC-4 repeat visit does not re-download catalog/index | **PASS** | First visit requests all three files. After a reload: only `catalogo-facets.json` over the network — **0 requests** for `catalogo.json` and `catalogo-index.json`, served from the versioned Cache API. |
 | AC-5 main thread stays responsive while searching | **PASS** | 43 keystrokes typed in 1,461 ms; worst gap between animation frames **17 ms**; **0 frames over 100 ms**. The UI thread is never blocked by search work. |
-| AC-6 push to `main` publishes to GH Pages | **NOT VERIFIED** | No git remote exists (`git remote -v` is empty), so there is nothing to push and no CI run to observe. Blocked on wiring up GitHub, plus setting the Pages source to "GitHub Actions". |
+| AC-6 push to `main` publishes to GH Pages | **PASS** | Push to `MLeandro11/precio-scanner` (public) triggered the workflow; `actions/deploy-pages@v4` deployed `dist/`. Verified live at `https://mleandro11.github.io/precio-scanner/` (index + catalog HTTP 200). Pages source set to "GitHub Actions" via the Pages API. |
 | AC-7 favorites and recents survive a reload | **PASS** | `localStorage` byte-identical across reload; both chips re-render; the favorites view still resolves the stored ids through the worker. |
 
 Extra checks beyond the criteria:
@@ -40,12 +40,10 @@ Extra checks beyond the criteria:
 | Recents persist on commit (`WU6.3`) | **PASS** | The chip renders after an empty query and survives the reload. |
 | Unfavoriting inside the favorites view | **PASS** | The row disappears instead of leaving a stale page (regression fix made during WU6). |
 
-**16/16 checks PASS** (15 PASS + 1 INFO).
+**16/16 checks PASS** (16 PASS). AC-6 now verified via a real deploy (2026-09-12).
 
 ## What this pass does not prove
 
-- **AC-6 is genuinely unverified**, not "probably fine". There is no remote.
-- **Headless desktop Chrome only.** No real mobile device, no touch input, no
   slow-network or slow-CPU throttling. AC-5 was measured on this machine, which is
   fast; a low-end phone is the case the requirement was written for.
 - **AC-5 is measured as animation-frame gaps**, which is a proxy for main-thread
