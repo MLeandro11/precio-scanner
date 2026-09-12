@@ -4,6 +4,8 @@
  * Owns the interaction rules (spec FR-2.4/2.5, design §Search pipeline):
  *   - query typing is debounced (150 ms default);
  *   - filters and sort apply immediately (cheap worker runs);
+ *   - favorites mode: `showFavorites(ids)` swaps the whole result set for the
+ *     stored ids and runs immediately; typing or an explicit `null` leaves it;
  *   - one run in flight: a new run supersedes the previous one; stale worker
  *     rejections ('superseded') are swallowed, real errors surface as
  *     state.error;
@@ -16,6 +18,7 @@
 export function createSearchSession({ client, debounceMs = 150, limit = 50 }) {
   let state = {
     query: '',
+    ids: null, // non-empty array = favorites mode (worker restricts to those ids)
     categoria: '',
     priceMin: null,
     priceMax: null,
@@ -47,6 +50,7 @@ export function createSearchSession({ client, debounceMs = 150, limit = 50 }) {
     try {
       const r = await client.query({
         query: state.query,
+        ids: state.ids,
         categoria: state.categoria,
         priceMin: state.priceMin,
         priceMax: state.priceMax,
@@ -90,7 +94,8 @@ export function createSearchSession({ client, debounceMs = 150, limit = 50 }) {
       return state
     },
     setQuery(query) {
-      patch({ query })
+      // typing always leaves favorites mode
+      patch({ query, ids: null })
       schedule()
     },
     setFilters(filters = {}) {
@@ -99,6 +104,13 @@ export function createSearchSession({ client, debounceMs = 150, limit = 50 }) {
     },
     setSort(sort) {
       patch({ sort })
+      run()
+    },
+    showFavorites(ids) {
+      // A chip click is deliberate, so drop any pending debounced query and run
+      // now. `ids: null` leaves favorites mode and restores the normal browse.
+      clearTimeout(timer)
+      patch({ ids, query: '', results: [] })
       run()
     },
     loadMore() {

@@ -26,6 +26,7 @@ export function useSearch(session) {
     setQuery: (q) => session.setQuery(q),
     setFilters: (f) => session.setFilters(f),
     setSort: (s) => session.setSort(s),
+    showFavorites: (ids) => session.showFavorites(ids),
     loadMore: () => session.loadMore(),
   }
 }

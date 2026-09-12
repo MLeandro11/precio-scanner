@@ -124,4 +124,57 @@ describe('searchEngine', () => {
     expect(r.total).toBe(0)
     expect(r.results).toEqual([])
   })
+
+  it('restricts results and total to an explicit id set', () => {
+    const r = runQuery(engine(), { query: '', ids: ['2', '4'] })
+    expect(r.total).toBe(2)
+    expect(r.results.map((p) => p.id)).toEqual(['2', '4'])
+  })
+
+  it('applies the ids filter to the fuzzy path too', () => {
+    const r = runQuery(engine(), { query: 'cocacola', ids: ['1'] })
+    expect(r.total).toBe(1)
+    expect(r.results.map((p) => p.id)).toEqual(['1'])
+  })
+
+  it('ignores ids that match no product', () => {
+    const r = runQuery(engine(), { query: '', ids: ['nope'] })
+    expect(r.total).toBe(0)
+    expect(r.results).toEqual([])
+  })
+
+  it('composes ids with category and price filters', () => {
+    const byCategory = runQuery(engine(), {
+      query: '',
+      ids: ['1', '2', '3'],
+      categoria: 'Bebidas',
+    })
+    expect(byCategory.total).toBe(2)
+    expect(byCategory.results.map((p) => p.id)).toEqual(['1', '2'])
+
+    const byPrice = runQuery(engine(), { query: '', ids: ['1', '2', '3'], priceMax: 3000 })
+    expect(byPrice.total).toBe(1)
+    expect(byPrice.results.map((p) => p.id)).toEqual(['2'])
+  })
+
+  it('treats an empty ids array as no filter (favorites must never blank the browse)', () => {
+    const plain = runQuery(engine(), { query: '' })
+    const empty = runQuery(engine(), { query: '', ids: [] })
+    expect(empty.total).toBe(plain.total)
+    expect(empty.results.map((p) => p.id)).toEqual(plain.results.map((p) => p.id))
+  })
+
+  it('does not break paging when ids is set', () => {
+    const ids = ['1', '2', '3', '4', '5']
+    const page1 = runQuery(engine(), { query: '', ids, sort: 'price-asc', limit: 2, offset: 0 })
+    expect(page1.total).toBe(5)
+    expect(page1.results.map((p) => p.id)).toEqual(['4', '2'])
+
+    const page2 = runQuery(engine(), { query: '', ids, sort: 'price-asc', limit: 2, offset: 2 })
+    expect(page2.results.map((p) => p.id)).toEqual(['5', '3'])
+
+    const page3 = runQuery(engine(), { query: '', ids, sort: 'price-asc', limit: 2, offset: 4 })
+    expect(page3.total).toBe(5)
+    expect(page3.results.map((p) => p.id)).toEqual(['1'])
+  })
 })

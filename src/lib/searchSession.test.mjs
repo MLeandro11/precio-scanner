@@ -134,4 +134,73 @@ describe('searchSession', () => {
     expect(lastCall.offset ?? 0).toBe(0)
     expect(session.getState().results).toHaveLength(50)
   })
+
+  it('showFavorites sends the ids, clears the query and skips the debounce', async () => {
+    vi.useFakeTimers()
+    const { client, session } = setup()
+    await vi.waitFor(() => expect(client.calls).toHaveLength(1))
+
+    session.setQuery('coca') // leaves a debounced run pending
+    session.showFavorites(['2', '3'])
+    await vi.waitFor(() => expect(client.calls).toHaveLength(2))
+
+    const favoritesCall = client.calls[1]
+    expect(favoritesCall.ids).toEqual(['2', '3'])
+    expect(favoritesCall.query).toBe('')
+    expect(session.getState()).toMatchObject({ ids: ['2', '3'], query: '' })
+
+    // the pending debounced query was cancelled: favorites run exactly once
+    vi.advanceTimersByTime(300)
+    await vi.runAllTimersAsync()
+    expect(client.calls).toHaveLength(2)
+  })
+
+  it('showFavorites(null) leaves favorites mode and restores the normal browse', async () => {
+    vi.useFakeTimers()
+    const { client, session } = setup()
+    await vi.waitFor(() => expect(client.calls).toHaveLength(1))
+
+    session.showFavorites(['1', '2'])
+    await vi.waitFor(() => expect(client.calls).toHaveLength(2))
+    session.showFavorites(null)
+    await vi.waitFor(() => expect(client.calls).toHaveLength(3))
+
+    expect(client.calls[2].ids).toBeNull()
+    expect(client.calls[2].query).toBe('')
+    expect(session.getState().ids).toBeNull()
+  })
+
+  it('setQuery leaves favorites mode (typing always drops the ids filter)', async () => {
+    vi.useFakeTimers()
+    const { client, session } = setup()
+    await vi.waitFor(() => expect(client.calls).toHaveLength(1))
+
+    session.showFavorites(['1', '2'])
+    await vi.waitFor(() => expect(client.calls).toHaveLength(2))
+    session.setQuery('yerba')
+    expect(session.getState().ids).toBeNull()
+
+    vi.advanceTimersByTime(150)
+    await vi.runAllTimersAsync()
+    const lastCall = client.calls[client.calls.length - 1]
+    expect(lastCall.query).toBe('yerba')
+    expect(lastCall.ids).toBeNull()
+  })
+
+  it('setFilters and setSort keep the ids filter (filtering favorites is legitimate)', async () => {
+    vi.useFakeTimers()
+    const { client, session } = setup()
+    await vi.waitFor(() => expect(client.calls).toHaveLength(1))
+
+    session.showFavorites(['1', '2'])
+    await vi.waitFor(() => expect(client.calls).toHaveLength(2))
+
+    session.setFilters({ categoria: 'Bebidas' })
+    await vi.waitFor(() => expect(client.calls).toHaveLength(3))
+    expect(client.calls[2]).toMatchObject({ categoria: 'Bebidas', ids: ['1', '2'] })
+
+    session.setSort('price-asc')
+    await vi.waitFor(() => expect(client.calls).toHaveLength(4))
+    expect(client.calls[3]).toMatchObject({ sort: 'price-asc', ids: ['1', '2'] })
+  })
 })

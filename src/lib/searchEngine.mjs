@@ -43,8 +43,9 @@ export function createEngine(products, index /* , facets */) {
   return { products, fuse, barcodeMap }
 }
 
-function applyFilters(list, { categoria, priceMin, priceMax }) {
+function applyFilters(list, { categoria, priceMin, priceMax, idSet }) {
   return list.filter((p) => {
+    if (idSet && !idSet.has(p.id)) return false
     if (categoria && p.categoria !== categoria) return false
     if (priceMin != null && p.precio < priceMin) return false
     if (priceMax != null && p.precio > priceMax) return false
@@ -81,7 +82,12 @@ function matchPositions(fuseMatch) {
 }
 
 /**
- * @param {object} params { query, categoria, priceMin, priceMax, sort, limit, offset }
+ * `ids` is the favorites mode filter: a non-empty id array restricts the match
+ * set to those products (total included, so paging stays honest). Null,
+ * undefined or an empty array means no filter — an empty favorites list must
+ * never blank the default browse.
+ *
+ * @param {object} params { query, categoria, priceMin, priceMax, sort, limit, offset, ids }
  * @returns {{ results: Product[], total: number }}
  */
 export function runQuery(engine, params = {}) {
@@ -93,7 +99,11 @@ export function runQuery(engine, params = {}) {
     sort = 'relevance',
     limit = DEFAULT_LIMIT,
     offset = 0,
+    ids = null,
   } = params
+
+  const idSet = Array.isArray(ids) && ids.length ? new Set(ids) : null
+  const filters = { categoria, priceMin, priceMax, idSet }
 
   const q = String(query).trim()
   const digits = q.replace(/\D/g, '')
@@ -103,7 +113,7 @@ export function runQuery(engine, params = {}) {
     const hits = engine.barcodeMap.get(digits)
     if (hits) {
       // exact code hit: filter+sort still apply, relevance is identity
-      const filtered = applyFilters(hits, { categoria, priceMin, priceMax })
+      const filtered = applyFilters(hits, filters)
       return {
         results: sortResults(filtered, sort, null).slice(offset, offset + limit),
         total: filtered.length,
@@ -125,7 +135,7 @@ export function runQuery(engine, params = {}) {
     matches = engine.products.slice()
   }
 
-  const filtered = applyFilters(matches, { categoria, priceMin, priceMax })
+  const filtered = applyFilters(matches, filters)
   const total = filtered.length
   const results = sortResults(filtered, sort, scores).slice(offset, offset + limit)
   return { results, total }

@@ -1,6 +1,6 @@
 import ProductCard from './ProductCard.jsx'
 
-export default function ProductList({ search }) {
+export default function ProductList({ search, isFavorite, onToggleFavorite }) {
   const { results, total, loading, error, hasMore, query, categoria, priceMin, priceMax } = search
 
   if (error) {
@@ -13,6 +13,7 @@ export default function ProductList({ search }) {
 
   const hasQuery = query.trim() !== ''
   const hasFilters = Boolean(categoria) || priceMin != null || priceMax != null
+  const inFavorites = Array.isArray(search.ids) && search.ids.length > 0
 
   return (
     <div>
@@ -24,14 +25,16 @@ export default function ProductList({ search }) {
             : `Mostrando ${results.length} de ${total.toLocaleString('es-AR')} productos`}
       </p>
 
-      {total === 0 && (hasQuery || hasFilters) ? (
+      {total === 0 && (hasQuery || hasFilters || inFavorites) ? (
         <div className="rounded-xl border border-slate-200 bg-white px-6 py-10 text-center">
           <p className="text-4xl" aria-hidden="true">
             🔍
           </p>
           <p className="mt-3 font-medium text-slate-800">Sin resultados</p>
           <p className="mt-1 text-sm text-slate-500">
-            {hasQuery ? (
+            {inFavorites ? (
+              <>Ninguno de tus favoritos está en el catálogo actual.</>
+            ) : hasQuery ? (
               <>
                 Nada coincide con “{query.trim()}”
                 {categoria ? <> en {categoria}</> : null}.
@@ -65,7 +68,12 @@ export default function ProductList({ search }) {
 
       <ul className="space-y-2">
         {results.map((p) => (
-          <ProductCard key={p.id} product={p} />
+          <ProductCard
+            key={p.id}
+            product={p}
+            isFavorite={isFavorite?.(p.id) ?? false}
+            onToggleFavorite={onToggleFavorite}
+          />
         ))}
       </ul>
 

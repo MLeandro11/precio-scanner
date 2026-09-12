@@ -3,6 +3,7 @@ import { loadCatalog } from './lib/catalogLoader.mjs'
 import { createWorkerClient } from './lib/workerClient.mjs'
 import { createSearchSession } from './lib/searchSession.mjs'
 import { useSearch } from './hooks/useSearch.js'
+import { useFavorites } from './hooks/useFavorites.js'
 import { getStored } from './lib/storage.mjs'
 import SearchBar from './components/SearchBar.jsx'
 import FilterBar from './components/FilterBar.jsx'
@@ -13,6 +14,25 @@ function CatalogView({ client, facets }) {
   const session = useMemo(() => createSearchSession({ client }), [client])
   const search = useSearch(session)
   const recents = useMemo(() => getStored('recents', []), [])
+  const favorites = useFavorites()
+  const favoriteIds = favorites.favorites
+
+  // non-empty id list = the session is showing favorites, not browsing
+  const inFavorites = Array.isArray(search?.ids) && search.ids.length > 0
+
+  // Favorites mode renders a snapshot of ids, so it goes stale the instant the user
+  // unfavorites a row from inside the list. Re-run with the current ids; if the list
+  // empties, leave favorites mode rather than leave a stale page on screen.
+  useEffect(() => {
+    if (!inFavorites) return
+    const shown = search.ids ?? []
+    const same =
+      shown.length === favoriteIds.length && favoriteIds.every((id) => shown.includes(id))
+    if (same) return
+    search.showFavorites(favoriteIds.length > 0 ? favoriteIds : null)
+    // `search` is deliberately not a dependency: useSearch returns a new object on
+    // every render, so depending on it would re-run this effect forever.
+  }, [favoriteIds, inFavorites])
 
   if (!search) return null
 
@@ -36,25 +56,55 @@ function CatalogView({ client, facets }) {
         total={search.total}
       />
 
-      {search.query.trim() === '' && recents.length > 0 && (
-        <div className="mb-3">
-          <p className="mb-1.5 text-xs font-medium text-slate-500">Búsquedas recientes</p>
-          <div className="flex flex-wrap gap-1.5">
-            {recents.map((r) => (
+      {search.query.trim() === '' &&
+        (favorites.favorites.length > 0 || recents.length > 0) && (
+          <div className="mb-3">
+            {favorites.favorites.length > 0 && (
               <button
-                key={r}
                 type="button"
-                onClick={() => search.setQuery(r)}
-                className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 hover:bg-slate-100"
+                onClick={() => search.showFavorites(favorites.favorites)}
+                className="mb-2 rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100"
               >
-                {r}
+                ★ Favoritos ({favorites.favorites.length})
               </button>
-            ))}
+            )}
+            {recents.length > 0 && (
+              <>
+                <p className="mb-1.5 text-xs font-medium text-slate-500">Búsquedas recientes</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {recents.map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => search.setQuery(r)}
+                      className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 hover:bg-slate-100"
+                    >
+                      {r}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
+        )}
+
+      {inFavorites && (
+        <div className="mb-3">
+          <button
+            type="button"
+            onClick={() => search.showFavorites(null)}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+          >
+            Volver
+          </button>
         </div>
       )}
 
-      <ProductList search={search} />
+      <ProductList
+        search={search}
+        isFavorite={favorites.isFavorite}
+        onToggleFavorite={favorites.toggleFavorite}
+      />
     </div>
   )
 }
