@@ -1,0 +1,16 @@
+# Local Pi runtime state
+.atl/
+
+# Node / build
+node_modules/
+dist/
+
+# Raw catalog extraction (never commit; keep local only)
+raw-catalog.json
+
+# Windows/WSL NTFS metadata artifacts (e.g. raw-catalog.json:Zone.Identifier)
+*:Zone.Identifier
+
+# Logs / editor noise
+*.log
+.DS_Store

@@ -1,0 +1,119 @@
+import { describe, it, expect } from 'vitest'
+import { loadCatalog } from './catalogLoader.mjs'
+
+const BASE = '/precio-scanner/'
+
+function jsonResponse(body) {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  })
+}
+
+const FACETS = { version: 'abc123', categories: ['A'], brands: [], priceBounds: { min: 1, max: 10 } }
+const CATALOG = { version: 'catver1', products: [{ id: 'x', nombre: 'N', marca: '', categoria: 'A', precio: 5 }] }
+const INDEX = { keys: ['nombre', 'categoria'], fuseIndex: { tags: {} } }
+
+function fakeCache() {
+  const store = new Map()
+  return {
+    calls: { match: 0, put: 0 },
+    async match(key) {
+      this.calls.match++
+      return store.get(key) ?? undefined
+    },
+    async put(key, res) {
+      this.calls.put++
+      store.set(key, res)
+    },
+  }
+}
+
+function makeDeps({ cache = null, catalogStatus = 200 } = {}) {
+  const fetched = []
+  const fetchFn = async (url) => {
+    fetched.push(String(url))
+    if (String(url).includes('catalogo-facets.json')) return jsonResponse(FACETS)
+    if (String(url).includes('catalogo-index.json')) return jsonResponse(INDEX)
+    if (catalogStatus !== 200) return new Response('nope', { status: catalogStatus })
+    return jsonResponse(CATALOG)
+  }
+  const caches = cache ? { open: async () => cache } : undefined
+  return { deps: { fetchFn, caches, baseUrl: BASE }, fetched }
+}
+
+describe('catalogLoader', () => {
+  it('fetches facets no-cache and catalog+index when cache misses, storing versioned copies', async () => {
+    const cache = fakeCache()
+    const { deps, fetched } = makeDeps({ cache })
+
+    const result = await loadCatalog(deps)
+
+    expect(result.products).toEqual(CATALOG.products)
+    expect(result.facets.version).toBe('abc123')
+    expect(result.index.keys).toEqual(['nombre', 'categoria'])
+    // facets always bypasses the cache (fresh version check) and uses the
+    // exact public/data/ path (this caught a real bug: URLs missing /data/)
+    expect(fetched.some((u) => u.endsWith('/data/catalogo-facets.json'))).toBe(true)
+    // catalog + index were stored under versioned keys
+    expect(cache.calls.put).toBe(2)
+    expect(fetched.some((u) => u.endsWith('/data/catalogo.json?v=abc123'))).toBe(true)
+    expect(fetched.some((u) => u.endsWith('/data/catalogo-index.json?v=abc123'))).toBe(true)
+  })
+
+  it('serves catalog+index from cache on a version hit (no network for the big files)', async () => {
+    const cache = fakeCache()
+    // pre-warm: first load populates the cache
+    await loadCatalog(makeDeps({ cache }).deps)
+
+    // second load: track network calls; facets still fetched, big files not
+    const { deps, fetched } = makeDeps({ cache })
+    const result = await loadCatalog(deps)
+
+    expect(result.products).toEqual(CATALOG.products)
+    expect(cache.calls.match).toBeGreaterThanOrEqual(2)
+    expect(fetched.some((u) => u.includes('catalogo.json?v='))).toBe(false)
+    expect(fetched.some((u) => u.includes('catalogo-index.json?v='))).toBe(false)
+  })
+
+  it('re-downloads big files when the facets version changes (cache miss by new key)', async () => {
+    const cache = fakeCache()
+    await loadCatalog(makeDeps({ cache }).deps)
+
+    // new data version → different ?v= keys → misses → network
+    const FACETS2 = { ...FACETS, version: 'def456' }
+    const fetchFn = async (url) => {
+      if (String(url).includes('catalogo-facets.json')) return jsonResponse(FACETS2)
+      if (String(url).includes('catalogo-index.json')) return jsonResponse(INDEX)
+      return jsonResponse(CATALOG)
+    }
+    const result = await loadCatalog({ fetchFn, caches: { open: async () => cache }, baseUrl: BASE })
+    expect(result.products).toEqual(CATALOG.products)
+    expect(cache.calls.put).toBe(4) // 2 from first load + 2 from re-download
+  })
+
+  it('throws a clear error when the dev server returns HTML instead of JSON', async () => {
+    // e.g. Vite 7 dev server started before public/data existed: its public
+    // files Set lacks the JSONs and the SPA fallback answers with index.html
+    const fetchFn = async () =>
+      new Response('<!doctype html><html lang="es">...', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      })
+    await expect(
+      loadCatalog({ fetchFn, baseUrl: BASE }),
+    ).rejects.toThrow(/HTML.*restart `npm run dev`/i)
+  })
+
+  it('throws a clear error when facets cannot be fetched', async () => {
+    const fetchFn = async () => new Response('nope', { status: 404 })
+    await expect(
+      loadCatalog({ fetchFn, baseUrl: BASE }),
+    ).rejects.toThrow(/facets/)
+  })
+
+  it('throws a clear error when the catalog fails to download', async () => {
+    const { deps } = makeDeps({ catalogStatus: 500 })
+    await expect(loadCatalog(deps)).rejects.toThrow(/catalog/)
+  })
+})
