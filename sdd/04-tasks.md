@@ -20,11 +20,12 @@ Ordered by dependency. Each work unit = one commit (reviewable, tests included).
 | WU3 Loading + worker | 3 | 1 | 0 |
 | WU4 Search | 3 | 1 | 1 |
 | WU5 Filters + sorting | 2 | 1 | 1 |
-| WU6 Persistence | 0 | 2 | 2 |
+| WU6 Persistence | 3 | 0 | 1 |
 | WU7 Hardening + docs | 0 | 2 | 2 |
-| **Total (32 items)** | **17** | **7** | **8** |
+| **Total (32 items)** | **20** | **5** | **7** |
 
-Test suite at reconciliation time: `npx vitest run` → **8 files, 49 tests, all green**.
+Test suite at WU6 delivery: `npx vitest run` → **9 files, 78 tests, all green**
+(49 across 8 files at the reconciliation above).
 
 ## Work Unit 1 — Skeleton + deploy
 
@@ -141,18 +142,27 @@ Test suite at reconciliation time: `npx vitest run` → **8 files, 49 tests, all
 
 ## Work Unit 6 — Persistence
 
-- [ ] 6.1 `lib/storage.mjs` (namespaced, JSON-safe) + `useFavorites` hook.
-      — **PARTIAL.** Done: `src/lib/storage.mjs` with the `precio-scanner:` prefix,
-      JSON-safe read/write, tested in `storage.test.mjs`. Missing:
-      `src/hooks/useFavorites.js` **does not exist**.
-- [ ] 6.2 Favorite toggle on ProductCard; favorites view from empty-query state.
-      — **NOT DONE.** `ProductCard.jsx` has no toggle and no favorites prop; a
-      case-insensitive grep for "favorit" across `src/` returns zero results.
-- [ ] 6.3 Recent searches (dedupe, cap 10) saved on search; shown on empty query.
-      — **PARTIAL.** Done: display on empty query. Missing: all persistence — no write,
-      no dedupe, no cap; `useSearch.js` never touches storage.
+- [x] 6.1 `lib/storage.mjs` (namespaced, JSON-safe) + `useFavorites` hook.
+      — Evidence: `src/lib/storage.mjs` + `storage.test.mjs`; `src/hooks/useFavorites.js`
+      reads once at mount and writes from the toggle handler only, so mounting can never
+      clobber ids stored by an earlier session.
+- [x] 6.2 Favorite toggle on ProductCard; favorites view from empty-query state.
+      — Evidence: `ProductCard.jsx` (aria-pressed star toggle), `ProductList.jsx`
+      (forwards it), `App.jsx` ("★ Favoritos (N)" chip plus a "Volver" button while in
+      favorites mode). This needed a new worker capability: the main thread never holds
+      the catalog, so favorite products are fetched by id — `searchEngine.runQuery`
+      gained an `ids` filter (`null`/`[]` = no restriction) and the session gained
+      `showFavorites(ids)`.
+- [x] 6.3 Recent searches (dedupe, cap 10) saved on search; shown on empty query.
+      — Evidence: `searchSession.mjs` reports a committed query once through
+      `onQueryCommit` (never for the initial browse, filters, sort or paging, and
+      isolated so a storage failure cannot break a run); `src/hooks/useRecents.js`
+      persists it; `collections.addRecent` owns trim, minimum length, case-insensitive
+      dedupe, proper-prefix replacement and the cap.
 - [ ] 6.4 Manual acceptance: AC-7 (persistence across reload).
-      — **NOT DONE, and currently unverifiable** — there is nothing to persist yet.
+      — **Still open.** The logic is unit-tested and the wiring builds, but nobody has
+      reloaded the page and confirmed the data survives. Both collections are written
+      now, so this check is finally possible.
 
 ## Work Unit 7 — Hardening and docs
 
@@ -193,12 +203,16 @@ Recorded so the ledger stays honest:
    model as `''` only so a future extraction can fill it without another shape change.
 4. **Repo name is settled**: `precio-scanner`, matching `base` and the workflow. The
    "decision pending" note in the original forecast is resolved.
+5. **WU6 shipped as two commits, not one** (`57899eb` favorites, `fb91fb5` recents).
+   The split is deliberate: the favorites half alone was 436 insertions across 11 files,
+   over the 400-line review guidance, and the two halves carry different concerns.
 
 ## Review workload forecast
 
-Per work unit, excluding the lockfile and generated data: comfortably under 400 changed
-lines. Single-branch delivery on `main` is acceptable for the remaining WU6/WU7 items;
-no chained PRs required.
+Per work unit, excluding the lockfile and generated data: WU6a landed at 436 insertions
+across 11 files — slightly over the 400-line guidance — and was split from WU6b (149
+insertions) for that reason. Single-branch delivery on `main` is acceptable for the
+remaining WU7 items; no chained PRs required.
 
 The only remaining external dependency is the GitHub remote: until it exists, 1.4, AC-4,
 AC-6, and the whole deploy path stay unverifiable.

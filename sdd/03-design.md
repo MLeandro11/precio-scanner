@@ -20,7 +20,7 @@
         ├─ catalog.worker.js     (owns catalog + index: search, filters, sort)
         ├─ lib/catalogLoader.mjs (fetch + Cache API + version check)
         ├─ lib/storage.mjs       (localStorage wrapper)
-        ├─ hooks/useSearch.js    (debounce + worker messaging)
+        ├─ hooks/                (useSearch, useFavorites, useRecents)
         └─ components/           (SearchBar, FilterBar, ProductList, ProductCard)
 ```
 
@@ -37,7 +37,7 @@ scripts/              normalize-catalog.mjs, generate-index.mjs (build-time, Nod
 src/
   workers/catalog.worker.js
   lib/                catalogLoader.mjs, workerClient.mjs, storage.mjs
-  hooks/              useSearch.js, useFavorites.js
+  hooks/              useSearch.js, useFavorites.js, useRecents.js
   components/         SearchBar, FilterBar, ProductList, ProductCard, HighlightedName
                       (loading skeleton is inline in App.jsx, not a component)
 ```
@@ -86,7 +86,9 @@ Both scripts are pure Node, tested with fixture catalogs (valid, truncated, corr
 
 ### Worker (`catalog.worker.js`)
 - The worker receives catalog + index bytes, constructs the single `Fuse` instance,
-  and answers messages: `{ type: 'search', query, filters, sort, limit }`.
+  and answers messages: `{ type: 'query', query, ids, categoria, priceMin, priceMax,
+  sort, limit, offset }` (`ids` is the favorites-mode filter; null or empty means
+  no restriction).
 - Returns `{ results: Product[] (≤50), total: number }`. The `total` lets the UI
   show "load more" paging without shipping the whole match set.
 - One request in flight; new input cancels (or its response is discarded by
@@ -100,7 +102,11 @@ Both scripts are pure Node, tested with fixture catalogs (valid, truncated, corr
 
 1. Boot: `catalogLoader` hydrates worker (cache or network) → skeleton until ready.
 2. `useSearch(query)`: debounce 150 ms → post to worker → results replace current
-   page; generation counter drops stale responses.
+   page; generation counter drops stale responses. When the debounce commits a
+   non-blank query, the session reports it once through `onQueryCommit` so the
+   caller can persist it as a recent search. Only real query commits are reported
+   — the initial browse, filters, sort and paging are not — and the callback is
+   isolated so a failing storage write can never break a run.
 3. Highlight via Fuse match positions on `nombre`/`categoria`.
 4. Filters/sort ride in the same worker message; the worker applies them over the
    match set before returning the page.
@@ -109,12 +115,31 @@ Both scripts are pure Node, tested with fixture catalogs (valid, truncated, corr
    priority. No exact hit falls through to normal search, never to a fuzzy code
    near-miss (FR-2.8). Codes are the one query class where a wrong answer is worse than
    no answer.
+6. Favorites mode: `showFavorites(ids)` clears any pending debounced query, sets
+   `ids` and runs immediately. The worker then restricts the match set to those ids
+   (`total` included, so paging stays honest). Typing leaves the mode; filters and
+   sort are kept, because filtering within favorites is legitimate. The main thread
+   only ever holds the id list — favorite products are fetched through the worker
+   like any other result, never by keeping a catalog copy.
 
 ## State management
 
-Local React state + two hooks (`useSearch`, `useFavorites`). No global store.
+Local React state + three hooks (`useSearch`, `useFavorites`, `useRecents`). No
+global store.
 `lib/storage.mjs` wraps localStorage with a `precio-scanner:` prefix and JSON-safe
-read/write.
+read/write. Two keys: `favorites` (product ids, appended on toggle) and `recents`
+(query strings). Both are read once at mount and written from a handler, never from
+an effect — a mount effect would write the initial state back and clobber data from
+an earlier session. Their list math lives in `lib/collections.mjs` so it unit-tests
+in Node.
+
+Recent searches need one non-obvious rule. The session debounces at 150 ms, so a slow
+typist commits "coca", then "cocac", then "cocacola": storing each commit verbatim
+would fill the list with prefixes of a single search. `addRecent` therefore drops any
+existing entry that is a **proper prefix** of the new query, and only in that
+direction — adding "coca" after "cocacola" keeps both, because the user may have
+deliberately searched the shorter term. Dedupe is case-insensitive, the new casing
+wins, and the list is capped at 10.
 
 ## Styling
 

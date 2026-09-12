@@ -33,7 +33,7 @@ content hash (`version`) used for client-side cache invalidation.
 
 ## Status
 
-Phase 1 in progress. Search, filters, sorting, and barcode (EAN) lookup work over the
-real catalog. Favorites and recent-search persistence are not implemented yet, and the
-acceptance pass (AC-1..AC-7) has not been run. Per-item status with evidence lives in
-`sdd/04-tasks.md`.
+Phase 1 in progress. Search, filters, sorting, barcode (EAN) lookup, favorites, and
+recent-search persistence work over the real catalog. The acceptance pass (AC-1..AC-7)
+has not been run and no manual browser verification is recorded. Per-item status with
+evidence lives in `sdd/04-tasks.md`.

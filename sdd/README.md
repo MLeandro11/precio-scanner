@@ -11,13 +11,14 @@ Phase 1 planning artifacts (generated before implementation).
 
 Dependency: proposal → spec → design → tasks.
 
-Status (reconciled 2026-09-12, baseline commit `dd1a943`): **WU1–WU5 implemented,
-WU6–WU7 open.** 8 test files / 49 tests green. `04-tasks.md` is the authoritative
-ledger — it carries per-item evidence and the recorded deviations.
+Status (updated 2026-09-12 at commit `fb91fb5`): **WU1–WU6 implemented, WU7 open.**
+9 test files / 78 tests green. `04-tasks.md` is the authoritative ledger — it carries
+per-item evidence and the recorded deviations.
 
-Open work: favorites (WU6.1/6.2), recents persistence (WU6.3), the AC-1..AC-7
-acceptance pass (WU7.4), and the GitHub remote — without it the deploy path
-(items 1.4, AC-4, AC-6) stays unverifiable.
+Open work: the AC-1..AC-7 acceptance pass (WU7.4, which includes the manual AC-4/AC-5/
+AC-7 checks), the Fuse threshold recorded in the design doc (WU7.1), responsiveness
+observations (WU7.2), README known limitations (WU7.3), and the GitHub remote — without
+it the deploy path (items 1.4, AC-4, AC-6) stays unverifiable.
 
 `03-design.md` was reconciled in the same pass (`.mjs` module names, `nombre`/`categoria`
 index keys, inline skeleton, `barcode` in the data model and search pipeline).
