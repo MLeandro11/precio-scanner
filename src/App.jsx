@@ -4,16 +4,21 @@ import { createWorkerClient } from './lib/workerClient.mjs'
 import { createSearchSession } from './lib/searchSession.mjs'
 import { useSearch } from './hooks/useSearch.js'
 import { useFavorites } from './hooks/useFavorites.js'
-import { getStored } from './lib/storage.mjs'
+import { useRecents } from './hooks/useRecents.js'
 import SearchBar from './components/SearchBar.jsx'
 import FilterBar from './components/FilterBar.jsx'
 import SortSelect from './components/SortSelect.jsx'
 import ProductList from './components/ProductList.jsx'
 
 function CatalogView({ client, facets }) {
-  const session = useMemo(() => createSearchSession({ client }), [client])
+  const { recents, addRecent } = useRecents()
+  // `addRecent` is stable, so this session is created once per client and still
+  // sees the latest recents list when it commits a query.
+  const session = useMemo(
+    () => createSearchSession({ client, onQueryCommit: addRecent }),
+    [client, addRecent],
+  )
   const search = useSearch(session)
-  const recents = useMemo(() => getStored('recents', []), [])
   const favorites = useFavorites()
   const favoriteIds = favorites.favorites
 

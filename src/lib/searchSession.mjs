@@ -3,6 +3,10 @@
  *
  * Owns the interaction rules (spec FR-2.4/2.5, design §Search pipeline):
  *   - query typing is debounced (150 ms default);
+ *   - a committed query (debounced and non-blank) is reported once through the
+ *     optional `onQueryCommit` callback so the caller can persist it as a recent
+ *     search; the initial browse, filters, sort and paging are not commits, and a
+ *     throwing callback can never break a run;
  *   - filters and sort apply immediately (cheap worker runs);
  *   - favorites mode: `showFavorites(ids)` swaps the whole result set for the
  *     stored ids and runs immediately; typing or an explicit `null` leaves it;
@@ -15,7 +19,7 @@
  * Framework-agnostic (no React) so it unit-tests in plain Node; useSearch is
  * the thin React adapter.
  */
-export function createSearchSession({ client, debounceMs = 150, limit = 50 }) {
+export function createSearchSession({ client, debounceMs = 150, limit = 50, onQueryCommit }) {
   let state = {
     query: '',
     ids: null, // non-empty array = favorites mode (worker restricts to those ids)
@@ -77,9 +81,27 @@ export function createSearchSession({ client, debounceMs = 150, limit = 50 }) {
     }
   }
 
+  /**
+   * Reports a committed query, best-effort. Persisting a recent search is a side
+   * effect: if storage is unavailable or full it must not surface as a search
+   * error, so the callback is deliberately isolated here.
+   */
+  function commitQuery() {
+    const q = state.query.trim()
+    if (!q || !onQueryCommit) return
+    try {
+      onQueryCommit(q)
+    } catch {
+      // ignore: a failed recent-search write is not worth breaking search for
+    }
+  }
+
   function schedule() {
     clearTimeout(timer)
-    timer = setTimeout(() => run(), debounceMs)
+    timer = setTimeout(() => {
+      commitQuery()
+      run()
+    }, debounceMs)
   }
 
   // initial browse: the worker answers the empty query with the first page

@@ -203,4 +203,84 @@ describe('searchSession', () => {
     await vi.waitFor(() => expect(client.calls).toHaveLength(4))
     expect(client.calls[3]).toMatchObject({ sort: 'price-asc', ids: ['1', '2'] })
   })
+
+  it('calls onQueryCommit once per debounced query, never for filters, sort or paging', async () => {
+    vi.useFakeTimers()
+    const committed = []
+    const { client, session } = setup({ onQueryCommit: (q) => committed.push(q) })
+    await vi.waitFor(() => expect(client.calls).toHaveLength(1))
+    // the initial browse is not a user query
+    expect(committed).toEqual([])
+
+    session.setQuery('coca')
+    session.setQuery('cocacola')
+    vi.advanceTimersByTime(150)
+    await vi.runAllTimersAsync()
+    expect(committed).toEqual(['cocacola'])
+
+    session.setFilters({ categoria: 'Bebidas' })
+    session.setSort('price-asc')
+    session.loadMore()
+    await vi.runAllTimersAsync()
+    expect(committed).toEqual(['cocacola'])
+  })
+
+  it('does not commit a blank query', async () => {
+    vi.useFakeTimers()
+    const committed = []
+    const { client, session } = setup({ onQueryCommit: (q) => committed.push(q) })
+    await vi.waitFor(() => expect(client.calls).toHaveLength(1))
+
+    // positive control first: without it this test would pass even with no wiring
+    session.setQuery('coca')
+    vi.advanceTimersByTime(150)
+    await vi.runAllTimersAsync()
+    expect(committed).toEqual(['coca'])
+
+    session.setQuery('   ')
+    vi.advanceTimersByTime(150)
+    await vi.runAllTimersAsync()
+    expect(committed).toEqual(['coca'])
+  })
+
+  it('does not commit a query that showFavorites cancelled', async () => {
+    vi.useFakeTimers()
+    const committed = []
+    const { client, session } = setup({ onQueryCommit: (q) => committed.push(q) })
+    await vi.waitFor(() => expect(client.calls).toHaveLength(1))
+
+    session.setQuery('coca')
+    session.showFavorites(['1'])
+    vi.advanceTimersByTime(300)
+    await vi.runAllTimersAsync()
+    expect(committed).toEqual([])
+
+    // positive control: the callback still fires once the pending query is not cancelled
+    session.showFavorites(null)
+    session.setQuery('yerba')
+    vi.advanceTimersByTime(150)
+    await vi.runAllTimersAsync()
+    expect(committed).toEqual(['yerba'])
+  })
+
+  it('a throwing onQueryCommit never breaks the search run', async () => {
+    vi.useFakeTimers()
+    const committed = []
+    const { client, session } = setup({
+      onQueryCommit: (q) => {
+        committed.push(q)
+        throw new Error('storage exploded')
+      },
+    })
+    await vi.waitFor(() => expect(client.calls).toHaveLength(1))
+
+    session.setQuery('coca')
+    vi.advanceTimersByTime(150)
+    await vi.runAllTimersAsync()
+    // the callback really ran, and its failure stayed contained
+    expect(committed).toEqual(['coca'])
+    expect(session.getState().error).toBeNull()
+    expect(session.getState().loading).toBe(false)
+    expect(client.calls.filter((c) => c.query === 'coca')).toHaveLength(1)
+  })
 })
