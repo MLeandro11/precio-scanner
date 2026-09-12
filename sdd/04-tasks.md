@@ -40,11 +40,8 @@ because there is no git remote to push to.
 - [x] 1.3 Add `.github/workflows/deploy.yml` (build + deploy to GH Pages on push to `main`).
       — Evidence: workflow present: checkout → node 20 → `npm ci` → `npm run build` →
       `upload-pages-artifact@v3` → `deploy-pages@v4`.
-- [ ] 1.4 Verify: push → site live at `https://<user>.github.io/precio-scanner/`.
-      — **Blocked, not verified.** `git remote -v` is empty: there is no remote and no CI
-      run. Also `Pages source = "GitHub Actions"` has to be set in repo settings, and the
-      `<user>` placeholder in `02-spec.md` / this file is still unreplaced.
-
+- [ ] 1.4 Verify: push → site live at `https://MLeandro11.github.io/precio-scanner/`.
+              - **In progress (deployment wiring).** Owner confirmed as `MLeandro11`; placeholder replaced and `origin` remote wired to `MLeandro11/precio-scanner`. Remaining steps are outside the repo: create the GitHub repo, push `main`, and set `Pages -> Source = "GitHub Actions"` in repo settings.
 ## Work Unit 2 — Data pipeline (normalizer + index)
 
 - [x] 2.1 Add Vitest; RED tests for `scripts/normalize-catalog.mjs` contract:

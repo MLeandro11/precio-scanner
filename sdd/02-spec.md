@@ -64,7 +64,7 @@
 - FR-6.1: Vite `base: '/precio-scanner/'` (repo-relative assets).
 - FR-6.2: GitHub Actions workflow deploys `dist/` to GH Pages on push to `main`.
 - FR-6.3: Site loads and searches correctly at
-  `https://<user>.github.io/precio-scanner/`.
+  `https://MLeandro11.github.io/precio-scanner/`.
 
 ## Non-functional requirements
 
