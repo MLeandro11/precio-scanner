@@ -163,7 +163,7 @@ Tailwind CSS (via Vite plugin). Mobile-first, single-column list, sticky filter 
 | Catalog becomes stale | Documented as accepted for Phase 1; updater is Phase 2 |
 | Raw data has no brand field | `marca` kept as `''` in the model; no brand filter/index in Phase 1; wire it in when a future extraction provides it |
 | Zero-price / not-in-store noise | Excluded at normalize time with reported counts |
-| Fuse threshold too loose/strict | Threshold constant; tuned against acceptance searches (AC-2, AC-3) |
+| Fuse threshold too loose/strict | Threshold fixed at **0.35** (`searchEngine.mjs`), verified against the real catalog: AC-2 and AC-3 return 10/10 relevant results in the top 10 (`05-acceptance-report.md`). Not yet tuned against a personal list of tricky searches (WU7.1) |
 | GH Pages base-path mistakes | `base` set on day one; deploy verified with a blank page first |
 
 ## Testing strategy

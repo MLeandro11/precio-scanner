@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "normalize": "node scripts/normalize-catalog.mjs",
-    "generate-index": "node scripts/generate-index.mjs"
+    "generate-index": "node scripts/generate-index.mjs",
+    "acceptance": "node scripts/acceptance.mjs"
   },
   "dependencies": {
     "fuse.js": "^7.5.0",

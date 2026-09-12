@@ -20,12 +20,16 @@ Ordered by dependency. Each work unit = one commit (reviewable, tests included).
 | WU3 Loading + worker | 3 | 1 | 0 |
 | WU4 Search | 3 | 1 | 1 |
 | WU5 Filters + sorting | 2 | 1 | 1 |
-| WU6 Persistence | 3 | 0 | 1 |
-| WU7 Hardening + docs | 0 | 2 | 2 |
-| **Total (32 items)** | **20** | **5** | **7** |
+| WU6 Persistence | 4 | 0 | 0 |
+| WU7 Hardening + docs | 3 | 1 | 0 |
+| **Total (32 items)** | **24** | **4** | **4** |
 
 Test suite at WU6 delivery: `npx vitest run` → **9 files, 78 tests, all green**
 (49 across 8 files at the reconciliation above).
+
+Acceptance pass: `npm run acceptance` → **16/16 checks pass** against the real catalog
+(see `05-acceptance-report.md`). One criterion, AC-6, is recorded there as NOT VERIFIED
+because there is no git remote to push to.
 
 ## Work Unit 1 — Skeleton + deploy
 
@@ -159,26 +163,30 @@ Test suite at WU6 delivery: `npx vitest run` → **9 files, 78 tests, all green*
       isolated so a storage failure cannot break a run); `src/hooks/useRecents.js`
       persists it; `collections.addRecent` owns trim, minimum length, case-insensitive
       dedupe, proper-prefix replacement and the cap.
-- [ ] 6.4 Manual acceptance: AC-7 (persistence across reload).
-      — **Still open.** The logic is unit-tested and the wiring builds, but nobody has
-      reloaded the page and confirmed the data survives. Both collections are written
-      now, so this check is finally possible.
+- [x] 6.4 Manual acceptance: AC-7 (persistence across reload).
+      — Evidence: `sdd/05-acceptance-report.md`. `localStorage` is byte-identical across a
+      reload, both chips re-render, and the favorites view still resolves its ids through
+      the worker. Automated in `scripts/acceptance.mjs` — no longer a manual step.
 
 ## Work Unit 7 — Hardening and docs
 
 - [ ] 7.1 Tune Fuse threshold against AC-2/AC-3 and a personal list of 10 tricky
       real searches; record final value in design doc.
-      — **PARTIAL.** Current value: `threshold: 0.35` (`searchEngine.mjs:13`). Missing:
-      `03-design.md` never records it (it only lists "tuned against AC-2, AC-3" as a
-      mitigation), and there is no evidence the 10-query tuning list was ever run.
-- [ ] 7.2 Long-typing responsiveness pass (AC-5); record observations.
-      — **NOT DONE.** No recorded observations.
-- [ ] 7.3 README: setup, data regeneration, deploy, known limitations.
-      — **PARTIAL.** Present: Setup, Deployment, Data pipeline. Missing: **known
-      limitations** (no such section).
-- [ ] 7.4 Final acceptance checklist AC-1..AC-7; note results in README (or verify report).
-      — **NOT DONE.** `02-spec.md:80-90` defines AC-1..AC-7; no checklist, verify report,
-      or README section records their results.
+      — **PARTIAL.** The value (`threshold: 0.35`) is now recorded in `03-design.md`, and
+      AC-2/AC-3 pass against the real 20,331-product catalog (`05-acceptance-report.md`).
+      Still missing: the tuning run over a personal list of 10 tricky real searches.
+      That list has to come from the user's own search habits — inventing it here would
+      produce a fake "tuning" pass.
+- [x] 7.2 Long-typing responsiveness pass (AC-5); record observations.
+      — Evidence: `05-acceptance-report.md` → 43 keystrokes in 1,461 ms, worst gap between
+      animation frames 17 ms, 0 frames over 100 ms. Automated in `scripts/acceptance.mjs`,
+      so it re-runs instead of being a one-off observation.
+- [x] 7.3 README: setup, data regeneration, deploy, known limitations.
+      — Evidence: `README.md` now covers Setup, Deployment, Data pipeline, and Known
+      limitations.
+- [x] 7.4 Final acceptance checklist AC-1..AC-7; note results in README (or verify report).
+      — Evidence: `sdd/05-acceptance-report.md` — 16/16 checks pass, reproducible with
+      `npm run acceptance`. AC-6 is recorded there as NOT VERIFIED (no git remote).
 
 ## Phase 2 backlog (separate change, not started here)
 
