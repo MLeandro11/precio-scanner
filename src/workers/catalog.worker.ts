@@ -7,24 +7,28 @@
  *     priceMin, priceMax, sort, limit, offset } → replies { type: 'results',
  *     id, results (≤ limit), total }
  *
- * All the heavy logic lives in src/lib/searchEngine.mjs (unit-tested there);
+ * All the heavy logic lives in src/lib/searchEngine.ts (unit-tested there);
  * this file is a thin message adapter.
  */
-import { createEngine, runQuery } from '../lib/searchEngine.mjs'
+import { createEngine, runQuery } from '../lib/searchEngine'
+import type { WorkerInMessage } from '../lib/types'
+import type { Engine } from '../lib/searchEngine'
 
-let engine = null
+const ctx = globalThis as unknown as DedicatedWorkerGlobalScope
 
-self.onmessage = (e) => {
+let engine: Engine | null = null
+
+ctx.onmessage = (e: MessageEvent<WorkerInMessage>) => {
   const msg = e.data
 
   if (msg.type === 'init') {
-    engine = createEngine(msg.products, msg.index, msg.facets)
-    self.postMessage({ type: 'ready' })
+    engine = createEngine(msg.products, msg.index)
+    ctx.postMessage({ type: 'ready' })
     return
   }
 
   if (msg.type === 'query' && engine) {
     const { results, total } = runQuery(engine, msg)
-    self.postMessage({ type: 'results', id: msg.id, results, total })
+    ctx.postMessage({ type: 'results', id: msg.id, results, total })
   }
 }
