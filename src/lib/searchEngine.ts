@@ -5,9 +5,10 @@
  * message and receives top-N results plus the total match count. Kept as a
  * dependency-free module (except Fuse) so it unit-tests in plain Node.
  */
-import Fuse from 'fuse.js'
+import Fuse, { type IFuseOptions, type FuseResultMatch } from 'fuse.js'
+import type { Producto, QueryParams, QueryResult } from './types'
 
-const FUSE_OPTIONS = {
+const FUSE_OPTIONS: IFuseOptions<Producto> = {
   includeScore: true,
   includeMatches: true,
   threshold: 0.35,
@@ -22,17 +23,34 @@ export const DEFAULT_LIMIT = 50
 
 const BARCODE_MIN_DIGITS = 6
 
+/** Extra-match positions attached to results when available (highlighting). */
+type MatchPositions = Record<string, Array<[number, number]>>
+
+interface Engine {
+  products: Producto[]
+  fuse: Fuse<Producto>
+  barcodeMap: Map<string, Producto[]>
+}
+
+export type { Engine }
+
 /**
  * Builds the engine from the loader's payload. `index` is either the wrapper
  * stored in catalogo-index.json ({ keys, fuseIndex }) or the serialized
  * Fuse.createIndex output itself (scripts/generate-index.mjs) — never
  * re-computed in the browser (Fuse.parseIndex hydrates it).
  */
-export function createEngine(products, index /* , facets */) {
-  const serialized = index?.fuseIndex ?? index
-  const fuse = new Fuse(products, FUSE_OPTIONS, Fuse.parseIndex(serialized))
+export function createEngine(products: Producto[], index: unknown): Engine {
+  const serialized = // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (index as { fuseIndex?: unknown } | null)?.fuseIndex ?? index
+  const fuse = new Fuse<Producto>(
+    products,
+    FUSE_OPTIONS,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    Fuse.parseIndex<Producto>(serialized as any),
+  )
   // exact barcode lookup: EAN matching is exact by design, never fuzzy
-  const barcodeMap = new Map()
+  const barcodeMap = new Map<string, Producto[]>()
   for (const p of products) {
     if (p.barcode) {
       const hits = barcodeMap.get(p.barcode) ?? []
@@ -43,7 +61,14 @@ export function createEngine(products, index /* , facets */) {
   return { products, fuse, barcodeMap }
 }
 
-function applyFilters(list, { categoria, priceMin, priceMax, idSet }) {
+interface Filters {
+  categoria?: string
+  priceMin?: number | null
+  priceMax?: number | null
+  idSet?: Set<string> | null
+}
+
+function applyFilters(list: Producto[], { categoria, priceMin, priceMax, idSet }: Filters) {
   return list.filter((p) => {
     if (idSet && !idSet.has(p.id)) return false
     if (categoria && p.categoria !== categoria) return false
@@ -53,7 +78,11 @@ function applyFilters(list, { categoria, priceMin, priceMax, idSet }) {
   })
 }
 
-function sortResults(list, sort, scores) {
+function sortResults(
+  list: Producto[],
+  sort: QueryParams['sort'],
+  scores: Map<string, number> | null,
+): Producto[] {
   switch (sort) {
     case 'price-asc':
       return list.sort((a, b) => a.precio - b.precio)
@@ -70,9 +99,9 @@ function sortResults(list, sort, scores) {
   }
 }
 
-function matchPositions(fuseMatch) {
+function matchPositions(fuseMatch: { matches?: readonly FuseResultMatch[] }): MatchPositions | undefined {
   if (!Array.isArray(fuseMatch.matches)) return undefined
-  const byKey = {}
+  const byKey: MatchPositions = {}
   for (const m of fuseMatch.matches) {
     if (m.key && Array.isArray(m.indices)) {
       ;(byKey[m.key] ??= []).push(...m.indices)
@@ -86,11 +115,8 @@ function matchPositions(fuseMatch) {
  * set to those products (total included, so paging stays honest). Null,
  * undefined or an empty array means no filter — an empty favorites list must
  * never blank the default browse.
- *
- * @param {object} params { query, categoria, priceMin, priceMax, sort, limit, offset, ids }
- * @returns {{ results: Product[], total: number }}
  */
-export function runQuery(engine, params = {}) {
+export function runQuery(engine: Engine, params: QueryParams = {}): QueryResult {
   const {
     query = '',
     categoria = '',
@@ -102,7 +128,8 @@ export function runQuery(engine, params = {}) {
     ids = null,
   } = params
 
-  const idSet = Array.isArray(ids) && ids.length ? new Set(ids) : null
+  const idSet: Set<string> | null =
+    Array.isArray(ids) && ids.length ? new Set(ids) : null
   const filters = { categoria, priceMin, priceMax, idSet }
 
   const q = String(query).trim()
@@ -124,8 +151,8 @@ export function runQuery(engine, params = {}) {
     // bare EAN with no name match yields 0 without false positives
   }
 
-  let matches
-  let scores = null
+  let matches: Producto[]
+  let scores: Map<string, number> | null = null
 
   if (q) {
     const fuseMatches = engine.fuse.search(q)

@@ -1,35 +1,40 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { createSearchSession } from './searchSession.mjs'
+import { createSearchSession } from './searchSession'
+import type { SearchState, QueryClient } from './searchSession'
+import type { Producto, QueryParams, QueryResult } from './types'
 
-function fakeClient() {
+type TestClient = QueryClient & { calls: QueryParams[] }
+
+function fakeClient(): TestClient {
   return {
     calls: [],
-    async query(params) {
+    query(params: QueryParams): Promise<QueryResult> {
       this.calls.push(params)
       const offset = params.offset ?? 0
       // respect the total: fewer results on the last page
-      const n = Math.min(params.limit, 120 - offset)
-      return {
-        results: Array.from({ length: n }, (_, i) => ({
-          id: `p${offset + i}`,
-          nombre: `Prod ${offset + i}`,
-          marca: '',
-          categoria: 'C',
-          precio: offset + i,
-        })),
-        total: 120,
-      }
+      const n = Math.min(params.limit ?? 50, 120 - offset)
+      const results: Producto[] = Array.from({ length: n }, (_, i) => ({
+        id: `p${offset + i}`,
+        nombre: `Prod ${offset + i}`,
+        marca: '',
+        categoria: 'C',
+        barcode: '',
+        precio: offset + i,
+      }))
+      return Promise.resolve({ results, total: 120 })
     },
   }
 }
 
-function setup(deps = {}) {
+function setup(deps: { limit?: number; onQueryCommit?: (q: string) => void } = {}) {
   const client = fakeClient()
   const session = createSearchSession({ client, ...deps })
-  const states = []
+  const states: SearchState[] = []
   session.subscribe((s) => states.push(s))
   return { client, session, states }
 }
+
+type AnyClient = TestClient & { query: ReturnType<typeof vi.fn> }
 
 afterEach(() => {
   vi.useRealTimers()
@@ -37,9 +42,9 @@ afterEach(() => {
 
 describe('searchSession', () => {
   it('runs an initial browse query at creation (empty query, page 0)', async () => {
-    const { client, session, states } = setup()
+    const { client, session } = setup()
     await vi.waitFor(() => expect(client.calls).toHaveLength(1))
-    expect(client.calls[0].query).toBe('')
+    expect(client.calls[0]!.query).toBe('')
     const final = session.getState()
     expect(final.results).toHaveLength(50)
     expect(final.total).toBe(120)
@@ -54,7 +59,7 @@ describe('searchSession', () => {
     session.setQuery('c')
     session.setQuery('co')
     session.setQuery('coc')
-    expect(states[states.length - 1].query).toBe('coc')
+    expect(states[states.length - 1]!.query).toBe('coc')
     // nothing ran yet
     expect(client.calls).toHaveLength(1) // only the initial browse
 
@@ -65,8 +70,8 @@ describe('searchSession', () => {
 
   it('swallows superseded worker rejections (fast typing never breaks the UI)', async () => {
     vi.useFakeTimers()
-    const client = fakeClient()
-    client.query = vi.fn(async (p) => {
+    const client = fakeClient() as AnyClient
+    client.query = vi.fn(async (p: QueryParams) => {
       if (p.query === 'lento') {
         await new Promise((_, reject) =>
           setTimeout(() => reject(new Error('query superseded by generation 9')), 50),
@@ -84,7 +89,7 @@ describe('searchSession', () => {
 
   it('exposes real errors (not supersession) as state.error', async () => {
     vi.useFakeTimers()
-    const client = fakeClient()
+    const client = fakeClient() as AnyClient
     client.query = vi.fn(async () => {
       throw new Error('worker crashed')
     })
@@ -96,7 +101,7 @@ describe('searchSession', () => {
   })
 
   it('loadMore appends the next page and clears hasMore at the end', async () => {
-    const { session, states } = setup()
+    const { session } = setup()
     await vi.waitFor(() => expect(session.getState().results).toHaveLength(50))
 
     session.loadMore()
@@ -116,11 +121,11 @@ describe('searchSession', () => {
 
     session.setFilters({ categoria: 'Bebidas' })
     await vi.waitFor(() => expect(client.calls).toHaveLength(2))
-    expect(client.calls[1].categoria).toBe('Bebidas')
+    expect(client.calls[1]!.categoria).toBe('Bebidas')
 
     session.setSort('price-asc')
     await vi.waitFor(() => expect(client.calls).toHaveLength(3))
-    expect(client.calls[2].sort).toBe('price-asc')
+    expect(client.calls[2]!.sort).toBe('price-asc')
   })
 
   it('new query resets paging (append starts from a clean page)', async () => {
@@ -130,7 +135,7 @@ describe('searchSession', () => {
     session.setQuery('coca')
     vi.advanceTimersByTime(150)
     await vi.runAllTimersAsync()
-    const lastCall = client.calls[client.calls.length - 1]
+    const lastCall = client.calls[client.calls.length - 1]!
     expect(lastCall.offset ?? 0).toBe(0)
     expect(session.getState().results).toHaveLength(50)
   })
@@ -144,7 +149,7 @@ describe('searchSession', () => {
     session.showFavorites(['2', '3'])
     await vi.waitFor(() => expect(client.calls).toHaveLength(2))
 
-    const favoritesCall = client.calls[1]
+    const favoritesCall = client.calls[1]!
     expect(favoritesCall.ids).toEqual(['2', '3'])
     expect(favoritesCall.query).toBe('')
     expect(session.getState()).toMatchObject({ ids: ['2', '3'], query: '' })
@@ -165,8 +170,8 @@ describe('searchSession', () => {
     session.showFavorites(null)
     await vi.waitFor(() => expect(client.calls).toHaveLength(3))
 
-    expect(client.calls[2].ids).toBeNull()
-    expect(client.calls[2].query).toBe('')
+    expect(client.calls[2]!.ids).toBeNull()
+    expect(client.calls[2]!.query).toBe('')
     expect(session.getState().ids).toBeNull()
   })
 
@@ -182,7 +187,7 @@ describe('searchSession', () => {
 
     vi.advanceTimersByTime(150)
     await vi.runAllTimersAsync()
-    const lastCall = client.calls[client.calls.length - 1]
+    const lastCall = client.calls[client.calls.length - 1]!
     expect(lastCall.query).toBe('yerba')
     expect(lastCall.ids).toBeNull()
   })
@@ -206,7 +211,7 @@ describe('searchSession', () => {
 
   it('calls onQueryCommit once per debounced query, never for filters, sort or paging', async () => {
     vi.useFakeTimers()
-    const committed = []
+    const committed: string[] = []
     const { client, session } = setup({ onQueryCommit: (q) => committed.push(q) })
     await vi.waitFor(() => expect(client.calls).toHaveLength(1))
     // the initial browse is not a user query
@@ -227,7 +232,7 @@ describe('searchSession', () => {
 
   it('does not commit a blank query', async () => {
     vi.useFakeTimers()
-    const committed = []
+    const committed: string[] = []
     const { client, session } = setup({ onQueryCommit: (q) => committed.push(q) })
     await vi.waitFor(() => expect(client.calls).toHaveLength(1))
 
@@ -245,7 +250,7 @@ describe('searchSession', () => {
 
   it('does not commit a query that showFavorites cancelled', async () => {
     vi.useFakeTimers()
-    const committed = []
+    const committed: string[] = []
     const { client, session } = setup({ onQueryCommit: (q) => committed.push(q) })
     await vi.waitFor(() => expect(client.calls).toHaveLength(1))
 
@@ -265,7 +270,7 @@ describe('searchSession', () => {
 
   it('a throwing onQueryCommit never breaks the search run', async () => {
     vi.useFakeTimers()
-    const committed = []
+    const committed: string[] = []
     const { client, session } = setup({
       onQueryCommit: (q) => {
         committed.push(q)

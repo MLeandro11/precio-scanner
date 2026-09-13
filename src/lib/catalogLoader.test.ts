@@ -1,44 +1,49 @@
 import { describe, it, expect } from 'vitest'
-import { loadCatalog } from './catalogLoader.mjs'
+import { loadCatalog } from './catalogLoader'
+import type { CacheLike, CacheStore } from './catalogLoader'
+import type { Facets, Catalog, CatalogIndex } from './types'
 
 const BASE = '/precio-scanner/'
 
-function jsonResponse(body) {
+function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status: 200,
     headers: { 'content-type': 'application/json' },
   })
 }
 
-const FACETS = { version: 'abc123', categories: ['A'], brands: [], priceBounds: { min: 1, max: 10 } }
-const CATALOG = { version: 'catver1', products: [{ id: 'x', nombre: 'N', marca: '', categoria: 'A', precio: 5 }] }
-const INDEX = { keys: ['nombre', 'categoria'], fuseIndex: { tags: {} } }
+const FACETS: Facets = { version: 'abc123', categories: ['A'], brands: [], priceBounds: { min: 1, max: 10 } }
+const CATALOG: Catalog = {
+  version: 'catver1',
+  products: [{ id: 'x', nombre: 'N', marca: '', categoria: 'A', barcode: '', precio: 5 }],
+}
+const INDEX: CatalogIndex = { keys: ['nombre', 'categoria'], fuseIndex: { tags: {} } }
 
-function fakeCache() {
-  const store = new Map()
+function fakeCache(): CacheLike & { calls: { match: number; put: number } } {
+  const store = new Map<string, Response>()
   return {
     calls: { match: 0, put: 0 },
-    async match(key) {
+    async match(key: string) {
       this.calls.match++
       return store.get(key) ?? undefined
     },
-    async put(key, res) {
+    async put(key: string, res: Response) {
       this.calls.put++
       store.set(key, res)
     },
   }
 }
 
-function makeDeps({ cache = null, catalogStatus = 200 } = {}) {
-  const fetched = []
-  const fetchFn = async (url) => {
+function makeDeps({ cache = null, catalogStatus = 200 }: { cache?: CacheLike | null; catalogStatus?: number } = {}) {
+  const fetched: string[] = []
+  const fetchFn: typeof fetch = async (url: RequestInfo | URL) => {
     fetched.push(String(url))
     if (String(url).includes('catalogo-facets.json')) return jsonResponse(FACETS)
     if (String(url).includes('catalogo-index.json')) return jsonResponse(INDEX)
     if (catalogStatus !== 200) return new Response('nope', { status: catalogStatus })
     return jsonResponse(CATALOG)
   }
-  const caches = cache ? { open: async () => cache } : undefined
+  const caches: CacheStore | undefined = cache ? { open: async () => cache } : undefined
   return { deps: { fetchFn, caches, baseUrl: BASE }, fetched }
 }
 
@@ -81,13 +86,17 @@ describe('catalogLoader', () => {
     await loadCatalog(makeDeps({ cache }).deps)
 
     // new data version → different ?v= keys → misses → network
-    const FACETS2 = { ...FACETS, version: 'def456' }
-    const fetchFn = async (url) => {
+    const FACETS2: Facets = { ...FACETS, version: 'def456' }
+    const fetchFn: typeof fetch = async (url: RequestInfo | URL) => {
       if (String(url).includes('catalogo-facets.json')) return jsonResponse(FACETS2)
       if (String(url).includes('catalogo-index.json')) return jsonResponse(INDEX)
       return jsonResponse(CATALOG)
     }
-    const result = await loadCatalog({ fetchFn, caches: { open: async () => cache }, baseUrl: BASE })
+    const result = await loadCatalog({
+      fetchFn,
+      caches: { open: async () => cache },
+      baseUrl: BASE,
+    })
     expect(result.products).toEqual(CATALOG.products)
     expect(cache.calls.put).toBe(4) // 2 from first load + 2 from re-download
   })
@@ -95,7 +104,7 @@ describe('catalogLoader', () => {
   it('throws a clear error when the dev server returns HTML instead of JSON', async () => {
     // e.g. Vite 7 dev server started before public/data existed: its public
     // files Set lacks the JSONs and the SPA fallback answers with index.html
-    const fetchFn = async () =>
+    const fetchFn: typeof fetch = async () =>
       new Response('<!doctype html><html lang="es">...', {
         status: 200,
         headers: { 'content-type': 'text/html' },
@@ -106,7 +115,7 @@ describe('catalogLoader', () => {
   })
 
   it('throws a clear error when facets cannot be fetched', async () => {
-    const fetchFn = async () => new Response('nope', { status: 404 })
+    const fetchFn: typeof fetch = async () => new Response('nope', { status: 404 })
     await expect(
       loadCatalog({ fetchFn, baseUrl: BASE }),
     ).rejects.toThrow(/facets/)

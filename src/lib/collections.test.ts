@@ -5,7 +5,7 @@ import {
   addRecent,
   toggleFavorite,
   isFavorite,
-} from './collections.mjs'
+} from './collections'
 
 describe('collections.addRecent', () => {
   it('is a no-op below the minimum query length', () => {
@@ -43,7 +43,7 @@ describe('collections.addRecent', () => {
   })
 
   it(`caps the list at ${RECENTS_CAP}, dropping the oldest`, () => {
-    let recents = []
+    let recents: string[] = []
     for (let i = 0; i < RECENTS_CAP + 3; i++) {
       recents = addRecent(recents, `query-${i}`)
     }
@@ -79,7 +79,7 @@ describe('collections.toggleFavorite', () => {
   it('returns the input unchanged for a falsy id', () => {
     const favorites = ['a']
     for (const falsy of ['', null, undefined, 0]) {
-      expect(toggleFavorite(favorites, falsy)).toEqual(['a'])
+      expect(toggleFavorite(favorites, falsy as string)).toEqual(['a'])
     }
   })
 

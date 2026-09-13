@@ -19,20 +19,36 @@
  * cache is stale). That must fail loudly, never be cached, and never produce
  * a cryptic JSON.parse error.
  */
+import type { Catalog, CatalogIndex, Facets, Producto } from './types'
 
 const CACHE_NAME = 'precio-scanner-data-v1'
 const CACHEABLE = ['catalogo.json', 'catalogo-index.json']
 
-function defaultBaseUrl() {
+/** Minimal shape of a Cache entry the loader needs (injectable for tests). */
+export interface CacheLike {
+  match(key: string): Promise<Response | undefined>
+  put(key: string, response: Response): Promise<void>
+}
+/** Minimal shape of the Cache API the loader needs. */
+export interface CacheStore {
+  open(name: string): Promise<CacheLike>
+}
+
+function defaultBaseUrl(): string {
   // Vite injects import.meta.env in the app; fall back for non-Vite contexts.
   try {
-    return import.meta.env?.BASE_URL ?? '/'
+    return (import.meta as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/'
   } catch {
     return '/'
   }
 }
 
-function parseJsonResponse(res, text, label, url) {
+function parseJsonResponse<T>(
+  res: Response,
+  text: string,
+  label: string,
+  url: string,
+): T {
   if (
     res.headers.get('content-type')?.includes('text/html') ||
     /^\s*<!doctype|<html/i.test(text)
@@ -43,29 +59,49 @@ function parseJsonResponse(res, text, label, url) {
     )
   }
   try {
-    return JSON.parse(text)
+    return JSON.parse(text) as T
   } catch (err) {
-    throw new Error(`catalogLoader: invalid JSON for ${label} (${url}): ${err.message}`)
+    throw new Error(
+      `catalogLoader: invalid JSON for ${label} (${url}): ${err instanceof Error ? err.message : String(err)}`,
+    )
   }
 }
 
-async function fetchJson(fetchFn, url, init, label) {
+async function fetchJson<T>(
+  fetchFn: typeof fetch,
+  url: string,
+  init: RequestInit,
+  label: string,
+): Promise<T> {
   const res = await fetchFn(url, init)
   if (!res.ok) {
     throw new Error(`catalogLoader: failed to download ${label} (${res.status} ${url})`)
   }
   const text = await res.text()
-  return parseJsonResponse(res, text, label, url)
+  return parseJsonResponse<T>(res, text, label, url)
 }
 
-export async function loadCatalog(deps = {}) {
-  const fetchFn = deps.fetchFn ?? fetch
-  const cachesApi = deps.caches ?? globalThis.caches ?? null
+interface LoaderDeps {
+  fetchFn?: typeof fetch
+  caches?: CacheStore | null
+  baseUrl?: string
+}
+
+export interface LoadedCatalog {
+  products: Producto[]
+  catalogVersion: string
+  facets: Facets
+  index: CatalogIndex
+}
+
+export async function loadCatalog(deps: LoaderDeps = {}): Promise<LoadedCatalog> {
+  const fetchFn: typeof fetch = deps.fetchFn ?? fetch
+  const cachesApi = deps.caches ?? (globalThis as { caches?: CacheStore }).caches ?? null
   const baseUrl = deps.baseUrl ?? defaultBaseUrl()
-  const url = (path) => baseUrl + 'data/' + path
+  const url = (path: string) => baseUrl + 'data/' + path
 
   // 1. facets: always fresh (tiny file, carries the version)
-  const facets = await fetchJson(
+  const facets = await fetchJson<Facets>(
     fetchFn,
     url('catalogo-facets.json'),
     { cache: 'no-cache' },
@@ -76,18 +112,18 @@ export async function loadCatalog(deps = {}) {
   // 2. heavy files: versioned cache, network only on miss
   const cache = cachesApi ? await cachesApi.open(CACHE_NAME) : null
 
-  async function fetchVersioned(path) {
+  async function fetchVersioned(path: string): Promise<Catalog | CatalogIndex> {
     const keyedUrl = `${url(path)}?v=${version}`
     if (cache) {
       const hit = await cache.match(keyedUrl)
-      if (hit) return hit.json()
+      if (hit) return (await hit.json()) as Catalog & CatalogIndex
     }
     const res = await fetchFn(keyedUrl)
     if (!res.ok) {
       throw new Error(`catalogLoader: failed to download ${path} (${res.status})`)
     }
     const text = await res.text()
-    const data = parseJsonResponse(res, text, path, keyedUrl)
+    const data = parseJsonResponse<Catalog & CatalogIndex>(res, text, path, keyedUrl)
     if (cache) {
       // cache the validated JSON (never the raw response: it may be an HTML
       // fallback that must not be poisoned into the versioned cache)
@@ -101,6 +137,9 @@ export async function loadCatalog(deps = {}) {
     return data
   }
 
-  const [catalog, index] = await Promise.all(CACHEABLE.map(fetchVersioned))
+  const [catalog, index] = (await Promise.all(CACHEABLE.map(fetchVersioned))) as [
+    Catalog,
+    CatalogIndex,
+  ]
   return { products: catalog.products, catalogVersion: catalog.version, facets, index }
 }

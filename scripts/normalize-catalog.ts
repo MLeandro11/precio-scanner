@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * normalize-catalog.mjs — raw extraction JSON → public/data/catalogo.json
+ * normalize-catalog.ts — raw extraction JSON → public/data/catalogo.json
  *
  * Raw shape contract (confirmed against the real extraction): a top-level
  * array (or { products: [...] }) of items with at least:
@@ -23,47 +23,61 @@
  *     records (truncated extraction), an included record missing nombre, or
  *     a non-numeric precio on an included record.
  *
- * Usage: node scripts/normalize-catalog.mjs [input.json] [output.json]
+ * Usage: node scripts/normalize-catalog.ts [input.json] [output.json]
  */
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
-import { stableId } from '../src/lib/stableId.mjs'
+import { stableId } from '../src/lib/stableId.ts'
+import type { Producto } from '../src/lib/types.ts'
 
 const MIN_RECORDS = 20_000
 
 const NUMBER_RE = /^-?\d+(?:[.,]\d+)?$/
 
-function fail(msg) {
+/** Raw extraction record: field presence/shape is not guaranteed upstream. */
+interface RawItem {
+  id?: unknown
+  nombre?: unknown
+  categoria?: unknown
+  precio?: unknown
+  barcode?: unknown
+}
+
+function fail(msg: string): never {
   console.error(`normalize-catalog: ${msg}`)
   process.exit(1)
 }
 
-function parseIncludedPrice(raw, index) {
+function parseIncludedPrice(raw: unknown, index: number): number {
   if (raw === null || raw === undefined) {
     fail(`record ${index}: included record has no precio`)
   }
   const s = String(raw).trim().replace(',', '.')
   if (!NUMBER_RE.test(s)) {
-    fail(`record ${index}: precio is not numeric: "${raw}"`)
+    fail(`record ${index}: precio is not numeric: "${String(raw)}"`)
   }
   return Number(s)
 }
 
-function main() {
+function main(): void {
   const [, , inputArg, outputArg] = process.argv
   const input = resolve(inputArg ?? 'raw-catalog.json')
   const output = resolve(outputArg ?? 'public/data/catalogo.json')
 
-  let parsed
+  let parsed: unknown
   try {
     parsed = JSON.parse(readFileSync(input, 'utf8'))
   } catch (err) {
-    fail(`cannot read catalog JSON from ${input}: ${err.message}`)
+    fail(`cannot read catalog JSON from ${input}: ${err instanceof Error ? err.message : String(err)}`)
   }
 
-  const items = Array.isArray(parsed) ? parsed : parsed?.products
-  if (!Array.isArray(items) || items.length === 0) {
+  const items: RawItem[] = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray((parsed as { products?: unknown } | null)?.products)
+      ? ((parsed as { products: RawItem[] }).products)
+      : []
+  if (items.length === 0) {
     fail(`input catalog has no products array: ${input}`)
   }
   if (items.length < MIN_RECORDS) {
@@ -73,7 +87,7 @@ function main() {
     )
   }
 
-  const products = []
+  const products: Producto[] = []
   let excludedNoPrice = 0
   let excludedBadPrice = 0
   let fallbackIds = 0

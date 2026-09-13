@@ -5,7 +5,24 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
-const SCRIPT = join(__dirname, 'normalize-catalog.mjs')
+type TestRawItem = {
+  id?: unknown
+  nombre?: unknown
+  categoria?: unknown
+  subcategoria?: unknown
+  precio: unknown
+  enTienda: unknown
+}
+type TestProduct = {
+  id: string
+  nombre: string
+  marca: string
+  categoria: string
+  barcode: string
+  precio: number
+}
+
+const SCRIPT = join(__dirname, 'normalize-catalog.ts')
 
 // Real raw shape contract (confirmed against the actual extraction, 2025):
 // top-level array (or { products: [...] }) of items like:
@@ -19,7 +36,7 @@ const SCRIPT = join(__dirname, 'normalize-catalog.mjs')
 //     mean "available"; verified against the real extraction)
 //   - fail-loud: invalid JSON, <20,000 input records, missing nombre,
 //     non-numeric precio on an included record
-function rawItem(i) {
+function rawItem(i: number): TestRawItem {
   return {
     id: randomUUID(),
     nombre: `PRODUCTO DE PRUEBA ${i} 500ML`,
@@ -30,15 +47,15 @@ function rawItem(i) {
   }
 }
 
-function validRawCatalog(n = 23000) {
+function validRawCatalog(n = 23000): TestRawItem[] {
   return Array.from({ length: n }, (_, i) => rawItem(i))
 }
 
-function isIncluded(item) {
+function isIncluded(item: TestRawItem) {
   return typeof item.precio === 'number' && item.precio > 0
 }
 
-function runScript(cwd, ...args) {
+function runScript(cwd: string, ...args: string[]) {
   try {
     const out = execFileSync('node', [SCRIPT, ...args], {
       cwd,
@@ -47,12 +64,13 @@ function runScript(cwd, ...args) {
     })
     return { code: 0, out }
   } catch (err) {
-    return { code: err.status ?? 1, err: String(err.stderr ?? err) }
+      const e = err as { status?: number; stderr?: string | Buffer }
+    return { code: e.status ?? 1, err: String(e.stderr ?? err) }
   }
 }
 
 describe('scripts/normalize-catalog.mjs', () => {
-  let dir
+  let dir: string
 
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), 'normalize-test-'))
@@ -67,7 +85,7 @@ describe('scripts/normalize-catalog.mjs', () => {
     const r = runScript(dir, input, output)
     expect(r.code).toBe(0)
 
-    const catalog = JSON.parse(readFileSync(output, 'utf8'))
+    const catalog = JSON.parse(readFileSync(output, 'utf8')) as { version: string; products: TestProduct[] }
     const expected = items.filter(isIncluded)
     expect(catalog.products.length).toBe(expected.length)
     expect(catalog.version).toEqual(expect.any(String))
@@ -94,16 +112,16 @@ describe('scripts/normalize-catalog.mjs', () => {
     const output = join(dir, 'out', 'catalogo.json')
     const r = runScript(dir, input, output)
     expect(r.code).toBe(0)
-    const items = JSON.parse(readFileSync(input, 'utf8'))
+    const items = JSON.parse(readFileSync(input, 'utf8')) as TestRawItem[]
     const expectedKept = items.filter(isIncluded).length
     expect(r.out).toContain(`wrote ${expectedKept} records`)
     expect(r.out).toContain('excluded')
-    const catalog = JSON.parse(readFileSync(output, 'utf8'))
+    const catalog = JSON.parse(readFileSync(output, 'utf8')) as { version: string; products: TestProduct[] }
     expect(catalog.products.every((p) => p.precio > 0)).toBe(true)
     // enTienda:false must NOT exclude (real data: only 8 of 23,230 are true)
     const keptIds = new Set(catalog.products.map((p) => p.id))
     const notInStoreKept = items.filter(
-      (i) => i.enTienda === false && keptIds.has(i.id),
+      (i) => i.enTienda === false && keptIds.has(i.id as string),
     ).length
     expect(notInStoreKept).toBeGreaterThan(0)
   })
@@ -118,7 +136,7 @@ describe('scripts/normalize-catalog.mjs', () => {
 
     const r = runScript(dir, input, output)
     expect(r.code).toBe(0)
-    const catalog = JSON.parse(readFileSync(output, 'utf8'))
+    const catalog = JSON.parse(readFileSync(output, 'utf8')) as { version: string; products: TestProduct[] }
     const byNombre = Object.fromEntries(
       catalog.products.map((p) => [p.nombre, p]),
     )

@@ -5,8 +5,8 @@ import { createHash } from 'node:crypto'
  * Case-, accent- and whitespace-insensitive so catalog re-extractions keep ids
  * stable across naming inconsistencies like "coca cola" vs "Coca Cola".
  */
-export function stableId(nombre, marca) {
-  const norm = (s) =>
+export function stableId(nombre: string, marca?: string): string {
+  const norm = (s: string) =>
     String(s)
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')

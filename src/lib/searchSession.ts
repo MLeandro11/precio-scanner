@@ -19,10 +19,57 @@
  * Framework-agnostic (no React) so it unit-tests in plain Node; useSearch is
  * the thin React adapter.
  */
-export function createSearchSession({ client, debounceMs = 150, limit = 50, onQueryCommit }) {
-  let state = {
+import type { Producto, QueryParams, QueryResult, SortOrder } from './types'
+
+/** Sólo la parte de consulta del cliente que la sesión usa (inyectable en tests). */
+export interface QueryClient {
+  query(params: QueryParams): Promise<QueryResult>
+}
+
+export interface SearchState {
+  query: string
+  /** Non-empty array = favorites mode (worker restricts to those ids). */
+  ids: string[] | null
+  categoria: string
+  priceMin: number | null
+  priceMax: number | null
+  sort: SortOrder
+  results: Producto[]
+  total: number
+  loading: boolean
+  error: unknown
+  hasMore: boolean
+}
+
+export type SearchFilters = Pick<SearchState, 'categoria' | 'priceMin' | 'priceMax'>
+
+export interface SearchSession {
+  subscribe: (listener: (state: SearchState) => void) => () => void
+  getState: () => SearchState
+  setQuery: (query: string) => void
+  setFilters: (filters?: Partial<SearchFilters>) => void
+  setSort: (sort: SortOrder) => void
+  showFavorites: (ids: string[] | null) => void
+  loadMore: () => void
+  dispose: () => void
+}
+
+interface SessionDeps {
+  client: QueryClient
+  debounceMs?: number
+  limit?: number
+  onQueryCommit?: (query: string) => void
+}
+
+export function createSearchSession({
+  client,
+  debounceMs = 150,
+  limit = 50,
+  onQueryCommit,
+}: SessionDeps): SearchSession {
+  let state: SearchState = {
     query: '',
-    ids: null, // non-empty array = favorites mode (worker restricts to those ids)
+    ids: null,
     categoria: '',
     priceMin: null,
     priceMax: null,
@@ -34,25 +81,25 @@ export function createSearchSession({ client, debounceMs = 150, limit = 50, onQu
     hasMore: false,
   }
 
-  const listeners = new Set()
+  const listeners = new Set<(s: SearchState) => void>()
   let runId = 0
-  let timer = null
+  let timer: ReturnType<typeof setTimeout> | null = null
 
   function emit() {
     listeners.forEach((l) => l(state))
   }
 
-  function patch(p) {
+  function patch(p: Partial<SearchState>) {
     state = { ...state, ...p }
     emit()
   }
 
-  async function run({ append = false } = {}) {
+  async function run({ append = false }: { append?: boolean } = {}) {
     const id = ++runId
     const offset = append ? state.results.length : 0
     patch({ loading: true, error: null })
     try {
-      const r = await client.query({
+      const params: QueryParams = {
         query: state.query,
         ids: state.ids,
         categoria: state.categoria,
@@ -61,7 +108,8 @@ export function createSearchSession({ client, debounceMs = 150, limit = 50, onQu
         sort: state.sort,
         limit,
         offset,
-      })
+      }
+      const r = await client.query(params)
       if (id !== runId) return // a newer run already superseded this one
       const shown = offset + r.results.length
       patch({
@@ -72,7 +120,7 @@ export function createSearchSession({ client, debounceMs = 150, limit = 50, onQu
       })
     } catch (err) {
       if (id !== runId) return // a newer run already superseded this one
-      if (/superseded/i.test(err.message)) {
+      if (err instanceof Error && /superseded/i.test(err.message)) {
         // client dropped this request for a newer one: keep last good results
         patch({ loading: false })
         return
@@ -97,7 +145,7 @@ export function createSearchSession({ client, debounceMs = 150, limit = 50, onQu
   }
 
   function schedule() {
-    clearTimeout(timer)
+    clearTimeout(timer ?? undefined)
     timer = setTimeout(() => {
       commitQuery()
       run()
@@ -131,7 +179,7 @@ export function createSearchSession({ client, debounceMs = 150, limit = 50, onQu
     showFavorites(ids) {
       // A chip click is deliberate, so drop any pending debounced query and run
       // now. `ids: null` leaves favorites mode and restores the normal browse.
-      clearTimeout(timer)
+      clearTimeout(timer ?? undefined)
       patch({ ids, query: '', results: [] })
       run()
     },
@@ -139,7 +187,7 @@ export function createSearchSession({ client, debounceMs = 150, limit = 50, onQu
       if (state.hasMore && !state.loading) run({ append: true })
     },
     dispose() {
-      clearTimeout(timer)
+      clearTimeout(timer ?? undefined)
       listeners.clear()
     },
   }

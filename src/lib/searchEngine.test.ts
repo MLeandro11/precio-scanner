@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import Fuse from 'fuse.js'
-import { createEngine, runQuery } from './searchEngine.mjs'
+import { createEngine, runQuery } from './searchEngine'
+import type { Producto } from './types'
 
-const PRODUCTS = [
+type WithMatches = Producto & { _matches: { nombre?: Array<[number, number]> } }
+
+const PRODUCTS: Producto[] = [
   { id: '1', nombre: 'COCA COLA 1.75', marca: '', categoria: 'Bebidas', barcode: '7790895007217', precio: 6000 },
   { id: '2', nombre: 'COCA COLA 500 ML', marca: '', categoria: 'Bebidas', barcode: '100427', precio: 2500 },
   { id: '3', nombre: 'YERBA PLAYADITO 1KG', marca: '', categoria: 'Almacen', barcode: '', precio: 4800 },
@@ -11,7 +14,7 @@ const PRODUCTS = [
 ]
 
 // Mirrors the production build: serialized Fuse.createIndex over ['nombre','categoria']
-function buildIndex(products) {
+function buildIndex(products: Producto[]) {
   return JSON.parse(
     JSON.stringify(Fuse.createIndex(['nombre', 'categoria'], products)),
   )
@@ -101,13 +104,13 @@ describe('searchEngine', () => {
 
   it('returns fuse match positions for highlighting when a query is present', () => {
     const r = runQuery(engine(), { query: 'cocacola', limit: 1 })
-    const first = r.results[0]
+    const first = r.results[0] as WithMatches
     expect(first._matches).toBeDefined()
     expect(Array.isArray(first._matches.nombre)).toBe(true)
     // indices are [start, end] char ranges within the nombre field (Fuse v7
     // may match partial tokens: each range covers exactly the matched chars)
-    const nombre = PRODUCTS.find((p) => p.id === first.id).nombre
-    for (const [start, end] of first._matches.nombre) {
+    const nombre = PRODUCTS.find((p) => p.id === first.id)?.nombre ?? ''
+    for (const [start, end] of first._matches.nombre!) {
       expect(start).toBeGreaterThanOrEqual(0)
       expect(end).toBeLessThanOrEqual(nombre.length)
       expect(end).toBeGreaterThan(start)
@@ -116,7 +119,7 @@ describe('searchEngine', () => {
 
   it('does not add _matches when there is no query (browsing)', () => {
     const r = runQuery(engine(), { query: '' })
-    expect(r.results[0]._matches).toBeUndefined()
+    expect((r.results[0] as WithMatches)._matches).toBeUndefined()
   })
 
   it('is resilient: unknown category yields empty results without throwing', () => {

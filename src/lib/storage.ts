@@ -4,17 +4,17 @@
  */
 export const STORAGE_PREFIX = 'precio-scanner:'
 
-export function getStored(key, fallback) {
+export function getStored<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(STORAGE_PREFIX + key)
     if (raw === null) return fallback
-    return JSON.parse(raw)
+    return JSON.parse(raw) as T
   } catch {
     return fallback
   }
 }
 
-export function setStored(key, value) {
+export function setStored<T>(key: string, value: T): void {
   try {
     localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(value))
   } catch {

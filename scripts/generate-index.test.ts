@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 
-const SCRIPT = join(__dirname, 'generate-index.mjs')
+const SCRIPT = join(__dirname, 'generate-index.ts')
 
 function smallCatalog() {
   const products = Array.from({ length: 30 }, (_, i) => ({
@@ -18,7 +18,7 @@ function smallCatalog() {
   return { version: 'abc123', products }
 }
 
-function runScript(cwd, ...args) {
+function runScript(cwd: string, ...args: string[]) {
   try {
     const out = execFileSync('node', [SCRIPT, ...args], {
       cwd,
@@ -27,7 +27,8 @@ function runScript(cwd, ...args) {
     })
     return { code: 0, out }
   } catch (err) {
-    return { code: err.status ?? 1, err: String(err.stderr ?? err) }
+      const e = err as { status?: number; stderr?: string | Buffer }
+    return { code: e.status ?? 1, err: String(e.stderr ?? err) }
   }
 }
 

@@ -11,26 +11,51 @@
  *
  * The Worker is injectable (workerFactory) so tests run without a browser.
  */
-function defaultWorkerFactory() {
-  return new Worker(new URL('../workers/catalog.worker.js', import.meta.url), {
+import type { Producto, QueryParams, QueryResult, WorkerOutMessage } from './types'
+
+/** Minimo del Worker que workerClient usa (inyectable en tests). */
+export interface WorkerLike {
+  postMessage(message: unknown): void
+  addEventListener(
+    type: string,
+    listener: (event: MessageEvent<WorkerOutMessage>) => void,
+  ): void
+}
+
+function defaultWorkerFactory(): WorkerLike {
+  return new Worker(new URL('../workers/catalog.worker.ts', import.meta.url), {
     type: 'module',
   })
 }
 
-export function createWorkerClient({ workerFactory = defaultWorkerFactory } = {}) {
+interface InitPayload {
+  products: Producto[]
+  index?: unknown
+  facets?: unknown
+}
+
+interface Pending {
+  id: number
+  resolve: (result: QueryResult) => void
+  reject: (err: Error) => void
+}
+
+export function createWorkerClient({
+  workerFactory = defaultWorkerFactory,
+}: { workerFactory?: () => WorkerLike } = {}) {
   const worker = workerFactory()
-  let readyResolve
-  const ready = new Promise((resolve) => {
+  let readyResolve: (() => void) | undefined
+  const ready = new Promise<void>((resolve) => {
     readyResolve = resolve
   })
 
   let nextId = 0
-  let pending = null // { id, resolve, reject }
+  let pending: Pending | null = null
 
-  worker.addEventListener('message', (e) => {
+  worker.addEventListener('message', (e: MessageEvent<WorkerOutMessage>) => {
     const msg = e.data
     if (msg.type === 'ready') {
-      readyResolve()
+      readyResolve?.()
       return
     }
     if (msg.type === 'results') {
@@ -45,21 +70,22 @@ export function createWorkerClient({ workerFactory = defaultWorkerFactory } = {}
 
   return {
     ready,
-    init(payload) {
+    init(payload: InitPayload): Promise<void> {
       worker.postMessage({ type: 'init', ...payload })
       return ready
     },
-    query(params) {
+    query(params: QueryParams): Promise<QueryResult> {
       const id = ++nextId
       if (pending) {
-        const { reject } = pending
+        pending.reject(new Error(`query superseded by generation ${id}`))
         pending = null
-        reject(new Error(`query superseded by generation ${id}`))
       }
-      return new Promise((resolve, reject) => {
+      return new Promise<QueryResult>((resolve, reject) => {
         pending = { id, resolve, reject }
         worker.postMessage({ type: 'query', id, ...params })
       })
     },
   }
 }
+
+export type WorkerClient = ReturnType<typeof createWorkerClient>

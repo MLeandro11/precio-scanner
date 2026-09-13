@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * generate-index.mjs — public/data/catalogo.json → search assets
+ * generate-index.ts — public/data/catalogo.json → search assets
  *
  * Emits, into the given output directory (default: public/data):
  *   - catalogo-index.json   Fuse.js pre-generated index (serialized
@@ -12,28 +12,29 @@
  *                           sha256 of the input catalog bytes and keys the
  *                           client-side cache (spec FR-4.2).
  *
- * Usage: node scripts/generate-index.mjs [catalogo.json] [outputDir]
+ * Usage: node scripts/generate-index.ts [catalogo.json] [outputDir]
  */
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
 import Fuse from 'fuse.js'
+import type { Catalog, Facets, Producto } from '../src/lib/types.ts'
 
-function fail(msg) {
+function fail(msg: string): never {
   console.error(`generate-index: ${msg}`)
   process.exit(1)
 }
 
-function main() {
+function main(): void {
   const [, , inputArg, outputArg] = process.argv
   const input = resolve(inputArg ?? 'public/data/catalogo.json')
   const outputDir = resolve(outputArg ?? 'public/data')
 
-  let catalog
+  let catalog: Catalog
   try {
-    catalog = JSON.parse(readFileSync(input, 'utf8'))
+    catalog = JSON.parse(readFileSync(input, 'utf8')) as Catalog
   } catch (err) {
-    fail(`cannot read catalog from ${input}: ${err.message}`)
+    fail(`cannot read catalog from ${input}: ${err instanceof Error ? err.message : String(err)}`)
   }
   if (!Array.isArray(catalog?.products) || catalog.products.length === 0) {
     fail(`catalog has no products array: ${input}`)
@@ -54,17 +55,14 @@ function main() {
   const brands = [
     ...new Set(catalog.products.map((p) => p.marca).filter(Boolean)),
   ].sort()
-  const prices = catalog.products.map((p) => p.precio)
-  const facets = {
+  const prices: number[] = catalog.products.map((p) => p.precio)
+  const facets: Facets = {
     version: createHash('sha256').update(readFileSync(input)).digest('hex'),
     categories,
     brands,
     priceBounds: { min: Math.min(...prices), max: Math.max(...prices) },
   }
-  writeFileSync(
-    resolve(outputDir, 'catalogo-facets.json'),
-    JSON.stringify(facets),
-  )
+  writeFileSync(resolve(outputDir, 'catalogo-facets.json'), JSON.stringify(facets))
 
   console.log(
     `generate-index: wrote index (${catalog.products.length} products, ` +

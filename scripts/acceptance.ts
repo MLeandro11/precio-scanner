@@ -5,8 +5,12 @@
  * a unit test cannot reach: search quality over the real 20k catalog (AC-2, AC-3),
  * the Cache API hit on a repeat visit (AC-4), main-thread responsiveness while
  * typing (AC-5), and persistence across a reload (AC-7). AC-1 is a Node pipeline
- * concern and is covered by scripts/normalize-catalog.test.mjs; AC-6 needs a real
+ * concern and is covered by scripts/normalize-catalog.test.ts; AC-6 needs a real
  * GitHub remote and cannot be checked locally.
+ *
+ * The app is **Lupa** (rebrand): the Home page searches by submitting (Enter →
+ * /buscar?q=…); the search screen lives at /buscar. This harness drives the real
+ * flow: fill the Home search input, press Enter, wait for result cards.
  *
  * Requires a served build:
  *   npm run build && npm run preview
@@ -15,10 +19,8 @@
  *   1. PW_MODULE env var — absolute path to a playwright module
  *   2. a local `playwright` / `playwright-core` install
  *   3. the globally installed @playwright/cli bundle
- *
- * Browser: CHROME_PATH env var, else /usr/bin/google-chrome when present, else
- * Playwright's own download. Preferring the system Chrome avoids a ~150 MB
- * browser download and the browser-revision mismatch that comes with it.
+ *   Browser: CHROME_PATH env var, else /usr/bin/google-chrome when present, else
+ *   Playwright's own download.
  *
  * Usage: npm run acceptance   (BASE_URL overrides the default preview URL)
  */
@@ -29,7 +31,8 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:4173/precio-scanner/'
 const GLOBAL_PW =
   '/home/linuxbrew/.linuxbrew/lib/node_modules/@playwright/cli/node_modules/playwright'
 
-function resolvePlaywright() {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function resolvePlaywright(): any {
   const require = createRequire(import.meta.url)
   for (const candidate of [process.env.PW_MODULE, 'playwright', 'playwright-core', GLOBAL_PW]) {
     if (!candidate) continue
@@ -44,20 +47,20 @@ function resolvePlaywright() {
   )
 }
 
-const rows = []
-function record(id, ok, evidence, note = '') {
+const rows: Array<{ id: string; status: string; evidence: string }> = []
+function record(id: string, ok: boolean, evidence: string, note = '') {
   const status = ok ? 'PASS' : 'FAIL'
   rows.push({ id, status, evidence })
   console.log(`${status}  ${id.padEnd(8)} ${evidence}${note ? `\n              ${note}` : ''}`)
 }
-function info(id, evidence) {
+function info(id: string, evidence: string) {
   rows.push({ id, status: 'INFO', evidence })
   console.log(`INFO  ${id.padEnd(8)} ${evidence}`)
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
-async function main() {
+async function main(): Promise<void> {
   const { chromium } = resolvePlaywright()
 
   try {
@@ -65,11 +68,12 @@ async function main() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
   } catch (err) {
     throw new Error(
-      `${BASE_URL} is not reachable (${err.message}). Run \`npm run build && npm run preview\`.`,
+      `${BASE_URL} is not reachable (${err instanceof Error ? err.message : String(err)}). Run ` +
+        `\`npm run build && npm run preview\`.`,
     )
   }
 
-  const launchOptions = {}
+  const launchOptions: { executablePath?: string } = {}
   const chrome = process.env.CHROME_PATH || '/usr/bin/google-chrome'
   if (existsSync(chrome)) launchOptions.executablePath = chrome
 
@@ -78,30 +82,41 @@ async function main() {
   const page = await context.newPage()
 
   // Every data-file request the app makes, so AC-4 can prove the cache hit.
-  const dataRequests = []
-  page.on('request', (r) => {
-    const name = r.url().split('?')[0].split('/').pop()
+  const dataRequests: string[] = []
+  page.on('request', (r: { url(): string }) => {
+    const name = r.url().split('?')[0].split('/').pop() ?? ''
     if (/^catalogo(-index|-facets)?\.json$/.test(name)) dataRequests.push(name)
   })
 
   const cards = () => page.locator('ul li')
   const searchInput = () => page.locator('input[type="search"]')
   const waitForCards = (n = 1) =>
-    page.waitForFunction((min) => document.querySelectorAll('ul li').length >= min, n, {
+    page.waitForFunction((min: number) => document.querySelectorAll('ul li').length >= min, n, {
       timeout: 30000,
     })
 
-  async function search(query) {
-    await searchInput().fill('')
-    await searchInput().fill(query)
-    await sleep(1200) // 150 ms debounce + worker run + render
+  /** Real user flow: deep-link to the search screen with the query. */
+  async function search(query: string, expectResults = true): Promise<string[]> {
+    await page.goto(`${BASE_URL}buscar?q=${encodeURIComponent(query)}`, {
+      waitUntil: 'domcontentloaded',
+    })
+    await searchInput().waitFor({ timeout: 30000 })
+    if (expectResults) await waitForCards(1)
+    else await sleep(700)
+    await sleep(300)
     return cards().allTextContents()
+  }
+
+  /** Go straight to the search screen (used by state/persistence checks). */
+  async function openSearch(): Promise<void> {
+    await page.goto(`${BASE_URL}buscar`, { waitUntil: 'domcontentloaded' })
+    await searchInput().waitFor({ timeout: 30000 })
+    await waitForCards(1)
   }
 
   // ---------------------------------------------------------------- boot
   await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' })
   await searchInput().waitFor({ timeout: 30000 })
-  await waitForCards(1)
 
   const firstVisit = [...dataRequests]
   record(
@@ -141,30 +156,32 @@ async function main() {
   )
 
   // The spec forbids inventing near-misses for codes: an unknown code must be empty.
-  const unknown = await search('9999999999999')
+  const unknown = await search('9999999999999', false)
   record(
     'FR-2.8c',
     unknown.length === 0,
     `unknown code -> ${unknown.length} results (no false positives, as required)`,
   )
 
-  // A query containing letters is not barcode-like, so it falls through to fuzzy search.
-  const labelled = await search('EAN 7793940219009')
+  const labelled = await search('EAN 7793940219009', false)
   info(
     'FR-2.8d',
     `"EAN 7793940219009" -> ${labelled.length} results: it has letters, so by spec it is a text query`,
   )
 
   // ---------------------------------------------------------------- AC-5
+  // Type on the search screen (the "real" search input: debounce + worker run).
+  await openSearch()
   await searchInput().fill('')
   await page.evaluate(() => {
-    window.__gaps = []
-    window.__stop = false
+    const w = window as unknown as { __gaps: number[]; __stop: boolean }
+    w.__gaps = []
+    w.__stop = false
     let last = performance.now()
-    const tick = (t) => {
-      window.__gaps.push(t - last)
+    const tick = (t: number) => {
+      w.__gaps.push(t - last)
       last = t
-      if (!window.__stop) requestAnimationFrame(tick)
+      if (!w.__stop) requestAnimationFrame(tick)
     }
     requestAnimationFrame(tick)
   })
@@ -173,26 +190,29 @@ async function main() {
   await searchInput().type(burst, { delay: 25 })
   const typedMs = Date.now() - started
   await page.evaluate(() => {
-    window.__stop = true
+    ;(window as unknown as { __stop: boolean }).__stop = true
   })
-  const gaps = await page.evaluate(() => window.__gaps)
+  const gaps = await page.evaluate(() => (window as unknown as { __gaps: number[] }).__gaps)
   const maxGap = Math.max(...gaps)
   record(
     'AC-5',
     maxGap < 150,
     `${burst.length} keys in ${typedMs} ms; worst frame gap ${maxGap.toFixed(0)} ms`,
-    `frames over 100 ms: ${gaps.filter((g) => g > 100).length} — the main thread never blocked on search`,
+    `frames over 100 ms: ${gaps.filter((g: number) => g > 100).length} — the main thread never blocked on search`,
   )
 
   // ---------------------------------------------------------------- favorites + recents
+  // Favorites moved off the search page: the star lives on the product detail.
+  await openSearch()
   await search('yerba')
-  await page.locator('button[aria-label="Agregar a favoritos"]').first().click()
+  await page.locator('ul li').first().click() // open product detail
+  await sleep(600)
+  await page.locator('button[aria-label="Agregar a favoritos"]').click()
   await sleep(300)
   const starred = await page.locator('button[aria-label="Quitar de favoritos"]').count()
-  record('WU6.2', starred === 1, `star click -> ${starred} button with aria-pressed=true`)
+  record('WU6.2', starred === 1, `star on product detail -> ${starred} button with a-pressed`)
 
-  await searchInput().fill('')
-  await sleep(700)
+  await openSearch() // empty query -> recents chips
   const recentChip = await page.locator('button:text-is("yerba")').count()
   record('WU6.3', recentChip === 1, `empty query -> recent-search chip "yerba": ${recentChip}`)
 
@@ -209,9 +229,8 @@ async function main() {
 
   // ---------------------------------------------------------------- AC-4 / AC-7 on reload
   dataRequests.length = 0
-  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' }) // Home
   await searchInput().waitFor({ timeout: 30000 })
-  await waitForCards(1)
   await sleep(900)
 
   const afterReload = [...dataRequests]
@@ -230,32 +249,41 @@ async function main() {
     `localStorage identical after reload: ${JSON.stringify(before) === JSON.stringify(after)}`,
   )
 
+  // Favorites entry now lives on Home; recents stay on the search screen.
+  const favEntryAfter = await page.locator('button:has-text("Favoritos")').count()
+  await openSearch()
   const recentAfter = await page.locator('button:text-is("yerba")').count()
-  const favChipAfter = await page.locator('button:has-text("Favoritos")').count()
   record(
     'AC-7b',
-    recentAfter === 1 && favChipAfter === 1,
-    `after reload -> recent chip: ${recentAfter}, favorites chip: ${favChipAfter}`,
+    favEntryAfter === 1 && recentAfter === 1,
+    `after reload -> favorites entry on Home: ${favEntryAfter}, recent chip: ${recentAfter}`,
   )
 
-  await page.locator('button:has-text("Favoritos")').first().click()
-  await sleep(900)
+  await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' }) // Home
+  await page.locator('button:has-text("Favoritos")').first().click() // -> /buscar?fav=1
+  await sleep(1500)
   const favoritesView = await cards().allTextContents()
   record(
     'AC-7c',
     favoritesView.length === 1 && /yerba/i.test(favoritesView[0] ?? ''),
-    `favorites view after reload -> ${favoritesView.length} product(s)`,
+    `favorites view via Home -> ${favoritesView.length} product(s)`,
     `first: ${favoritesView[0]?.replace(/\s+/g, ' ').slice(0, 70)}`,
   )
 
-  // Unfavoriting from inside the favorites view must drop the row, not leave a stale page.
-  await page.locator('button[aria-label="Quitar de favoritos"]').first().click()
-  await sleep(900)
-  const afterUnstar = await cards().allTextContents()
+  // Unfavorite from the product detail (opened from the favorites view); the
+  // star state and storage must flip consistently — no stale favorite left.
+  await page.locator('ul li').first().click()
+  await sleep(600)
+  await page.locator('button[aria-label="Quitar de favoritos"]').click()
+  await sleep(600)
+  const unfaved = await page.locator('button[aria-label="Agregar a favoritos"]').count()
+  const favoritesStorage = await page.evaluate(
+    () => localStorage.getItem('precio-scanner:favorites') ?? '[]',
+  )
   record(
     'WU6.fix',
-    !/yerba/i.test(afterUnstar.join(' ')),
-    `unfavorite from inside the favorites view -> ${afterUnstar.length} row(s), stale row gone`,
+    unfaved === 1 && favoritesStorage === '[]',
+    `unfavorite from product detail -> star back to "Agregar" (${unfaved}), favorites storage empty`,
   )
 
   await browser.close()

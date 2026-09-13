@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { stableId } from '../src/lib/stableId.mjs'
+import { stableId } from '../src/lib/stableId.ts'
 
 describe('stableId', () => {
   it('is deterministic for the same input', () => {

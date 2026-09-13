@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { getStored, setStored, STORAGE_PREFIX } from './storage.mjs'
+import { getStored, setStored, STORAGE_PREFIX } from './storage'
 
 // localStorage does not exist in Node: stub it with an in-memory map
 function stubLocalStorage() {
   const store = new Map()
   vi.stubGlobal('localStorage', {
-    getItem: (k) => (store.has(k) ? store.get(k) : null),
-    setItem: (k, v) => store.set(k, String(v)),
+    getItem: (k: string) => (store.has(k) ? store.get(k) : null),
+    setItem: (k: string, v: unknown) => store.set(k, String(v)),
   })
   return store
 }
