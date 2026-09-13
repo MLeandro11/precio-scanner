@@ -1,7 +1,14 @@
 import { RotateCcw } from 'lucide-react'
-import { formatPrice } from './ProductCard.jsx'
-import Button from './ui/Button.jsx'
-import Input from './ui/Input.jsx'
+import { formatPrice } from './ProductCard'
+import Button from './ui/Button'
+import Input from './ui/Input'
+import type { Facets } from '../lib/types'
+
+export interface Filters {
+  categoria: string
+  priceMin: number | null
+  priceMax: number | null
+}
 
 /**
  * Filter content (design-system §7): category chips + price range + clear + count.
@@ -10,14 +17,24 @@ import Input from './ui/Input.jsx'
  *
  * Both filters apply immediately (session handles the worker run).
  */
-export default function FilterBar({ facets, filters, onFiltersChange, total }) {
+export default function FilterBar({
+  facets,
+  filters,
+  onFiltersChange,
+  total,
+}: {
+  facets: Facets
+  filters: Filters
+  onFiltersChange: (filters: Partial<Filters>) => void
+  total: number
+}) {
   const { categoria, priceMin, priceMax } = filters
 
-  function toggleCategory(c) {
+  function toggleCategory(c: string) {
     onFiltersChange({ categoria: categoria === c ? '' : c })
   }
 
-  function commitPrice(next) {
+  function commitPrice(next: { priceMin: string | number | null; priceMax: string | number | null }) {
     // commit only complete, sane ranges; empty input clears the bound
     const min = next.priceMin === '' ? null : Number(next.priceMin)
     const max = next.priceMax === '' ? null : Number(next.priceMax)

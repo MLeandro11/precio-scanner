@@ -1,8 +1,10 @@
+import type { ButtonHTMLAttributes } from 'react'
+
 /**
  * In-house Button (design-system §7b). Token-driven, never a bare hex.
  * Min touch target 44px, visible focus ring via the global :focus-visible rule.
  */
-const VARIANTS = {
+const VARIANTS: Record<Variant, string> = {
   // Primary action: accent background, contrast text.
   primary: 'bg-accent text-accent-contrast hover:opacity-90 active:opacity-95',
   // Secondary: raised surface with a border. Default for toolbar/actions.
@@ -12,11 +14,19 @@ const VARIANTS = {
   ghost: 'text-text-secondary hover:bg-surface active:bg-surface',
 }
 
-const SIZES = {
+const SIZES: Record<Size, string> = {
   // 44px min height everywhere (design-system §7).
   md: 'min-h-11 px-4 text-sm',
   // Square icon button, also 44px.
   icon: 'h-11 w-11 p-0',
+}
+
+type Variant = 'primary' | 'secondary' | 'ghost'
+type Size = 'md' | 'icon'
+
+interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: Variant
+  size?: Size
 }
 
 export default function Button({
@@ -26,7 +36,7 @@ export default function Button({
   className = '',
   children,
   ...rest
-}) {
+}: ButtonProps) {
   return (
     <button
       type={type}

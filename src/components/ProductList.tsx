@@ -1,9 +1,24 @@
 import { PackageSearch, SearchX } from 'lucide-react'
-import ProductCard from './ProductCard.jsx'
-import Button from './ui/Button.jsx'
-import SkeletonList from './ui/Skeleton.jsx'
+import ProductCard from './ProductCard'
+import Button from './ui/Button'
+import SkeletonList from './ui/Skeleton'
+import type { SearchState } from '../lib/searchSession'
+import type { SearchControls } from '../hooks/useSearch'
+import type { Producto } from '../lib/types'
 
-export default function ProductList({ search, isFavorite, onToggleFavorite }) {
+type SearchView = SearchState & SearchControls
+
+export default function ProductList({
+  search,
+  onOpenProduct,
+  isInList,
+  onAddToList,
+}: {
+  search: SearchView
+  onOpenProduct?: (product: Producto) => void
+  isInList?: (eanOrId: string) => boolean
+  onAddToList?: (product: Producto) => void
+}) {
   const { results, total, loading, error, hasMore, query, categoria, priceMin, priceMax } = search
 
   if (error) {
@@ -75,8 +90,9 @@ export default function ProductList({ search, isFavorite, onToggleFavorite }) {
             <ProductCard
               key={p.id}
               product={p}
-              isFavorite={isFavorite?.(p.id) ?? false}
-              onToggleFavorite={onToggleFavorite}
+              onOpen={onOpenProduct}
+              inList={isInList?.(p.barcode || p.id) ?? false}
+              onAddToList={onAddToList}
             />
           ))}
         </ul>
@@ -84,7 +100,12 @@ export default function ProductList({ search, isFavorite, onToggleFavorite }) {
 
       {hasMore ? (
         <div className="safe-bottom mt-4">
-          <Button variant="secondary" onClick={search.loadMore} disabled={loading} className="w-full">
+          <Button
+            variant="secondary"
+            onClick={search.loadMore}
+            disabled={loading}
+            className="w-full"
+          >
             {loading
               ? 'Cargando…'
               : `Ver más (${(total - results.length).toLocaleString('es-AR')} restantes)`}

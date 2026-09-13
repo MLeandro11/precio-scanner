@@ -21,7 +21,7 @@ export function SkeletonRow() {
   )
 }
 
-export default function SkeletonList({ count = 6 }) {
+export default function SkeletonList({ count = 6 }: { count?: number }) {
   return (
     <div role="status" aria-live="polite" aria-label="Cargando resultados">
       <span className="sr-only">Cargando…</span>

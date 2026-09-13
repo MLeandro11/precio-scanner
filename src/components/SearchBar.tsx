@@ -1,11 +1,19 @@
 import { Search } from 'lucide-react'
-import Input from './ui/Input.jsx'
+import Input from './ui/Input'
 
 /**
  * Search input (design-system §5). Pill, 44px min height, lucide Search icon.
  * The sticky positioning lives on the App header that wraps this field.
  */
-export default function SearchBar({ query, onQueryChange }) {
+export default function SearchBar({
+  query,
+  onQueryChange,
+  autoFocus = false,
+}: {
+  query: string
+  onQueryChange: (query: string) => void
+  autoFocus?: boolean
+}) {
   return (
     <div className="relative">
       <Search
@@ -15,6 +23,7 @@ export default function SearchBar({ query, onQueryChange }) {
       />
       <Input
         type="search"
+        autoFocus={autoFocus}
         value={query}
         onChange={(e) => onQueryChange(e.target.value)}
         placeholder="Buscar productos…"

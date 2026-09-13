@@ -1,6 +1,7 @@
 import { ChevronDown } from 'lucide-react'
+import type { SortOrder } from '../lib/types'
 
-const SORTS = [
+const SORTS: Array<{ value: SortOrder; label: string }> = [
   { value: 'relevance', label: 'Relevancia' },
   { value: 'price-asc', label: 'Precio ↑' },
   { value: 'price-desc', label: 'Precio ↓' },
@@ -10,7 +11,15 @@ const SORTS = [
  * Sort control (design-system §5): compact NATIVE select with a visible label.
  * No custom dropdown; tokens only. 44px min height for touch.
  */
-export default function SortSelect({ sort, onSortChange, id = 'sort-select' }) {
+export default function SortSelect({
+  sort,
+  onSortChange,
+  id = 'sort-select',
+}: {
+  sort: SortOrder
+  onSortChange: (sort: SortOrder) => void
+  id?: string
+}) {
   return (
     <label
       htmlFor={id}
@@ -21,7 +30,7 @@ export default function SortSelect({ sort, onSortChange, id = 'sort-select' }) {
         <select
           id={id}
           value={sort}
-          onChange={(e) => onSortChange(e.target.value)}
+          onChange={(e) => onSortChange(e.target.value as SortOrder)}
           className="min-h-11 appearance-none rounded-sm border border-border bg-surface-raised py-2 pl-3 pr-8 text-sm text-text-primary outline-none transition"
         >
           {SORTS.map((s) => (

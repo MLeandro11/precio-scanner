@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef } from 'react'
 import { X } from 'lucide-react'
+import type { ReactNode } from 'react'
 
 /**
  * In-house mobile bottom Sheet (design-system §5/§7b).
@@ -9,15 +10,27 @@ import { X } from 'lucide-react'
  * - Body scroll is locked while open; focus moves into the panel on open.
  * - Only transform/opacity animate, so no layout reflow (§8).
  */
-export default function Sheet({ open, onClose, title, description, children }) {
+export default function Sheet({
+  open,
+  onClose,
+  title,
+  description,
+  children,
+}: {
+  open: boolean
+  onClose?: () => void
+  title?: string
+  description?: string
+  children: ReactNode
+}) {
   const titleId = useId()
   const descriptionId = useId()
-  const panelRef = useRef(null)
+  const panelRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
     if (!open) return
 
-    function onKeyDown(event) {
+    function onKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         event.stopPropagation()
         onClose?.()
