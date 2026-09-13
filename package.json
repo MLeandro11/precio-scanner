@@ -8,20 +8,26 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "normalize": "node scripts/normalize-catalog.mjs",
-    "generate-index": "node scripts/generate-index.mjs",
-    "acceptance": "node scripts/acceptance.mjs"
+    "normalize": "node scripts/normalize-catalog.ts",
+    "generate-index": "node scripts/generate-index.ts",
+    "acceptance": "node scripts/acceptance.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "fuse.js": "^7.5.0",
     "lucide-react": "^1.45.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^7.18.3"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.0",
+    "@types/node": "^26.5.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^5.0.0",
     "tailwindcss": "^4.1.0",
+    "typescript": "^7.0.2",
     "vite": "^7.0.0",
     "vitest": "^5.0.0"
   }

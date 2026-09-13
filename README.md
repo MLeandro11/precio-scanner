@@ -1,79 +1,85 @@
-# precio-scanner
+# Lupa — Buscador de precios de almacén
 
-Client-side supermarket catalog search app. Static Vite + React SPA with fuzzy
-search over a large (~23k products) catalog — no backend, fully static, deployed
-to GitHub Pages.
+Rebrand de **precio-scanner**: búsqueda de productos de almacén con el objetivo de
+**armar una lista de compras** y, en el futuro, **vigilar precios por código EAN**.
 
-## Setup
+> Una nota de identidad: la app se apoya en el **EAN** como identidad estable del
+> producto (el mismo código en todos los almacenes). Hoy el catálogo es de **una
+> sola tienda**; el modelo ya contempla multi-almacén, historial y alertas (sin
+> simular datos que no existen).
+
+## Flujo / rutas
+
+```
+Home (/) ──▶ /buscar (resultados, por nombre o EAN)
+  │            │
+  ├──▶ /escanear (ingreso de EAN manual; cámara en futura versión)
+  ├──▶ /producto/:ean (detalle + "agregar a lista")
+  ├──▶ /historial/:ean (pendiente de datos de histórico)
+  ├──▶ /lista (la lista, con vista de códigos de barras)
+  ├──▶ /alertas y /perfil (placeholders honestos)
+```
+
+Navegación inferior: **Inicio · Alertas · [Escanear] · Lista · Perfil** (bar flotante outline).
+
+## Estado por feature
+
+| Feature | Estado |
+|---|---|
+| Búsqueda por nombre (fuzzy, worker + Fuse) | ✅ |
+| Búsqueda exacta por código de barras/EAN | ✅ (FR-2.8) |
+| Lista de compras (por EAN, cantidades, persistencia localStorage) | ✅ |
+| Detalle de producto + agregar a lista | ✅ |
+| Vista "códigos de barras" en la lista | ✅ |
+| Escaneo con cámara (BarcodeDetector) | ⏳ futura (hoy: EAN manual) |
+| Comparación entre almacenes / historial / alertas | ⏳ **modelado**, sin datos (1 tienda) |
+
+## Stack
+
+Vite + React 19 + **TypeScript (strict)** + Tailwind v4 + lucide-react +
+react-router-dom v7. Tests con vitest; bike en worker (`src/workers/catalog.worker.ts`).
+
+## Comandos
 
 ```sh
 npm install
-npm run dev      # local dev server
-npm run build    # production build into dist/
-npm run preview  # serve the production build locally
+npm run dev          # dev server
+npm run build        # build a dist/
+npm run preview      # sirve el build
+npm test             # vitest (lógica pura)
+npm run typecheck    # tsc --noEmit (strict)
+npm run acceptance   # Playwright contra preview (16 criterios AC/FR/WU)
 ```
 
-## Deployment
-
-Every push to `main` builds and deploys to GitHub Pages via
-`.github/workflows/deploy.yml`. No manual steps.
-
-**Live:** <https://mleandro11.github.io/precio-scanner/>
-
-## Data pipeline
-
-Raw catalog extraction goes to `raw-catalog.json` (repo root, gitignored —
-never commit it). Then:
+## Pipeline de datos (con una sola tienda)
 
 ```sh
-npm run normalize        # raw-catalog.json → public/data/catalogo.json
-npm run generate-index   # → catalogo-index.json + catalogo-facets.json
+npm run normalize      # raw-catalog.json → public/data/catalogo.json
+npm run generate-index # → catalogo-index.json + catalogo-facets.json
 ```
 
-Regenerate after every fresh extraction; `catalogo-facets.json` carries a
-content hash (`version`) used for client-side cache invalidation.
+El catálogo (gitignored) tiene ~20.3k productos; 98,8% con barcode. Cada producto:
+`{ id, nombre, marca, categoria, barcode, precio }`.
 
-## Testing
+## Estructura relevante
 
-```sh
-npm test            # vitest: pure logic (search engine, session, loader, pipeline, collections)
-npm run build && npm run preview   # then, in a second shell:
-npm run acceptance  # real browser: AC-2..AC-5, AC-7, barcode lookup
+```
+src/
+├─ App.tsx              # boot del catálogo (worker) + rutas (CatalogContext)
+├─ layout/AppLayout.tsx # nav inferior outline
+├─ pages/               # Home, Search, Scan, Product, History, List, Placeholder
+├─ hooks/               # useSearch, useFavorites, useRecents, useList, useResolveEans
+├─ lib/
+│  ├─ types.ts          # Producto, Catalog, Facets, QueryParams/Result, worker msg
+│  ├─ lupa/list.ts      # modelo de lista (ListaItem, AlmacenPrecio, HistorialPrecio) + lógica pura
+│  ├─ searchEngine.ts   # cerebro del worker (fuzzy + barcode exacto)
+│  └─ catalogLoader.ts  # carga con Cache API versionado
+└─ workers/catalog.worker.ts
 ```
 
-`npm run acceptance` needs Playwright plus a browser. It uses the system Chrome when
-one is present (`CHROME_PATH` overrides it) and otherwise falls back to Playwright's own
-download. It exits non-zero on any failure. Results are recorded in
-`sdd/05-acceptance-report.md`.
+## Notas técnicas
 
-## Known limitations
-
-- **Partial catalog dates.** A fresh extraction is a manual DevTools step; the data
-  in `public/data/` is as old as the last regeneration. Prices drift.
-- **Search by code is not universal.** 251 products have no barcode and ~290 carry fewer
-  than 6 digits. A code query needs at least 6 digits, so those can never be found by
-  code — only by name.
-- **A labelled code is not recognised.** `EAN 7793940219009` contains letters, so it is
-  treated as a text query and finds nothing. Only the bare digits work.
-- **Recents do not normalise codes.** The same product searched as `7793940219009` and
-  `779 3940 219009` is stored twice.
-- **Favorites live in one browser profile.** `localStorage` is per device and per
-  browser; clearing site data removes them, and two tabs writing at once can race.
-- **Single store.** One extraction, one price per product. No multi-store comparison,
-  no price history (Phase 2).
-- **No unit-price comparison** by design — the source has no measure data (Phase 2).
-- **The deploy path is now exercised.** `main` is pushed to
-  `MLeandro11/precio-scanner` and deploys to GitHub Pages on every push.
-
-## Status
-
-Phase 1 implemented, including favorites and recent-search persistence. Search, filters,
-sorting, and barcode (EAN) lookup run over the real 20,331-product catalog.
-
-- Unit tests: 78 passing across 9 files (`npm test`).
-- Acceptance pass: 16/16 checks pass in a real browser (`npm run acceptance`), including
-  AC-6 (deploy to GH Pages) — verified live at
-  <https://mleandro11.github.io/precio-scanner/>.
-
-Per-item status with evidence lives in `sdd/04-tasks.md`, and the acceptance results in
-`sdd/05-acceptance-report.md`.
+- Node ≥ 23.6 para correr los scripts CLI como `.ts` (type stripping).
+- `tsconfig` con `strict`, `verbatimModuleSyntax`, `allowImportingTsExtensions`
+  (los scripts usan imports `.ts` explícitos para el type stripping).
+- El worker sigue siendo dueño del catálogo; el main thread solo guarda `facets`.
