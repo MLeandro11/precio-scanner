@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, lazy, Suspense, useContext, useEffect, useState } from 'react'
 import { Bell, User } from 'lucide-react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { loadCatalog } from './lib/catalogLoader'
@@ -8,7 +8,9 @@ import type { Facets } from './lib/types'
 import AppLayout from './layout/AppLayout'
 import HomePage from './pages/HomePage'
 import SearchPage from './pages/SearchPage'
-import ScanPage from './pages/ScanPage'
+// ScanPage pulls in the webcam decoder (ZXing) — lazy-loaded so the ~400 kB
+// decoder is only downloaded when the user actually opens /escanear.
+const ScanPage = lazy(() => import('./pages/ScanPage'))
 import ProductPage from './pages/ProductPage'
 import HistoryPage from './pages/HistoryPage'
 import ListPage from './pages/ListPage'
@@ -70,37 +72,55 @@ function SearchRoute() {
 
 function AppRoutes() {
   return (
-    <Routes>
-      <Route element={<AppLayout />}>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/buscar" element={<SearchRoute />} />
-        <Route path="/escanear" element={<ScanPage />} />
-        <Route path="/producto/:ean" element={<ProductPage />} />
-        <Route path="/historial/:ean" element={<HistoryPage />} />
-        <Route path="/lista" element={<ListPage />} />
-        <Route
-          path="/alertas"
-          element={
-            <PlaceholderPage
-              title="Alertas"
-              description="Acá vas a recibir avisos cuando un producto baje de precio. Requiere datos de historial/multi-tienda que hoy no tenemos; modelo listo para cuando lleguen."
-              icon={<Bell size={40} strokeWidth={1.5} aria-hidden="true" />}
-            />
-          }
-        />
-        <Route
-          path="/perfil"
-          element={
-            <PlaceholderPage
-              title="Perfil"
-              description="Tu perfil y preferencias (almacén favorito, notificaciones)."
-              icon={<User size={40} strokeWidth={1.5} aria-hidden="true" />}
-            />
-          }
-        />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Route>
-    </Routes>
+    <Suspense fallback={<ScanLoading />}>
+      <Routes>
+        <Route element={<AppLayout />}>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/buscar" element={<SearchRoute />} />
+          <Route path="/escanear" element={<ScanPage />} />
+          <Route path="/producto/:ean" element={<ProductPage />} />
+          <Route path="/historial/:ean" element={<HistoryPage />} />
+          <Route path="/lista" element={<ListPage />} />
+          <Route
+            path="/alertas"
+            element={
+              <PlaceholderPage
+                title="Alertas"
+                description="Acá vas a recibir avisos cuando un producto baje de precio. Requiere datos de historial/multi-tienda que hoy no tenemos; modelo listo para cuando lleguen."
+                icon={<Bell size={40} strokeWidth={1.5} aria-hidden="true" />}
+              />
+            }
+          />
+          <Route
+            path="/perfil"
+            element={
+              <PlaceholderPage
+                title="Perfil"
+                description="Tu perfil y preferencias (almacén favorito, notificaciones)."
+                icon={<User size={40} strokeWidth={1.5} aria-hidden="true" />}
+              />
+            }
+          />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+      </Routes>
+    </Suspense>
+  )
+}
+
+/** Light loader shown while the webcam/scan chunk streams in. */
+function ScanLoading() {
+  return (
+    <div className="safe-top mx-auto w-full max-w-lg px-4 pb-8">
+      <Brand />
+      <div
+        className="mt-5 aspect-[3/4] w-full rounded-2xl bg-slate-900"
+        role="status"
+        aria-live="polite"
+      >
+        <span className="sr-only">Cargando escáner…</span>
+      </div>
+    </div>
   )
 }
 

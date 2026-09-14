@@ -13,7 +13,7 @@ Rebrand de **precio-scanner**: búsqueda de productos de almacén con el objetiv
 ```
 Home (/) ──▶ /buscar (resultados, por nombre o EAN)
   │            │
-  ├──▶ /escanear (ingreso de EAN manual; cámara en futura versión)
+  ├──▶ /escanear (escaneo por cámara ZXing + EAN manual)
   ├──▶ /producto/:ean (detalle + "agregar a lista")
   ├──▶ /historial/:ean (pendiente de datos de histórico)
   ├──▶ /lista (la lista, con vista de códigos de barras)
@@ -31,7 +31,7 @@ Navegación inferior: **Inicio · Alertas · [Escanear] · Lista · Perfil** (ba
 | Lista de compras (por EAN, cantidades, persistencia localStorage) | ✅ |
 | Detalle de producto + agregar a lista | ✅ |
 | Vista "códigos de barras" en la lista | ✅ |
-| Escaneo con cámara (BarcodeDetector) | ⏳ futura (hoy: EAN manual) |
+| Escaneo con cámara (ZXing, cualquier dispositivo) | ✅ |
 | Comparación entre almacenes / historial / alertas | ⏳ **modelado**, sin datos (1 tienda) |
 
 ## Stack

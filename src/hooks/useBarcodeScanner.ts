@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { BrowserMultiFormatReader, BarcodeFormat } from '@zxing/browser'
+import { DecodeHintType } from '@zxing/library'
 import { createScanGate } from '../lib/lupa/scan'
 import type { ScanGate } from '../lib/lupa/scan'
 
@@ -7,17 +9,24 @@ export type ScanStatus = 'unsupported' | 'requesting' | 'active' | 'denied' | 'e
 interface BarcodeScanner {
   videoRef: React.RefObject<HTMLVideoElement | null>
   status: ScanStatus
-  /** When 'error', the underlying failure message. */
+  /** When 'status' is 'error', the underlying failure message (shown to the user). */
   error: string
 }
 
 /**
- * Camera barcode scanner (BarcodeDetector + getUserMedia), Chromium-only.
+ * Camera barcode scanner for any device that exposes `getUserMedia`
+ * (Chrome/Edge/Android, Safari iOS, Firefox…).
  *
- * The video stream is attached to `videoRef`; a requestAnimationFrame loop runs
- * BarcodeDetector.detect over the live frames and reports **one** signal per
- * distinct code through the gate (dedupe + cooldown). Not supported / denied /
- * failing contexts report a status the ScanPage handles with the manual EAN UI.
+ * Decodes with a single pure-JS decoder (ZXing, `BrowserMultiFormatReader`) limited to
+ * the EAN/UPC linear formats, throttled so it does not read a full-resolution frame
+ * every animation tick on low-end phones.
+ *
+ * Important Safari quirk handled here: we open the camera and play the `<video>`
+ * ourselves BEFORE handing the stream to ZXing, and pass it via `decodeFromStream`.
+ * ZXing's transparent `decodeFromVideoDevice` attaches the stream but on some engines
+ * leaves the preview black (and decodes an empty frame). Owning the stream+play makes
+ * the preview show and the decoder read real frames. A scan gate dedupes the
+ * near-constant detections into one signal per distinct code per window.
  */
 export function useBarcodeScanner(onDetect: (code: string) => void): BarcodeScanner {
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -29,22 +38,37 @@ export function useBarcodeScanner(onDetect: (code: string) => void): BarcodeScan
   const gateRef = useRef<ScanGate>(createScanGate())
 
   useEffect(() => {
-    if (typeof BarcodeDetector === 'undefined') {
-      setStatus('unsupported')
-      return
-    }
-    if (!navigator.mediaDevices?.getUserMedia) {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       setStatus('unsupported')
       return
     }
 
     let cancelled = false
-    let raf = 0
+    let controls: { stop: () => void } | null = null
     let stream: MediaStream | null = null
 
     async function start() {
       setStatus('requesting')
+      const video = videoRef.current
+      if (!video) {
+        setStatus('error')
+        setError('camera video not mounted')
+        return
+      }
+
+      // EAN-family only: faster than the 1D+2D multi-format sweep and avoids a
+      // stray QR / DataMatrix read answering "its a barcode".
+      const hints = new Map<DecodeHintType, unknown>([
+        [DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.EAN_13, BarcodeFormat.EAN_8, BarcodeFormat.UPC_A, BarcodeFormat.UPC_E]],
+      ])
+      const reader = new BrowserMultiFormatReader(hints, {
+        delayBetweenScanAttempts: 180,
+        delayBetweenScanSuccess: 400,
+      })
+
       try {
+        // 1) Open the camera and make the preview actually play. We own the
+        //    stream + play so the video is never a black box on Safari/iOS.
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'environment' },
         })
@@ -52,39 +76,53 @@ export function useBarcodeScanner(onDetect: (code: string) => void): BarcodeScan
           stream.getTracks().forEach((t) => t.stop())
           return
         }
-        const video = videoRef.current
-        if (!video) throw new Error('camera video element not mounted')
         video.srcObject = stream
         video.muted = true
+        video.playsInline = true
         await video.play()
-
-        const detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'] })
-        setStatus('active')
-
-        const loop = async () => {
-          if (cancelled) return
-          try {
-            if (video.readyState >= 2) {
-              const codes = await detector.detect(video)
-              for (const c of codes) {
-                if (gateRef.current.shouldEmit(c.rawValue, Date.now())) {
-                  onDetectRef.current(c.rawValue)
-                }
-              }
-            }
-          } catch {
-            // dim frame / detector hiccup: keep scanning
-          }
-          raf = requestAnimationFrame(loop)
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop())
+          return
         }
-        raf = requestAnimationFrame(loop)
+
+        // 2) Hand the live stream+video to ZXing, which decodes frames from it.
+        controls = await reader.decodeFromStream(stream, video, (result) => {
+          if (cancelled) return
+          if (result) {
+            const code = result.getText()
+            if (gateRef.current.shouldEmit(code, Date.now())) {
+              onDetectRef.current(code)
+            }
+          }
+        })
+        if (cancelled) {
+          controls?.stop()
+          stream?.getTracks().forEach((t) => t.stop())
+          return
+        }
+        setStatus('active')
       } catch (err) {
+        stream?.getTracks().forEach((t) => t.stop())
         if (cancelled) return
-        const name = (err as { name?: string }).name
-        if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {
+        const e = err as { name?: string; message?: string }
+        const name = e.name
+        if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
           setStatus('denied')
+        } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') {
+          setError('No se encontró una cámara en este dispositivo.')
+          setStatus('error')
+        } else if (name === 'NotReadableError') {
+          setError('La cámara está siendo usada por otra aplicación.')
+          setStatus('error')
+        } else if (name === 'SecurityError') {
+          setError(
+            typeof window !== 'undefined' && !window.isSecureContext
+              ? 'Necesitás un contexto HTTPS para usar la cámara.'
+              : 'La cámara fue bloqueada por el navegador.',
+          )
+          setStatus('error')
         } else {
-          setError(err instanceof Error ? err.message : String(err))
+          setError(e.message || String(err))
           setStatus('error')
         }
       }
@@ -93,7 +131,7 @@ export function useBarcodeScanner(onDetect: (code: string) => void): BarcodeScan
     start()
     return () => {
       cancelled = true
-      cancelAnimationFrame(raf)
+      controls?.stop()
       stream?.getTracks().forEach((t) => t.stop())
     }
   }, [])

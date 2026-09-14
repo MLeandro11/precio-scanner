@@ -19,9 +19,10 @@ interface Detection {
 }
 
 /**
- * Escáner de código de barras. Con cámara (BarcodeDetector, Chromium) detecta
- * el EAN y lo agrega a la lista; en navegadores sin soporte o con permiso
- * denegado, el ingreso manual sigue disponible y es el camino primario.
+ * Escáner de código de barras con cualquier dispositivo con cámara: decodifica
+ * con ZXing (JS puro) en el navegador, sin depender de la API Chromium-only
+ * BarcodeDetector. Si no hay cámara o se deniega el permiso, el ingreso manual
+ * del EAN sigue disponible y es el camino primario.
  */
 export default function ScanPage() {
   const navigate = useNavigate()
@@ -72,34 +73,38 @@ export default function ScanPage() {
     navigate(`/buscar?q=${encodeURIComponent(q)}`)
   }
 
-  const showCamera =
-    scanner.status === 'requesting' ||
-    scanner.status === 'active' ||
-    scanner.status === 'error'
-
   return (
     <main className="safe-top mx-auto w-full max-w-lg px-4 pb-8">
       <Brand />
 
-      {/* Camera viewport */}
-      {showCamera ? (
+      {/* Camera viewport — the video element is ALWAYS mounted so the scanner
+          hook always has a live ref; the status overlays say what is happening.
+          It is hidden only when there is no stream to show (unsupported / denied). */}
       <div className="relative mt-5 overflow-hidden rounded-2xl bg-slate-900">
         <div className="aspect-[3/4] w-full">
           <video
             ref={scanner.videoRef}
             playsInline
             muted
-            className="absolute inset-0 h-full w-full object-cover"
+            className={`absolute inset-0 h-full w-full object-cover ${
+              scanner.status === 'unsupported' || scanner.status === 'denied' ? 'hidden' : ''
+            }`}
             aria-hidden="true"
           />
           {scanner.status === 'requesting' ? (
-            <p className="absolute inset-0 flex items-center justify-center text-xs text-white/80" role="status">
+            <p className="absolute inset-0 flex items-center justify-center px-6 text-center text-xs text-white/80" role="status">
               Pidiendo acceso a la cámara…
             </p>
           ) : null}
           {scanner.status === 'error' ? (
+            <p className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-6 text-center text-xs text-white/80">
+              <span>La cámara no pudo arrancar.</span>
+              {scanner.error ? <span className="break-all text-white/50">{scanner.error}</span> : null}
+            </p>
+          ) : null}
+          {scanner.status === 'unsupported' ? (
             <p className="absolute inset-0 flex items-center justify-center px-6 text-center text-xs text-white/80">
-              La cámara no pudo arrancar.
+              Este navegador no puede acceder a la cámara.
             </p>
           ) : null}
           {scanner.status === 'active' ? (
@@ -118,7 +123,6 @@ export default function ScanPage() {
           ) : null}
         </div>
       </div>
-      ) : null}
 
       {/* Camera status feedback */}
       {scanner.status === 'requesting' ? (
@@ -128,9 +132,8 @@ export default function ScanPage() {
       ) : null}
       {scanner.status === 'unsupported' ? (
         <p className="mt-3 rounded-xl border border-border bg-surface-raised px-4 py-3 text-xs text-text-secondary">
-          <b className="text-text-primary">Sin cámara en este navegador.</b> Abrí Lupa en
-          Chrome/Edge (o desde el celular instalado) para escanear con la cámara. Por ahora,
-          escribí el EAN abajo.
+          <b className="text-text-primary">No se puede acceder a la cámara en este navegador.</b>{" "}
+          Probá en Chrome, Edge, Safari o Firefox desde el celular. Por ahora, escribí el EAN abajo.
         </p>
       ) : null}
       {scanner.status === 'denied' ? (
