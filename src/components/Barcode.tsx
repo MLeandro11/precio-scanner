@@ -40,6 +40,11 @@ export default function Barcode({
       fontSize: 11,
       displayValue: true,
       margin: 0,
+      // Barcodes must keep light/blank backgrounds in BOTH themes: a store
+      // scanner reads the white background for contrast. Explicit here so
+      // dark mode never makes the bars/box look broken.
+      background: '#ffffff',
+      lineColor: '#000000',
     }
     for (const format of [pickFormat(value), 'CODE128']) {
       try {
@@ -52,14 +57,20 @@ export default function Barcode({
   }, [value, height])
 
   return (
-    <svg
-      ref={ref}
-      width={width}
-      height={height}
-      style={{ width, height }}
-      role="img"
-      aria-label={`Código de barras ${value}`}
-      className="block overflow-hidden"
-    />
+    // White wrapper is essential: JsBarcode's SVG output does not draw a
+    // guaranteed background fill, so in dark mode the bars could sit on the
+    // dark row behind them. A fixed white container keeps the barcode readable
+    // in BOTH themes (store scanners need the white contrast).
+    <div className="inline-block overflow-hidden rounded-md bg-white p-1.5">
+      <svg
+        ref={ref}
+        width={width}
+        height={height}
+        style={{ width, height, backgroundColor: '#ffffff' }}
+        role="img"
+        aria-label={`Código de barras ${value}`}
+        className="block"
+      />
+    </div>
   )
 }

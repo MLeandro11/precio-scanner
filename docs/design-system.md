@@ -51,8 +51,10 @@ e-commerce sugar, icon-only controls without labels, emojis as structural icons 
 Semantic tokens map to concrete values in one place. Components reference the semantic
 name, never a bare hex.
 
-Light is the default theme. Dark tokens are defined now so adding dark mode later is a
-mapping change, not a component refactor.
+Light is the default theme. Dark mode is ACTIVE: the app follows the device
+`prefers-color-scheme` by default, and a manual override (Sistema / Claro / Oscuro) lives
+on the Perfil page, persisted in `lupa:theme`. The override sets `data-theme` on `<html>`, a
+mapping change — not a component refactor.
 
 | Token | Purpose | Light | Dark |
 | --- | --- | --- | --- |

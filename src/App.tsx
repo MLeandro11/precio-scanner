@@ -1,5 +1,5 @@
 import { createContext, lazy, Suspense, useContext, useEffect, useState } from 'react'
-import { Bell, User } from 'lucide-react'
+import { Bell } from 'lucide-react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { loadCatalog } from './lib/catalogLoader'
 import { createWorkerClient } from './lib/workerClient'
@@ -15,6 +15,7 @@ import ProductPage from './pages/ProductPage'
 import HistoryPage from './pages/HistoryPage'
 import ListPage from './pages/ListPage'
 import PlaceholderPage from './pages/PlaceholderPage'
+import SettingsPage from './pages/SettingsPage'
 import Brand from './components/Brand'
 import Button from './components/ui/Button'
 import SkeletonList from './components/ui/Skeleton'
@@ -91,16 +92,7 @@ function AppRoutes() {
               />
             }
           />
-          <Route
-            path="/perfil"
-            element={
-              <PlaceholderPage
-                title="Perfil"
-                description="Tu perfil y preferencias (almacén favorito, notificaciones)."
-                icon={<User size={40} strokeWidth={1.5} aria-hidden="true" />}
-              />
-            }
-          />
+          <Route path="/perfil" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

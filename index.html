@@ -9,6 +9,28 @@
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2315803d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E"
     />
     <title>Lupa — Buscador de precios de almacén</title>
+    <script>
+      // Apply the saved theme before first paint to avoid a flash of the
+      // wrong scheme. data-theme ("light"/"dark") is a manual override;
+      // absent, the CSS follows prefers-color-scheme.
+      (function () {
+        try {
+          var el = document.documentElement;
+          var t = localStorage.getItem('lupa:theme');
+          if (t === 'light' || t === 'dark') {
+            el.setAttribute('data-theme', t);
+          } else {
+            el.removeAttribute('data-theme');
+          }
+          var dark =
+            t === 'dark' ||
+            (t !== 'light' &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', dark ? '#171717' : '#15803d');
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -32,23 +32,44 @@
 }
 
 /*
- * Dark tokens — DEFINED BUT NOT ACTIVATED.
- * To enable later: add `class="dark"` to <html> (or a color-scheme media query).
+ * Dark tokens — ACTIVE.
+ * Activation: an explicit `data-theme` attribute on <html> is the manual override
+ * ("light" | "dark"); when it is absent the app follows the device setting via
+ * prefers-color-scheme. Set by the boot script in index.html and the useTheme hook.
  */
-.dark {
+html[data-theme="dark"] {
   color-scheme: dark;
-  --surface: #0f172a; /* slate-900 */
-  --surface-raised: #1e293b; /* slate-800 */
-  --surface-sunken: #e2e8f0; /* slate-200 */
-  --border: #334155; /* slate-700 */
-  --text-primary: #f8fafc; /* slate-50 */
-  --text-secondary: #94a3b8; /* slate-400 */
-  --text-muted: #64748b; /* slate-500 */
+  --surface: #171717; /* neutral-900 */
+  --surface-raised: #262626; /* neutral-800 */
+  --surface-sunken: #e5e5e5; /* neutral-200 */
+  --border: #404040; /* neutral-700 */
+  --text-primary: #fafafa; /* neutral-50 */
+  --text-secondary: #a3a3a3; /* neutral-400 */
+  --text-muted: #737373; /* neutral-500 */
   --accent: #4ade80; /* green-400 */
   --accent-contrast: #052e16; /* green-950 */
   --favorite: #fbbf24; /* amber-400 */
   --danger: #f87171; /* red-400 */
   --highlight: #78350f; /* amber-900 */
+}
+
+/* Follow the device theme unless the user forced light. */
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface: #171717; /* neutral-900 */
+    --surface-raised: #262626; /* neutral-800 */
+    --surface-sunken: #e5e5e5; /* neutral-200 */
+    --border: #404040; /* neutral-700 */
+    --text-primary: #fafafa; /* neutral-50 */
+    --text-secondary: #a3a3a3; /* neutral-400 */
+    --text-muted: #737373; /* neutral-500 */
+    --accent: #4ade80; /* green-400 */
+    --accent-contrast: #052e16; /* green-950 */
+    --favorite: #fbbf24; /* amber-400 */
+    --danger: #f87171; /* red-400 */
+    --highlight: #78350f; /* amber-900 */
+  }
 }
 
 /*

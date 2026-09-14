@@ -32,6 +32,7 @@ Navegación inferior: **Inicio · Alertas · [Escanear] · Lista · Perfil** (ba
 | Detalle de producto + agregar a lista | ✅ |
 | Vista "códigos de barras" en la lista | ✅ |
 | Escaneo con cámara (ZXing, cualquier dispositivo) | ✅ |
+| Dark mode (sigue al sistema + toggle manual en Perfil) | ✅ |
 | Comparación entre almacenes / historial / alertas | ⏳ **modelado**, sin datos (1 tienda) |
 
 ## Stack
