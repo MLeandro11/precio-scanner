@@ -8,6 +8,7 @@ import { useCatalog } from '../App'
 import { useList } from '../hooks/useList'
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
 import type { ScanStatus } from '../hooks/useBarcodeScanner'
+import ProductImage from '../components/ProductImage'
 import { toLookupDigits } from '../lib/lupa/scan'
 import { normalizeEan } from '../lib/lupa/list'
 import type { Producto } from '../lib/types'
@@ -161,9 +162,16 @@ export default function ScanPage() {
           ) : detected.product ? (
             <>
               <div className="mt-3 flex items-center gap-3">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-surface text-2xl">
-                  🧺
-                </div>
+                <ProductImage
+                  ean={detected.product.barcode}
+                  alt={detected.product.nombre}
+                  className="h-12 w-12 shrink-0 rounded-xl bg-surface object-cover"
+                  fallback={
+                    <span className="text-2xl" aria-hidden="true">
+                      🧺
+                    </span>
+                  }
+                />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-text-primary">
                     {detected.product.nombre}

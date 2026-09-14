@@ -1,5 +1,6 @@
 import { Check, Plus } from 'lucide-react'
 import HighlightedName from './HighlightedName'
+import ProductImage from './ProductImage'
 import type { Producto } from '../lib/types'
 
 export function formatPrice(precio: number): string {
@@ -80,13 +81,13 @@ export default function ProductCard({
       }
       className="flex gap-3 rounded-2xl border border-border bg-surface-raised p-3 transition active:bg-surface"
     >
-      {/* image tile */}
-      <div
-        className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-surface text-3xl"
-        aria-hidden="true"
-      >
-        {categoryEmoji(product.categoria)}
-      </div>
+      {/* image tile — real Precios Claros photo by EAN, emoji as fallback */}
+      <ProductImage
+        ean={product.barcode}
+        alt={product.nombre}
+        className="h-14 w-14 shrink-0 rounded-xl bg-surface object-cover"
+        fallback={<span className="text-3xl">{categoryEmoji(product.categoria)}</span>}
+      />
 
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold leading-snug text-text-primary">

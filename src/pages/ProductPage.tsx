@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Check, History, Plus, Star } from 'lucide-react'
 import Brand from '../components/Brand'
+import ProductImage from '../components/ProductImage'
 import { formatPrice } from '../components/ProductCard'
 import Button from '../components/ui/Button'
 import { useCatalog } from '../App'
@@ -118,9 +119,16 @@ export default function ProductPage() {
       </div>
 
       <div className="mt-6 flex flex-col gap-4">
-        <div className="flex h-40 items-center justify-center rounded-2xl border border-border bg-surface-raised text-6xl">
-          🧺
-        </div>
+        <ProductImage
+          ean={product.barcode}
+          alt={product.nombre}
+          className="h-40 w-full rounded-2xl bg-surface object-cover"
+          fallback={
+            <span className="text-6xl" aria-hidden="true">
+              🧺
+            </span>
+          }
+        />
         <div>
           <h2 className="text-lg font-semibold leading-snug text-text-primary">{product.nombre}</h2>
           <p className="mt-1 text-xs text-text-secondary">
