@@ -1,35 +1,22 @@
-import { useMemo } from 'react'
-
-interface Bar {
-  x: number
-  w: number
-}
+import { useEffect, useRef } from 'react'
+import JsBarcode from 'jsbarcode'
 
 /**
- * Deterministic pseudo-barcode: bars whose widths derive from the EAN digits,
- * with guard bars at start/middle/end. It is a visual representation of the
- * code (the literal barcode image the user asked for), not a standards-encoded
- * EAN-13 pattern — the EAN number is the real identity.
+ * Renders a REAL, standards-encoded barcode from a value using JsBarcode.
+ *
+ * Previously this drew a pseudo-barcode (bars derived from the EAN digits but not
+ * a scannable pattern). The list's "Códigos de barras" view is meant to be scanned
+ * at the store, so the image must be an actual EAN he decoders read.
+ *
+ * Format is chosen by the code shape: 13 digits -> EAN13, 8 digits -> EAN8, and
+ * anything else (e.g. a catalog id for a barcode-less product) -> CODE128. A try
+ * loop falls back so an invalid checksum or odd key never crashes the row.
  */
-function buildBars(value: string): Bar[] {
-  const seed = value.replace(/\D/g, '')
-  const n = seed.length || 1
-  const bars: Bar[] = []
-  let x = 0
-  let acc = 0
-  const push = (w: number) => {
-    bars.push({ x, w })
-    x += w + 1.1
-  }
-  push(2.6) // left guard
-  for (let i = 0; i < 30; i++) {
-    const d = seed.charCodeAt(i % n) + acc
-    acc = (acc + d) % 97
-    push(0.9 + (d % 3) * 0.9)
-    if (i === 14) push(2.6) // center guard
-  }
-  push(2.6) // right guard
-  return bars
+function pickFormat(value: string): string {
+  const digits = value.replace(/\D/g, '')
+  if (digits.length === 13) return 'EAN13'
+  if (digits.length === 8) return 'EAN8'
+  return 'CODE128'
 }
 
 export default function Barcode({
@@ -41,19 +28,38 @@ export default function Barcode({
   width?: number
   height?: number
 }) {
-  const bars = useMemo(() => buildBars(value), [value])
+  const ref = useRef<SVGSVGElement | null>(null)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    // bar plus human-readable digits fits under the desired box height.
+    const barHeight = Math.max(22, height - 16)
+    const base: JsBarcode.Options = {
+      height: barHeight,
+      fontSize: 11,
+      displayValue: true,
+      margin: 0,
+    }
+    for (const format of [pickFormat(value), 'CODE128']) {
+      try {
+        JsBarcode(el, value, { ...base, format })
+        return
+      } catch {
+        // invalid for this format (e.g. bad checksum) — try the next
+      }
+    }
+  }, [value, height])
+
   return (
     <svg
-      viewBox="0 0 200 44"
+      ref={ref}
       width={width}
       height={height}
+      style={{ width, height }}
       role="img"
       aria-label={`Código de barras ${value}`}
-      className="block"
-    >
-      {bars.map((b, i) => (
-        <rect key={i} x={b.x} y={0} width={b.w} height={44} fill="#0f172a" />
-      ))}
-    </svg>
+      className="block overflow-hidden"
+    />
   )
 }
