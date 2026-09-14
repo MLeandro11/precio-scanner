@@ -144,6 +144,30 @@ async function main(): Promise<void> {
     `first: ${cocacola[0]?.replace(/\s+/g, ' ').slice(0, 70)}`,
   )
 
+  // Search state is URL-driven: opening a product and going back must restore
+  // the same results (regression guard for the back-navigation restore).
+  const navBefore = await search('serenisma')
+  await cards().first().click()
+  await page.waitForURL('**/producto/**', { timeout: 30000 })
+  await page.goBack()
+  // The restore re-runs the search asynchronously — wait until the results for
+  // the query actually render instead of racing a fixed sleep.
+  await page.waitForFunction(
+    (pattern: string) =>
+      Array.from(document.querySelectorAll('ul li')).some((el) =>
+        (el.textContent ?? '').toLowerCase().includes(pattern),
+      ),
+    'seren',
+    { timeout: 20000 },
+  )
+  await sleep(400)
+  const navAfter = await cards().allTextContents()
+  record(
+    'NAV-back',
+    navAfter.length === navBefore.length && navBefore.length > 0,
+    `search survives back from product (${navAfter.length} results, before ${navBefore.length})`,
+  )
+
   // ---------------------------------------------------------------- FR-2.8 (barcode)
   const exact = await search('7793940219009')
   record('FR-2.8a', exact.length === 1, `exact 13-digit EAN -> ${exact.length} result(s)`)

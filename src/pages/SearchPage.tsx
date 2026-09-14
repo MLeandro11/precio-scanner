@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, SlidersHorizontal } from 'lucide-react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams, useNavigationType } from 'react-router-dom'
 import { createSearchSession } from '../lib/searchSession'
 import type { WorkerClient } from '../lib/workerClient'
-import type { Facets } from '../lib/types'
+import type { Facets, SortOrder } from '../lib/types'
 import { useSearch } from '../hooks/useSearch'
 import { useFavorites } from '../hooks/useFavorites'
 import { useRecents } from '../hooks/useRecents'
@@ -16,9 +16,18 @@ import Brand from '../components/Brand'
 import Button from '../components/ui/Button'
 import Sheet from '../components/ui/Sheet'
 
+function numParam(v: string | null): number | null {
+  if (v === null || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+
 /**
  * Search page — the core browse/filter/sort experience, now under /buscar.
- * Accepts an initial query via `?q=` so the Home search bar can deep-link.
+ *
+ * The browse state (query, category, price bounds, sort) lives in the URL search
+ * string, so navigating into a product and back restores the same results — the
+ * URL is the source of truth, not component memory.
  */
 export default function SearchPage({
   client,
@@ -28,7 +37,7 @@ export default function SearchPage({
   facets: Facets
 }) {
   const [filtersOpen, setFiltersOpen] = useState(false)
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
   const { recents, addRecent } = useRecents()
   const session = useMemo(
@@ -40,15 +49,45 @@ export default function SearchPage({
   const favoriteIds = favorites.favorites
   const { add: addToList, isInList } = useList()
 
+  // Seed the search from the URL (covers both the Home deep link and a back
+  // navigation returning from a product detail).
   const initialQuery = searchParams.get('q') ?? ''
   const focusFromHome = searchParams.get('focus') === '1'
   const favFromHome = searchParams.get('fav') === '1'
-  // Apply a deep-linked query once on mount (e.g. from the Home search bar).
+  const initialCat = searchParams.get('cat') ?? ''
+  const initialSort = (searchParams.get('sort') ?? 'relevance') as SortOrder
+  const initialMin = numParam(searchParams.get('pmin'))
+  const initialMax = numParam(searchParams.get('pmax'))
+
+  // Skip the very first URL-sync so a restored (back-nav) query is not clobbered
+  // by the mount's empty state before the session has caught up.
+  const syncedRef = useRef(false)
+
+  // Apply the URL descriptor once on mount.
   useEffect(() => {
-    if (!initialQuery) return
-    session.setQuery(initialQuery)
+    if (initialQuery) session.setQuery(initialQuery)
+    if (initialSort !== 'relevance') session.setSort(initialSort)
+    if (initialCat || initialMin != null || initialMax != null) {
+      session.setFilters({ categoria: initialCat, priceMin: initialMin, priceMax: initialMax })
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Reflect the browse state back into the URL (replace: no extra history entries).
+  useEffect(() => {
+    if (!search) return
+    if (!syncedRef.current) {
+      syncedRef.current = true
+      return
+    }
+    const p = new URLSearchParams()
+    if (search.query) p.set('q', search.query)
+    if (search.categoria) p.set('cat', search.categoria)
+    if (search.priceMin != null) p.set('pmin', String(search.priceMin))
+    if (search.priceMax != null) p.set('pmax', String(search.priceMax))
+    if (search.sort !== 'relevance') p.set('sort', search.sort)
+    setSearchParams(p, { replace: true })
+  }, [search?.query, search?.categoria, search?.priceMin, search?.priceMax, search?.sort])
 
   // Favorites entry from Home: reach the favorites view directly.
   useEffect(() => {
