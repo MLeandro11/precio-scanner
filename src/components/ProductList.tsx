@@ -23,12 +23,14 @@ export default function ProductList({
 
   if (error) {
     return (
-      <p
-        role="alert"
-        className="rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger"
-      >
-        Ocurrió un error al buscar. Reintentá.
-      </p>
+      <div data-search-state="error" data-search-query={query}>
+        <p
+          role="alert"
+          className="rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger"
+        >
+          Ocurrió un error al buscar. Reintentá.
+        </p>
+      </div>
     )
   }
 
@@ -42,7 +44,7 @@ export default function ProductList({
   const EmptyIcon = hasQuery ? SearchX : PackageSearch
 
   return (
-    <div>
+    <div data-search-state={loading ? 'loading' : 'ready'} data-search-query={query}>
       <p className="tnum mb-3 text-xs text-text-secondary" aria-live="polite">
         {loading && !hasQuery
           ? 'Buscando…'

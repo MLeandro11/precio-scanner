@@ -68,6 +68,92 @@ describe('searchSession', () => {
     expect(client.calls.filter((c) => c.query === 'coc')).toHaveLength(1)
   })
 
+  it('turns loading on as soon as the query changes (no stale "ready" window)', async () => {
+    vi.useFakeTimers()
+    const { client, session } = setup()
+    // the initial browse has already settled: nothing is in flight
+    await vi.waitFor(() => expect(session.getState().loading).toBe(false))
+    expect(client.calls).toHaveLength(1)
+
+    session.setQuery('coca')
+
+    // The debounce has not elapsed, but the session must already report that the
+    // rendered results do not belong to "coca": a readiness check keyed on
+    // `!loading && query === q` would otherwise read the stale browse page.
+    expect(session.getState().query).toBe('coca')
+    expect(session.getState().loading).toBe(true)
+
+    vi.advanceTimersByTime(150)
+    await vi.runAllTimersAsync()
+    expect(client.calls.filter((c) => c.query === 'coca')).toHaveLength(1)
+    expect(session.getState().loading).toBe(false)
+  })
+
+  it('discards a run already in flight when the query changes (never emits a stale settled state)', async () => {
+    vi.useFakeTimers()
+    const calls: QueryParams[] = []
+    let releaseBrowse: ((r: QueryResult) => void) | undefined
+    // The initial unfiltered browse page: distinguishable from the query's results.
+    const browsePage: Producto[] = Array.from({ length: 50 }, (_, i) => ({
+      id: `browse-${i}`,
+      nombre: `Browse ${i}`,
+      marca: '',
+      categoria: 'C',
+      barcode: '',
+      precio: i,
+    }))
+    const coca: Producto = {
+      id: 'coca-1',
+      nombre: 'Coca',
+      marca: '',
+      categoria: 'C',
+      barcode: '',
+      precio: 1,
+    }
+    const client: QueryClient = {
+      query(params: QueryParams): Promise<QueryResult> {
+        calls.push(params)
+        if (params.query === '') {
+          // the browse run stays in flight until the test releases it below
+          return new Promise<QueryResult>((resolve) => {
+            releaseBrowse = resolve
+          })
+        }
+        return Promise.resolve({ results: [coca], total: 1 })
+      },
+    }
+    const session = createSearchSession({ client })
+    const emitted: SearchState[] = []
+    session.subscribe((s) => emitted.push(s))
+
+    session.setQuery('coca')
+    expect(session.getState().loading).toBe(true)
+
+    // The browse run settles INSIDE the debounce window (no real timing involved):
+    // a run started before the query change must not be able to publish its results.
+    releaseBrowse!({ results: browsePage, total: 120 })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(calls).toHaveLength(1) // the debounced run for "coca" has not started yet
+
+    // Invariant: no emitted state may pair the new query with the previous query's
+    // results and claim to be settled (`loading === false`).
+    const staleSettled = emitted
+      .filter((s) => s.query === 'coca' && !s.loading && s.results[0]?.id.startsWith('browse-'))
+      .map((s) => ({ query: s.query, loading: s.loading, results: s.results.length }))
+    expect(staleSettled).toEqual([])
+
+    vi.advanceTimersByTime(150)
+    await vi.runAllTimersAsync()
+    expect(calls.filter((c) => c.query === 'coca')).toHaveLength(1)
+    expect(session.getState()).toMatchObject({
+      query: 'coca',
+      loading: false,
+      total: 1,
+      hasMore: false,
+    })
+    expect(session.getState().results.map((p) => p.id)).toEqual(['coca-1'])
+  })
+
   it('swallows superseded worker rejections (fast typing never breaks the UI)', async () => {
     vi.useFakeTimers()
     const client = fakeClient() as AnyClient

@@ -3,6 +3,10 @@
  *
  * Owns the interaction rules (spec FR-2.4/2.5, design §Search pipeline):
  *   - query typing is debounced (150 ms default);
+ *   - `loading` is the readiness signal the UI and the acceptance harness rely on:
+ *     it is raised as soon as `setQuery` changes the query (not only when the
+ *     debounced run starts), so a readiness check scoped to the new query never
+ *     reads the previous query's results while the debounce is pending;
  *   - a committed query (debounced and non-blank) is reported once through the
  *     optional `onQueryCommit` callback so the caller can persist it as a recent
  *     search; the initial browse, filters, sort and paging are not commits, and a
@@ -164,8 +168,18 @@ export function createSearchSession({
       return state
     },
     setQuery(query) {
-      // typing always leaves favorites mode
-      patch({ query, ids: null })
+      // typing always leaves favorites mode; `loading` flips on immediately so the
+      // state never claims the still-rendered results belong to the new query while
+      // the debounce is pending (see the readiness contract in the header).
+      //
+      // Invariant: after `setQuery`, only the debounced run may settle — no state may
+      // exist where `loading === false` while the displayed results belong to a
+      // previous query. Bumping `runId` invalidates any in-flight run *now*, so a run
+      // that resolves inside the 150 ms debounce (the initial browse, a paging append,
+      // anything) is discarded by run()'s `id !== runId` guard — in both its success
+      // and its error branch — instead of clearing `loading` with stale results.
+      runId++
+      patch({ query, ids: null, loading: true })
       schedule()
     },
     setFilters(filters = {}) {

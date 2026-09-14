@@ -8,9 +8,16 @@
  * concern and is covered by scripts/normalize-catalog.test.ts; AC-6 needs a real
  * GitHub remote and cannot be checked locally.
  *
- * The app is **Lupa** (rebrand): the Home page searches by submitting (Enter →
- * /buscar?q=…); the search screen lives at /buscar. This harness drives the real
- * flow: fill the Home search input, press Enter, wait for result cards.
+ * The app is **Lupa** (rebrand): the Home page deep-links to the search screen
+ * (/buscar?q=…); the search screen lives at /buscar. This harness drives the real
+ * flow: open /buscar with the query and wait for the results to settle.
+ *
+ * Waiting is contract-driven, never timing-driven: the results container carries
+ * `data-search-state` ('loading' | 'ready' | 'error') and `data-search-query` (the
+ * query those results belong to). The session runs an unfiltered initial browse at
+ * creation and debounces a deep-linked query by 150 ms, so "some cards exist" and
+ * fixed sleeps can read that browse page instead of the query's results — every
+ * search wait below keys on the settled query instead.
  *
  * Requires a served build:
  *   npm run build && npm run preview
@@ -90,20 +97,73 @@ async function main(): Promise<void> {
 
   const cards = () => page.locator('ul li')
   const searchInput = () => page.locator('input[type="search"]')
-  const waitForCards = (n = 1) =>
-    page.waitForFunction((min: number) => document.querySelectorAll('ul li').length >= min, n, {
-      timeout: 30000,
-    })
+
+  /**
+   * Waits used by the harness.
+   *
+   * `waitForSearchReady`/`waitForSearchSettled` read the readiness contract exposed
+   * by ProductList; they replace fixed sleeps, and a short sleep may only ever
+   * follow one of them as extra settle time, never stand in for one.
+   */
+  async function waitForSearchReady(timeout = 30000): Promise<void> {
+    await page.waitForFunction(
+      () =>
+        document.querySelector('[data-search-state]')?.getAttribute('data-search-state') ===
+        'ready',
+      undefined,
+      { timeout },
+    )
+  }
+
+  /** Wait until a settled run is displaying results for exactly this query. */
+  async function waitForSearchSettled(query: string, timeout = 30000): Promise<void> {
+    await page.waitForFunction(
+      (q: string) => {
+        const el = document.querySelector('[data-search-state]')
+        if (!el) return false
+        return (
+          el.getAttribute('data-search-state') === 'ready' &&
+          el.getAttribute('data-search-query') === q
+        )
+      },
+      query,
+      { timeout },
+    )
+  }
+
+  /**
+   * Bounded visibility wait that returns false instead of throwing, so a missing
+   * element fails its own assertion (with its id) instead of aborting the run.
+   * The timeout is only a bound on the wait, never the thing being relied on.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async function waitForVisible(target: any, timeout = 30000): Promise<boolean> {
+    try {
+      await target.first().waitFor({ state: 'visible', timeout })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** Polls a Node-side condition (request log); the DOM cannot express this wait. */
+  async function waitUntil(predicate: () => boolean, timeout = 30000): Promise<void> {
+    const deadline = Date.now() + timeout
+    while (!predicate()) {
+      if (Date.now() > deadline) throw new Error('timed out waiting for a harness condition')
+      await sleep(25)
+    }
+  }
 
   /** Real user flow: deep-link to the search screen with the query. */
-  async function search(query: string, expectResults = true): Promise<string[]> {
+  async function search(query: string): Promise<string[]> {
     await page.goto(`${BASE_URL}buscar?q=${encodeURIComponent(query)}`, {
       waitUntil: 'domcontentloaded',
     })
     await searchInput().waitFor({ timeout: 30000 })
-    if (expectResults) await waitForCards(1)
-    else await sleep(700)
-    await sleep(300)
+    // Wait for the run of THIS query: the session's initial unfiltered browse also
+    // renders cards, and the deep-linked query only lands after a 150 ms debounce.
+    await waitForSearchSettled(query)
     return cards().allTextContents()
   }
 
@@ -111,7 +171,7 @@ async function main(): Promise<void> {
   async function openSearch(): Promise<void> {
     await page.goto(`${BASE_URL}buscar`, { waitUntil: 'domcontentloaded' })
     await searchInput().waitFor({ timeout: 30000 })
-    await waitForCards(1)
+    await waitForSearchReady()
   }
 
   // ---------------------------------------------------------------- boot
@@ -160,7 +220,8 @@ async function main(): Promise<void> {
     'seren',
     { timeout: 20000 },
   )
-  await sleep(400)
+  // ...and until that restore has settled, so nothing re-renders after the read.
+  await waitForSearchSettled('serenisma')
   const navAfter = await cards().allTextContents()
   record(
     'NAV-back',
@@ -180,14 +241,15 @@ async function main(): Promise<void> {
   )
 
   // The spec forbids inventing near-misses for codes: an unknown code must be empty.
-  const unknown = await search('9999999999999', false)
+  // The settled empty state (query echoed, zero results) is what readiness waits for.
+  const unknown = await search('9999999999999')
   record(
     'FR-2.8c',
     unknown.length === 0,
     `unknown code -> ${unknown.length} results (no false positives, as required)`,
   )
 
-  const labelled = await search('EAN 7793940219009', false)
+  const labelled = await search('EAN 7793940219009')
   info(
     'FR-2.8d',
     `"EAN 7793940219009" -> ${labelled.length} results: it has letters, so by spec it is a text query`,
@@ -230,14 +292,18 @@ async function main(): Promise<void> {
   await openSearch()
   await search('yerba')
   await page.locator('ul li').first().click() // open product detail
-  await sleep(600)
-  await page.locator('button[aria-label="Agregar a favoritos"]').click()
-  await sleep(300)
+  // The detail renders its star only after the worker resolved the EAN: wait for
+  // that star instead of sleeping through it.
+  const addFavorite = page.locator('button[aria-label="Agregar a favoritos"]')
+  if (await waitForVisible(addFavorite)) await addFavorite.click()
+  await waitForVisible(page.locator('button[aria-label="Quitar de favoritos"]'))
   const starred = await page.locator('button[aria-label="Quitar de favoritos"]').count()
   record('WU6.2', starred === 1, `star on product detail -> ${starred} button with a-pressed`)
 
   await openSearch() // empty query -> recents chips
-  const recentChip = await page.locator('button:text-is("yerba")').count()
+  const recentChipLocator = page.locator('button:text-is("yerba")')
+  await waitForVisible(recentChipLocator)
+  const recentChip = await recentChipLocator.count()
   record('WU6.3', recentChip === 1, `empty query -> recent-search chip "yerba": ${recentChip}`)
 
   const readStorage = () =>
@@ -255,7 +321,10 @@ async function main(): Promise<void> {
   dataRequests.length = 0
   await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' }) // Home
   await searchInput().waitFor({ timeout: 30000 })
-  await sleep(900)
+  // The reload must not re-request the heavy files. facets is always fetched (it
+  // carries the version), so wait for that request to be observed instead of
+  // sleeping: an empty log would otherwise "pass" AC-4 vacuously.
+  await waitUntil(() => dataRequests.includes('catalogo-facets.json'))
 
   const afterReload = [...dataRequests]
   const heavy = afterReload.filter((f) => f !== 'catalogo-facets.json')
@@ -276,7 +345,9 @@ async function main(): Promise<void> {
   // Favorites entry now lives on Home; recents stay on the search screen.
   const favEntryAfter = await page.locator('button:has-text("Favoritos")').count()
   await openSearch()
-  const recentAfter = await page.locator('button:text-is("yerba")').count()
+  const recentAfterLocator = page.locator('button:text-is("yerba")')
+  await waitForVisible(recentAfterLocator)
+  const recentAfter = await recentAfterLocator.count()
   record(
     'AC-7b',
     favEntryAfter === 1 && recentAfter === 1,
@@ -285,7 +356,20 @@ async function main(): Promise<void> {
 
   await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' }) // Home
   await page.locator('button:has-text("Favoritos")').first().click() // -> /buscar?fav=1
-  await sleep(1500)
+  // The favorites view clears the query and `results`, so it cannot be keyed on a
+  // query: wait for a settled run that actually renders the favorite. The unfiltered
+  // browse page can never satisfy the content condition (results are cleared first).
+  await page.waitForFunction(
+    () => {
+      const el = document.querySelector('[data-search-state]')
+      if (!el || el.getAttribute('data-search-state') !== 'ready') return false
+      return Array.from(document.querySelectorAll('ul li')).some((li) =>
+        /yerba/i.test(li.textContent ?? ''),
+      )
+    },
+    undefined,
+    { timeout: 30000 },
+  )
   const favoritesView = await cards().allTextContents()
   record(
     'AC-7c',
@@ -297,9 +381,9 @@ async function main(): Promise<void> {
   // Unfavorite from the product detail (opened from the favorites view); the
   // star state and storage must flip consistently — no stale favorite left.
   await page.locator('ul li').first().click()
-  await sleep(600)
-  await page.locator('button[aria-label="Quitar de favoritos"]').click()
-  await sleep(600)
+  const removeFavorite = page.locator('button[aria-label="Quitar de favoritos"]')
+  if (await waitForVisible(removeFavorite)) await removeFavorite.click()
+  await waitForVisible(page.locator('button[aria-label="Agregar a favoritos"]'))
   const unfaved = await page.locator('button[aria-label="Agregar a favoritos"]').count()
   const favoritesStorage = await page.evaluate(
     () => localStorage.getItem('precio-scanner:favorites') ?? '[]',
@@ -313,7 +397,17 @@ async function main(): Promise<void> {
   await browser.close()
 }
 
-await main()
+try {
+  await main()
+} catch (err) {
+  // A timed-out wait must still print the summary line (and which rows passed),
+  // so a harness failure is diagnosable instead of an opaque unhandled rejection.
+  record(
+    'HARNESS',
+    false,
+    `acceptance aborted: ${err instanceof Error ? err.message : String(err)}`,
+  )
+}
 
 const failed = rows.filter((r) => r.status === 'FAIL')
 console.log(`\n===== ${rows.length - failed.length}/${rows.length} PASS =====`)
