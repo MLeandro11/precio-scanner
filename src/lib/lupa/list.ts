@@ -85,3 +85,8 @@ export function toggleAlerta(list: ListaItem[], ean: string): ListaItem[] {
 export function isInList(list: ListaItem[], ean: string): boolean {
   return list.some((i) => i.ean === normalizeEan(ean))
 }
+
+/** Vacía la lista completa (retorna una lista vacía, lista para persistir). */
+export function clearList(): ListaItem[] {
+  return []
+}

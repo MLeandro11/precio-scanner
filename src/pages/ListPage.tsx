@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Barcode as BarcodeIcon, Minus, Plus } from 'lucide-react'
+import { Barcode as BarcodeIcon, Minus, Plus, Trash2 } from 'lucide-react'
 import Brand from '../components/Brand'
 import Barcode from '../components/Barcode'
 import { formatPrice } from '../components/ProductCard'
@@ -20,7 +20,7 @@ type ListView = 'lista' | 'codigos'
 export default function ListPage() {
   const [view, setView] = useState<ListView>('lista')
   const { client } = useCatalog()
-  const { items, remove, setCantidad } = useList()
+  const { items, remove, setCantidad, clear } = useList()
 
   const eans = useMemo(() => items.map((i) => i.ean), [items])
   const products = useResolveEans(client, eans)
@@ -31,13 +31,32 @@ export default function ListPage() {
     return acc + (p ? p.precio * item.cantidad : 0)
   }, 0)
 
+
+  function onClearAll() {
+    const n = items.length
+    if (window.confirm(`¿Vaciar toda la lista (${n} producto${n === 1 ? '' : 's'})?`)) {
+      clear()
+    }
+  }
+
   return (
     <main className="safe-top mx-auto w-full max-w-lg px-4 pb-8">
       <div className="flex items-center justify-between">
         <Brand />
-        <span className="text-xs font-medium text-text-secondary">
-          {items.length} producto{items.length === 1 ? '' : 's'}
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-medium text-text-secondary">
+            {items.length} producto{items.length === 1 ? '' : 's'}
+          </span>
+          {items.length > 0 ? (
+            <button
+              type="button"
+              onClick={onClearAll}
+              className="flex items-center gap-1 rounded-lg border border-danger/30 bg-danger/5 px-2 py-1 text-xs font-semibold text-danger transition active:bg-danger/10"
+            >
+              <Trash2 size={14} aria-hidden="true" /> Vaciar
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {/* View selector: lista | códigos de barras */}

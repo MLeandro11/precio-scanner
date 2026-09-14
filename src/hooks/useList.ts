@@ -4,8 +4,9 @@ import {
   addItem as addItemTo, 
   removeItem as removeItemFrom, 
   setCantidad as setCantidadIn, 
-  toggleAlerta as toggleAlertaIn, 
-  LIST_STORAGE_KEY, 
+  toggleAlerta as toggleAlertaIn,
+  clearList,
+  LIST_STORAGE_KEY,
 } from '../lib/lupa/list'
 import type { ListaItem } from '../lib/lupa/list'
 
@@ -52,9 +53,11 @@ export function useList() {
     [commit],
   )
 
+  const clear = useCallback(() => commit(clearList()), [commit])
+
   const isInList = useCallback((ean: string) => itemsRef.current.some((i) => i.ean === ean), [])
 
-  return { items, add, remove, setCantidad, toggleAlerta, isInList }
+  return { items, add, remove, setCantidad, toggleAlerta, clear, isInList }
 }
 
 export type ListControls = ReturnType<typeof useList>

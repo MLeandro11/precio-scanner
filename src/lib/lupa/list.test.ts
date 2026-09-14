@@ -5,6 +5,7 @@ import {
   removeItem,
   toggleAlerta,
   isInList,
+  clearList,
   normalizeEan,
 } from './list'
 import type { ListaItem } from './list'
@@ -84,5 +85,16 @@ describe('toggleAlerta / isInList', () => {
   it('reports membership case/separator-insensitively', () => {
     expect(isInList(base, '779 3940 219009')).toBe(true)
     expect(isInList(base, '000')).toBe(false)
+  })
+})
+
+describe('clearList', () => {
+  it('returns an empty list regardless of the input', () => {
+    const base: ListaItem[] = [
+      { ean: '7793940219009', cantidad: 2, alerta: false },
+      { ean: '7790895007217', cantidad: 1, alerta: true },
+    ]
+    expect(clearList()).toEqual([])
+    expect(clearList().length).toBe(0)
   })
 })
