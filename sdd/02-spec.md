@@ -17,9 +17,17 @@
   another shape change).
 - FR-1.3: The script must fail with a non-zero exit if the INPUT has fewer than 20,000
   records (truncated extraction), an included record is missing `nombre`, or an included
-  record has a non-numeric `precio`. Records with `enTienda: false`, null `precio`, or
-  `precio <= 0` are excluded (counted and reported, not treated as errors).
+  record has a non-numeric `precio`. Records with null `precio` or `precio <= 0` are
+  excluded (counted and reported, not treated as errors). `enTienda` is **not** an exclusion
+  criterion: in the real extraction it is `true` for only 8 of 23,230 records, so the flag
+  does not mean "available" and excluding on it would empty the catalog.
 - FR-1.4: Output records keep the raw item order; exclusion counts are printed on success.
+- FR-1.5: Before writing the output, the script must fail with a non-zero exit and write no
+  file if the output would be invalid: duplicate product `id`s (they break React keys and the
+  favorites/list id-set filters); records not conserved (`products + exclusions` must equal
+  the input count — a guard against silently dropped records); or more than 50% of the input
+  excluded, which usually signals an upstream rename/rescale of `precio` rather than real
+  noise.
 
 ### FR-2: Search (Web Worker owned)
 - FR-2.1: Search uses Fuse.js over a build-time pre-generated index

@@ -19,9 +19,15 @@
  *     precio <= 0. enTienda is NOT an exclusion criterion (real extraction:
  *     only 8 of 23,230 records are true — the flag does not mean
  *     "available"). Exclusion counts are printed.
- *   - Fail-loud (exit non-zero): invalid JSON, fewer than 20,000 INPUT
- *     records (truncated extraction), an included record missing nombre, or
- *     a non-numeric precio on an included record.
+ *   - Fail-loud (exit non-zero), input side: invalid JSON, fewer than 20,000
+ *     INPUT records (truncated extraction), an included record missing nombre,
+ *     or a non-numeric precio on an included record.
+ *   - Fail-loud (exit non-zero), output side (checked once the products array
+ *     is built, before the file is written): duplicate product ids (they break
+ *     React keys and the favorites/list id-set filters); dropped records
+ *     (products + exclusions must equal the input count); and more than
+ *     MAX_EXCLUDED_RATIO (50%) of the input excluded, which usually means an
+ *     upstream rename or rescale of `precio` rather than real noise.
  *
  * Usage: node scripts/normalize-catalog.ts [input.json] [output.json]
  */
@@ -32,6 +38,8 @@ import { stableId } from '../src/lib/stableId.ts'
 import type { Producto } from '../src/lib/types.ts'
 
 const MIN_RECORDS = 20_000
+/** Guard against an upstream `precio` rename/rescale silently shrinking the catalog. */
+const MAX_EXCLUDED_RATIO = 0.5
 
 const NUMBER_RE = /^-?\d+(?:[.,]\d+)?$/
 
@@ -112,6 +120,39 @@ function main(): void {
     products.push({ id, nombre, marca: '', categoria, barcode, precio })
   })
 
+  const excluded = excludedNoPrice + excludedBadPrice
+
+  const uniqueIds = new Set(products.map((p) => p.id))
+  if (uniqueIds.size !== products.length) {
+    const seenIds = new Set<string>()
+    const duplicate = products.find((p) => {
+      if (seenIds.has(p.id)) return true
+      seenIds.add(p.id)
+      return false
+    })
+    fail(
+      `output has ${products.length - uniqueIds.size} duplicate id(s) among ${products.length} records; ` +
+        `first duplicate: "${duplicate?.id ?? '(unknown)'}"`,
+    )
+  }
+
+  if (products.length + excluded !== items.length) {
+    fail(
+      `record conservation violated: ${products.length} written + ${excluded} excluded ` +
+        `(null precio: ${excludedNoPrice}, precio <= 0: ${excludedBadPrice}) ` +
+        `!== ${items.length} input records`,
+    )
+  }
+
+  if (excluded > items.length * MAX_EXCLUDED_RATIO) {
+    const ratio = ((excluded / items.length) * 100).toFixed(2)
+    fail(
+      `excluded ${excluded} of ${items.length} input records (${ratio}%), ` +
+        `above the ${MAX_EXCLUDED_RATIO * 100}% cap; an upstream schema change may have ` +
+        `dropped or rescaled precio`,
+    )
+  }
+
   const catalog = { version: '', products }
   catalog.version = createHash('sha256')
     .update(JSON.stringify({ products }))
@@ -121,7 +162,6 @@ function main(): void {
   mkdirSync(dirname(output), { recursive: true })
   writeFileSync(output, JSON.stringify(catalog))
 
-  const excluded = excludedNoPrice + excludedBadPrice
   console.log(
     `normalize-catalog: ${items.length} input records → wrote ${products.length} records to ${output} ` +
       `(version ${catalog.version}); excluded ${excluded} ` +

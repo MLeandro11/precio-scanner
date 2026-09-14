@@ -1,5 +1,14 @@
 # Acceptance report: Lupa (precio-scanner, Phase 1)
 
+> **SUPERSEDED as of 2026-09-14.** The run recorded below is historical: it predates the 17th
+> (NAV-back) check and was produced by the harness while it was still **flaky** (three runs on
+> one build gave 14/17, 17/17, 16/17). Post-hoc note only — the evidence below was NOT
+> rewritten. **WU7.5** (see `04-tasks.md`) has since made the harness deterministic: after the
+> fix, 6 consecutive runs by an independent verifier on one fresh build, plus 10 by the
+> implementer, were all **17/17** (16 PASS + 1 INFO — `FR-2.8d` is informational). The AC-5
+> timing figures below are not reproducible as fixed numbers (post-fix runs measured 33–50 ms
+> against the 150 ms budget).
+
 Automated acceptance pass for `AC-1..AC-7` plus the FR-2.8 and WU6 extras. Every result
 below comes from a program, not from reading the code; the script exits non-zero on any
 failure, so it can gate a release or run in CI once a browser is available.

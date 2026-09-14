@@ -79,9 +79,12 @@ change; nothing simulates that data (single store today).
 ## Data pipeline (build time)
 
 1. `scripts/normalize-catalog.ts`: raw extraction → `catalogo.json`. Ids from the raw
-   extraction (source-stable uuids; `stableId` fallback). Excludes `enTienda: false` and
-   null/zero prices (counted, reported). Fail-loud: <20,000 input, missing nombre,
-   non-numeric precio → non-zero exit.
+   extraction (source-stable uuids; `stableId` fallback). Excludes null/zero prices
+   (counted, reported); `enTienda` is deliberately **not** an exclusion criterion (it is
+   `true` for only 8 of 23,230 records, so it does not mean "available"). Fail-loud, input
+   side: <20,000 input, missing nombre, non-numeric precio. Fail-loud, output side (checked
+   before the write, no file emitted): duplicate ids, record conservation, and >50% of the
+   input excluded.
 2. `scripts/generate-index.ts`: `catalogo.json` →
    `catalogo-index.json` (Fuse pre-index over `nombre` + `categoria`) and
    `catalogo-facets.json` (`{ version, categories, brands, priceBounds }`; `brands` empty
@@ -187,7 +190,7 @@ navigation, floating outline nav bar.
 | Large JSON hurts first load | Minimal records, gzip via Pages, progress skeleton; index pre-generated (never built in-browser) |
 | Catalog becomes stale | Accepted for Phase 1; daily updater is Phase 2 |
 | Raw data has no brand field | `marca` kept as `''`; no brand filter/index in Phase 1 |
-| Zero-price / not-in-store noise | Excluded at normalize time with reported counts |
+| Zero-price noise | Excluded at normalize time with reported counts. `enTienda` is **not** an exclusion criterion (FR-1.3) |
 | Fuse threshold too loose/strict | Fixed at **0.35** (`searchEngine.ts`), verified against the real catalog: AC-2/AC-3 return 10/10 relevant in the top 10. Not yet tuned against a personal list of tricky searches (WU7.1) |
 | GH Pages base-path mistakes | `base` set on day one; router `basename` follows `BASE_URL`; deploy verified live |
 | Scanner is Chromium-only | Replaced with a single pure-JS decoder (ZXing) that works on any device with `getUserMedia`; manual EAN entry remains as the always-available fallback (FR-9.2) |

@@ -197,4 +197,82 @@ describe('scripts/normalize-catalog.mjs', () => {
     expect(r.code).toBe(0)
     expect(JSON.parse(readFileSync(output, 'utf8')).products.length).toBeGreaterThan(0)
   })
+
+  it('fails loud when two output records share the same id', () => {
+    const input = join(dir, 'duplicate-ids.json')
+    const output = join(dir, 'duplicate-ids-out.json')
+    const items = validRawCatalog(20001)
+    // Both indices are included (precio > 0), so the duplicated id reaches the output.
+    const duplicateId = 'dup-id-0000-1111-2222'
+    items[8] = { ...items[8], id: duplicateId }
+    items[9] = { ...items[9], id: duplicateId }
+    writeFileSync(input, JSON.stringify(items))
+
+    const r = runScript(dir, input, output)
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain('duplicate')
+    expect(r.err).toContain(duplicateId)
+    // validation runs before the write: no broken catalog on disk
+    expect(() => readFileSync(output)).toThrow()
+  })
+
+  it('fails loud when exclusions exceed half of the input records', () => {
+    const input = join(dir, 'too-many-excluded.json')
+    const output = join(dir, 'too-many-excluded-out.json')
+    const items = validRawCatalog(23000)
+    // Set EVERY precio explicitly so the exclusion count is deterministic: exactly
+    // 13,000 of 23,000 (56.52%). `rawItem` already seeds `precio: 0` on every 7th
+    // row, so leaving the tail untouched added ~1,428 silent exclusions and made
+    // the expected ratio unpredictable (62.73%) — the reason the original
+    // `toContain('%')` assertion could never have caught anything.
+    for (let i = 0; i < items.length; i++) {
+      items[i] = { ...items[i], precio: i < 13000 ? null : 100 }
+    }
+    writeFileSync(input, JSON.stringify(items))
+
+    const r = runScript(dir, input, output)
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain('excluded')
+    // Pin the COMPUTED ratio (13000/23000 = 56.52%), not just any '%' in the
+    // message: the static "50%" cap literal also contains one, which made the
+    // original `toContain('%')` assertion vacuous.
+    expect(r.err).toContain('56.52%')
+    expect(() => readFileSync(output)).toThrow()
+  })
+
+  it('tolerates exclusions at exactly half the input (cap boundary, exit 0)', () => {
+    const input = join(dir, 'half-excluded.json')
+    const output = join(dir, 'half-excluded-out.json')
+    const items = Array.from({ length: 20000 }, (_, i) => rawItem(i))
+    // Exactly 10,000 of 20,000 excluded: the guard is a strict `>`.
+    for (let i = 0; i < items.length; i++) {
+      items[i] = { ...items[i], precio: i < 10000 ? null : 100 }
+    }
+    writeFileSync(input, JSON.stringify(items))
+
+    const r = runScript(dir, input, output)
+    expect(r.code).toBe(0)
+    const catalog = JSON.parse(readFileSync(output, 'utf8')) as { products: TestProduct[] }
+    expect(catalog.products.length).toBe(10000)
+  })
+
+  it('keeps the valid-catalog path green: exit 0 and the output file is written', () => {
+    const input = join(dir, 'output-guards-ok.json')
+    const output = join(dir, 'output-guards-ok-out.json')
+    const items = validRawCatalog(20001)
+    // Exercise the stableId(nombre) fallback: randomUUID fixtures can never
+    // collide, so without this the uniqueness assertion below is vacuous.
+    // Names stay distinct, so the derived ids stay unique.
+    for (let i = 0; i < 500; i++) items[i] = { ...items[i], id: '' }
+    writeFileSync(input, JSON.stringify(items))
+
+    const r = runScript(dir, input, output)
+    expect(r.code).toBe(0)
+    expect(r.out).toContain('wrote')
+    const catalog = JSON.parse(readFileSync(output, 'utf8')) as { products: TestProduct[] }
+    expect(catalog.products.length).toBe(items.filter(isIncluded).length)
+    expect(new Set(catalog.products.map((p) => p.id)).size).toBe(
+      catalog.products.length,
+    )
+  })
 })
