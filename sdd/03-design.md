@@ -176,7 +176,7 @@ navigation, floating outline nav bar.
 ## Deployment
 
 - `vite.config.ts`: `base: '/precio-scanner/'`.
-- `.github/workflows/deploy.yml`: checkout → node 20 → `npm ci` → `npm run build` →
+- `.github/workflows/deploy.yml`: checkout → node 24 → `npm ci` → `npm run build` →
   `upload-pages-artifact` → `deploy-pages`. Trigger: push to `main`.
 - Pages source set to "GitHub Actions"; verified live (`AC-6`).
 

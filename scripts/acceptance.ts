@@ -19,8 +19,17 @@
  * fixed sleeps can read that browse page instead of the query's results — every
  * search wait below keys on the settled query instead.
  *
- * Requires a served build:
- *   npm run build && npm run preview
+ * Requires a built app (`npm run build`), served in one of two modes:
+ *
+ *   - **Self-serve (default, no `BASE_URL`).** The harness starts
+ *     scripts/ghpages-server.ts on port 4173 over `dist/` and closes it when the run
+ *     ends, so `npm run acceptance` is a single command. That server reproduces
+ *     GitHub Pages semantics — an unknown path answers with `dist/404.html` and
+ *     status 404, where `vite preview` would silently answer with index.html — and
+ *     that is what makes the deep-link checks below meaningful locally.
+ *   - **External (`BASE_URL` set).** The harness targets that URL exactly and starts
+ *     nothing; this is how it is pointed at production or at a server started by
+ *     hand (`node scripts/ghpages-server.ts`).
  *
  * Playwright is resolved in this order:
  *   1. PW_MODULE env var — absolute path to a playwright module
@@ -29,12 +38,15 @@
  *   Browser: CHROME_PATH env var, else /usr/bin/google-chrome when present, else
  *   Playwright's own download.
  *
- * Usage: npm run acceptance   (BASE_URL overrides the default preview URL)
+ * Usage: npm run acceptance                     (self-served, faithful server)
+ *        BASE_URL=https://… npm run acceptance  (external host, e.g. production)
  */
 import { createRequire } from 'node:module'
 import { existsSync } from 'node:fs'
+import { startServer } from './ghpages-server.ts'
 
-const BASE_URL = process.env.BASE_URL || 'http://localhost:4173/precio-scanner/'
+const EXTERNAL_BASE_URL = process.env.BASE_URL
+const SELF_SERVE_PORT = 4173
 const GLOBAL_PW =
   '/home/linuxbrew/.linuxbrew/lib/node_modules/@playwright/cli/node_modules/playwright'
 
@@ -67,16 +79,38 @@ function info(id: string, evidence: string) {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
+/**
+ * Resolves where the run points and owns the self-served server's lifetime:
+ * in self-serve mode the server is closed even when a check throws, so the
+ * process always exits cleanly.
+ */
 async function main(): Promise<void> {
+  let server: { url: string; close(): Promise<void> } | undefined
+  let baseUrl: string
+  if (EXTERNAL_BASE_URL) {
+    baseUrl = EXTERNAL_BASE_URL
+  } else {
+    server = await startServer({ port: SELF_SERVE_PORT, root: 'dist' })
+    baseUrl = server.url
+  }
+
+  try {
+    await runChecks(baseUrl)
+  } finally {
+    await server?.close()
+  }
+}
+
+async function runChecks(baseUrl: string): Promise<void> {
   const { chromium } = resolvePlaywright()
 
   try {
-    const res = await fetch(BASE_URL, { signal: AbortSignal.timeout(4000) })
+    const res = await fetch(baseUrl, { signal: AbortSignal.timeout(4000) })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
   } catch (err) {
     throw new Error(
-      `${BASE_URL} is not reachable (${err instanceof Error ? err.message : String(err)}). Run ` +
-        `\`npm run build && npm run preview\`.`,
+      `${baseUrl} is not reachable (${err instanceof Error ? err.message : String(err)}). Run ` +
+        `\`npm run build\`, or start a server and point BASE_URL at it.`,
     )
   }
 
@@ -132,6 +166,20 @@ async function main(): Promise<void> {
   }
 
   /**
+   * Bounded variant of `waitForSearchSettled` that returns false instead of
+   * throwing: a page that never booted (the production 404) must FAIL its own row
+   * with its id, and let the run reach the summary line.
+   */
+  async function searchSettledWithin(query: string, timeout = 30000): Promise<boolean> {
+    try {
+      await waitForSearchSettled(query, timeout)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /**
    * Bounded visibility wait that returns false instead of throwing, so a missing
    * element fails its own assertion (with its id) instead of aborting the run.
    * The timeout is only a bound on the wait, never the thing being relied on.
@@ -157,7 +205,7 @@ async function main(): Promise<void> {
 
   /** Real user flow: deep-link to the search screen with the query. */
   async function search(query: string): Promise<string[]> {
-    await page.goto(`${BASE_URL}buscar?q=${encodeURIComponent(query)}`, {
+    await page.goto(`${baseUrl}buscar?q=${encodeURIComponent(query)}`, {
       waitUntil: 'domcontentloaded',
     })
     await searchInput().waitFor({ timeout: 30000 })
@@ -169,13 +217,13 @@ async function main(): Promise<void> {
 
   /** Go straight to the search screen (used by state/persistence checks). */
   async function openSearch(): Promise<void> {
-    await page.goto(`${BASE_URL}buscar`, { waitUntil: 'domcontentloaded' })
+    await page.goto(`${baseUrl}buscar`, { waitUntil: 'domcontentloaded' })
     await searchInput().waitFor({ timeout: 30000 })
     await waitForSearchReady()
   }
 
   // ---------------------------------------------------------------- boot
-  await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' })
+  await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
   await searchInput().waitFor({ timeout: 30000 })
 
   const firstVisit = [...dataRequests]
@@ -183,6 +231,54 @@ async function main(): Promise<void> {
     'AC-4a',
     firstVisit.length === 3,
     `first visit requests all three data files: [${firstVisit.join(', ')}]`,
+  )
+
+  // ------------------------------------------- deep links and hard navigation
+  // The rows above never prove the host can serve a subroute: reaching a screen by
+  // clicking around never issues the GET a browser makes when a discarded mobile tab
+  // is reloaded or a shared link is opened. GitHub Pages has no SPA fallback, so
+  // without the published 404.html shell every one of these GETs lands on GitHub's
+  // own 404 page and the app never boots. These rows do the GET.
+  const deepQuery = 'yerba'
+  await page.goto(`${baseUrl}buscar?q=${encodeURIComponent(deepQuery)}`, {
+    waitUntil: 'domcontentloaded',
+  })
+  const deepBooted = await waitForVisible(searchInput())
+  const deepSettled = deepBooted && (await searchSettledWithin(deepQuery))
+  const deepResults = deepBooted ? await cards().allTextContents() : []
+  record(
+    'DEEP-search',
+    deepBooted && deepSettled && deepResults.length > 0,
+    `hard GET /buscar?q=${deepQuery} -> app ${deepBooted ? 'booted' : 'did NOT boot'}, ` +
+      `${deepResults.length} result(s) for the query`,
+  )
+
+  // The path the bug actually breaks in the wild: reloading a discarded tab while
+  // the user sits on a deep subroute.
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  const reloadBooted = await waitForVisible(searchInput())
+  const reloadSettled = reloadBooted && (await searchSettledWithin(deepQuery))
+  const reloadResults = reloadBooted ? await cards().allTextContents() : []
+  record(
+    'DEEP-reload',
+    reloadBooted && reloadSettled && reloadResults.length === deepResults.length && reloadResults.length > 0,
+    `reload on /buscar?q=${deepQuery} -> app ${reloadBooted ? 'booted' : 'did NOT boot'}, ` +
+      `${reloadResults.length} result(s) (before reload: ${deepResults.length})`,
+  )
+
+  // A shared product link: /producto/<ean> straight from the address bar.
+  const deepEan = '7793940219009'
+  await page.goto(`${baseUrl}producto/${deepEan}`, { waitUntil: 'domcontentloaded' })
+  const detailRendered = await waitForVisible(page.locator(`text=EAN ${deepEan}`))
+  const notFoundShown = await page.locator('text=Producto no encontrado').count()
+  const detailName = detailRendered
+    ? ((await page.locator('main h2').first().textContent()) ?? '').replace(/\s+/g, ' ').trim()
+    : ''
+  record(
+    'DEEP-prod',
+    detailRendered && notFoundShown === 0,
+    `hard GET /producto/${deepEan} -> ${detailRendered ? 'detail rendered' : 'detail did NOT render'}`,
+    `name: "${detailName.slice(0, 70)}"`,
   )
 
   // ---------------------------------------------------------------- AC-2 / AC-3
@@ -319,7 +415,7 @@ async function main(): Promise<void> {
 
   // ---------------------------------------------------------------- AC-4 / AC-7 on reload
   dataRequests.length = 0
-  await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' }) // Home
+  await page.goto(baseUrl, { waitUntil: 'domcontentloaded' }) // Home
   await searchInput().waitFor({ timeout: 30000 })
   // The reload must not re-request the heavy files. facets is always fetched (it
   // carries the version), so wait for that request to be observed instead of
@@ -354,7 +450,7 @@ async function main(): Promise<void> {
     `after reload -> favorites entry on Home: ${favEntryAfter}, recent chip: ${recentAfter}`,
   )
 
-  await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' }) // Home
+  await page.goto(baseUrl, { waitUntil: 'domcontentloaded' }) // Home
   await page.locator('button:has-text("Favoritos")').first().click() // -> /buscar?fav=1
   // The favorites view clears the query and `results`, so it cannot be keyed on a
   // query: wait for a settled run that actually renders the favorite. The unfiltered

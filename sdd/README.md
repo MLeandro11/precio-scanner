@@ -30,16 +30,26 @@ deterministic. `searchSession.setQuery` now raises `loading` immediately (and in
 in-flight run), `ProductList` exposes `data-search-state` / `data-search-query`, and the
 harness waits on `state === 'ready' && query === q` instead of any `ul li` plus a fixed sleep.
 
+**GH Pages fallback + harness fidelity (2026-09-14, uncommitted working tree):** the site had no
+SPA fallback, so every hard GET to a subroute returned GitHub's own 404 page and the app never
+booted (`/buscar`, `/lista`, `/producto/<ean>` all 404 since the first deploy).
+`scripts/postbuild.ts` now writes `dist/404.html` (a byte-identical copy of the shell) as npm's
+`postbuild` hook, so the deploy workflow needed no new step. `deploy.yml` moves Node 20 → **24**
+(Node 20 cannot execute a `.ts` entry point, and the repo already required ≥ 23.6) and
+`package.json` records `engines: node >=23.6`. New `scripts/ghpages-server.ts` reproduces GitHub
+Pages semantics so the harness tests the real host contract instead of `vite preview`'s hidden
+fallback. See items 1.5 and 7.6 in `04-tasks.md`.
+
 **Green now (verified this session):**
 - `npm test` → **11 files, 104 tests pass** (97 at the Lupa merge; +5 in the 2.7 pass, +2 in
   the WU7.5 pass).
 - `npm run typecheck` → clean (TS strict, `verbatimModuleSyntax`).
 - `npm run build` → worker 28.75 kB, main bundle 106.59 kB gzip (90.61 kB at the merge).
-- `npm run acceptance` → **17/17, reproducible.** It emits **17** rows (16 PASS + 1 INFO: the
-  NAV-back check added in `68eb113`, and `FR-2.8d` is informational). It was **flaky** — three
-  runs on one build once gave 14/17, 17/17, 16/17 — until **WU7.5** fixed it; after the fix,
-  6 consecutive runs by an independent verifier on one fresh build, plus 10 by the
-  implementer, were all 17/17.
+- `npm run acceptance` → **20/20, reproducible.** It emits **20** rows (19 PASS + 1 INFO:
+  `FR-2.8d` is informational, and the summary counts it as passing). It was **flaky** — three
+  runs on one build once gave 14/17, 17/17, 16/17 — until **WU7.5** fixed it; **WU7.6** then
+  added the `DEEP-*` deep-link/reload rows and made the harness serve `dist/` with GitHub Pages
+  semantics itself, so `vite preview` is no longer involved.
 - Deploy live and verified at `https://mleandro11.github.io/precio-scanner/`.
 
 **Scanner update (this session):** camera scanning is now **cross-device**. The Chromium-only
@@ -47,7 +57,7 @@ harness waits on `state === 'ready' && query === q` instead of any `ul li` plus 
 `BrowserMultiFormatReader`)**, so it works on any device with `getUserMedia` (Safari iOS,
 Firefox, Chrome/Edge/Android). ZXing is lazy-loaded with `/escanear` to keep the main bundle
 small (main 89 kB gzip; ZXing chunks in its own ~120 kB gzip loaded only on open). Typecheck +
-11 test files/104 tests + acceptance 17/17 stay green (see above).
+11 test files/104 tests + acceptance 20/20 stay green (see above).
 
 `04-tasks.md` is the authoritative ledger — it carries per-item evidence and the
 recorded deviations, including the additions that the rebrand introduced (WU8+).

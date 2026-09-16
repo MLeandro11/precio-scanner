@@ -23,28 +23,30 @@ Ordered by dependency. Each work unit = one commit (reviewable, tests included).
 
 | Work unit | Done | Partial | Pending |
 | --- | --- | --- | --- |
-| WU1 Skeleton + deploy | 4 | 0 | 0 |
+| WU1 Skeleton + deploy | 5 | 0 | 0 |
 | WU2 Data pipeline | 6 | 1 | 1 |
 | WU3 Loading + worker | 4 | 0 | 0 |
 | WU4 Search | 5 | 0 | 0 |
 | WU5 Filters + sorting | 4 | 0 | 0 |
 | WU6 Persistence | 4 | 0 | 0 |
-| WU7 Hardening + docs | 4 | 1 | 0 |
+| WU7 Hardening + docs | 5 | 1 | 0 |
 | WU8 Lupa (rebrand + feature set) | 8 | 0 | 0 |
-| **Total (42 items)** | **39** | **2** | **1** |
+| **Total (44 items)** | **41** | **2** | **1** |
 
 Test suite at the Lupa merge: `npm test` → **11 files, 97 tests, all green**;
 `npm run typecheck` → clean. Build: worker chunk 28.75 kB gzip, main bundle 90.61 kB gzip.
 After the 2.7 pass: `npm test` → **11 files, 102 tests, all green**; after the WU7.5 pass:
 **11 files, 104 tests**. `npm run typecheck` → clean throughout.
 
-Acceptance pass: `npm run acceptance` → **17/17 reproducible** against the real catalog on the
-current TypeScript code. History: the harness was **flaky** (three runs on one build gave
-**14/17, 17/17, 16/17**) until the 7.5 fix; after it, **6 consecutive runs by an independent
-verifier on one fresh build, plus 10 by the implementer, were all 17/17** with no FAIL row.
-Wording caveat: 17 rows = **16 PASS + 1 INFO** (`FR-2.8d` is informational) and the summary
-line counts the INFO row as passing — pre-existing behaviour, not introduced here.
-AC-6 (deploy) verified via a real push.
+Acceptance pass: `npm run acceptance` → **20/20 reproducible** against the real catalog on the
+current TypeScript code, self-served by `scripts/ghpages-server.ts` (GitHub Pages semantics; see
+7.6). History: the harness was **flaky** (three runs on one build gave **14/17, 17/17, 16/17**)
+until the 7.5 fix; after it, **6 consecutive runs by an independent verifier on one fresh build,
+plus 10 by the implementer, were all 17/17**, and the 7.6 rows took it to **20 rows** (19 PASS +
+1 INFO).
+Wording caveat: the summary line counts the INFO row (`FR-2.8d`, informational) as passing —
+pre-existing behaviour, not introduced here.
+AC-6 (deploy) verified via a real push; the live deep links are re-verified once 1.5 ships.
 AC-6 (deploy) verified via a real push.
 
 ## Work Unit 1 — Skeleton + deploy
@@ -54,11 +56,29 @@ AC-6 (deploy) verified via a real push.
       added: `typescript`, `react-router-dom`, `lucide-react`); `src/index.css:1`.
 - [x] 1.2 Set `base: '/precio-scanner/'` in `vite.config.ts`. — Evidence: `vite.config.ts`.
 - [x] 1.3 Add `.github/workflows/deploy.yml` (build + deploy to GH Pages on push to `main`).
-      — Evidence: checkout → node 20 → `npm ci` → `npm run build` →
+      — Evidence: checkout → node 24 → `npm ci` → `npm run build` →
       `upload-pages-artifact@v3` → `deploy-pages@v4`.
 - [x] 1.4 Verify: push → site live at `https://MLeandro11.github.io/precio-scanner/`.
       — **Done.** Pushed `main` to `MLeandro11/precio-scanner` (public repo, GH Pages free plan);
       re-verified as AC-6 in the Lupa acceptance pass.
+- [x] 1.5 *(added 2026-09-14)* **GH Pages SPA fallback.** The site had no 404 fallback, so every
+      hard GET to a subroute returned GitHub's own 404 page and the app never booted: measured
+      live, `/buscar`, `/buscar?q=yerba`, `/lista` and `/producto/<ean>` all answered **404**
+      while `/` answered 200. Pre-existing since the first deploy (`public/404.html` never
+      existed and the workflow had no rewrite step). Impact: reloading on a subroute — normal on
+      mobile, where tabs get discarded — landed on a 404, and shared links were broken. The
+      URL-driven state fix in `68eb113` *increased* exposure, since the URL bar now holds a real
+      deep link that previously did not exist.
+      — Fix: `scripts/postbuild.ts` copies `dist/index.html` → `dist/404.html` after the build
+      (fail-loud if the copy is not byte-identical), wired as npm's `postbuild` hook so the
+      deploy workflow needed no new step. Deep links now boot the shell and the router resolves
+      them, with HTTP status 404 (inherent to SPA fallback on Pages; a non-200 for crawlers is
+      accepted).
+      — **Prerequisite fix:** `deploy.yml` pinned `node-version: 20`, which cannot execute a `.ts`
+      entry point, so the new `postbuild` hook would have failed the deploy job; bumped to **24**
+      (Node ≥ 23.6 is what `README.md` and `01-proposal.md` already require for the `.ts` CLI
+      scripts) and `engines: node >=23.6` recorded in `package.json` so the drift cannot return
+      silently. That same pin would also have blocked 2.8.
 
 ## Work Unit 2 — Data pipeline (normalizer + index)
 
@@ -213,6 +233,22 @@ AC-6 (deploy) verified via a real push.
       is load-bearing. **Note:** the live protection comes from `loading: true` in `setQuery`;
       the `runId++` invalidation did not fire in any observed run (it is reachable while typing
       and is covered by a unit test).
+- [x] 7.6 *(added 2026-09-14)* **Make the harness test the host's real routing semantics, and
+      cover deep links.** The harness reached subroutes with `page.goto` (a real GET) while being
+      run against `vite preview`, which silently provides an SPA fallback GitHub Pages does not
+      have — so it structurally could not see 1.5. Fix: `scripts/ghpages-server.ts` reproduces
+      GitHub Pages semantics (existing file → 200 + Content-Type; unknown path → `dist/404.html`
+      with **HTTP 404**; `/` → 302 to the base; nothing outside the root is ever served), and
+      `scripts/acceptance.ts` starts that server itself when `BASE_URL` is unset (closed in a
+      `finally`), so `npm run acceptance` is a single command that tests the real host contract.
+      `BASE_URL` still selects external mode, which is how the harness gets pointed at production.
+      Three new rows: `DEEP-search` (hard GET to `/buscar?q=<q>`), `DEEP-reload` (`page.reload()`
+      on that subroute — the mid-session reload path that 404'd), `DEEP-prod` (hard GET to
+      `/producto/<ean>`). Rows: 17 → **20** (19 PASS + 1 INFO).
+      — Evidence: **falsified.** With `dist/404.html` removed, the `DEEP-*` rows fail with their
+      own ids and the server answers `404 text/plain`; restored, the harness is green (20/20,
+      twice). A port collision on 4173 (`vite preview` also defaults there) fails loudly with
+      `EADDRINUSE` instead of silently testing the wrong server.
 
 ## Work Unit 8 — Lupa (rebrand + feature set, `c34d0e7`)
 
@@ -291,6 +327,12 @@ unit so the ledger stays honest about scope growth.
    lines, 5 `sdd/*.md`) and **WU7.5** (harness, `searchSession`, `ProductList`, their tests).
    The file split is clean — no file belongs to both — so they can land as two commits.
    They must be *reviewed* together only because the 2.7 docs describe WU7.5's subject.
+9. **CI's Node was below the repo's documented requirement (found 2026-09-14).** `deploy.yml`
+   pinned `node-version: 20` while `README.md` and `01-proposal.md` already require Node ≥ 23.6
+   for the `.ts` CLI scripts. It went unnoticed because CI only ever ran `vite build`. The 1.5
+   fix would have failed the deploy on that pin (a `.ts` postbuild hook cannot run on Node 20),
+   so it is now **24**, with `engines: node >=23.6` in `package.json`. The same pin would have
+   blocked 2.8 — CI could never have run `normalize`, `generate-index` or `acceptance`.
 
 ## Review workload forecast
 
