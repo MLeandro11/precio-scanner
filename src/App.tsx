@@ -103,15 +103,12 @@ function AppRoutes() {
 /** Light loader shown while the webcam/scan chunk streams in. */
 function ScanLoading() {
   return (
-    <div className="safe-top mx-auto w-full max-w-lg px-4 pb-8">
-      <Brand />
-      <div
-        className="mt-5 aspect-[3/4] w-full rounded-2xl bg-slate-900"
-        role="status"
-        aria-live="polite"
-      >
-        <span className="sr-only">Cargando escáner…</span>
-      </div>
+    <div
+      className="flex min-h-dvh items-center justify-center bg-slate-900"
+      role="status"
+      aria-live="polite"
+    >
+      <span className="text-xs text-white/70">Cargando escáner…</span>
     </div>
   )
 }

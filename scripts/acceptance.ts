@@ -114,11 +114,17 @@ async function runChecks(baseUrl: string): Promise<void> {
     )
   }
 
-  const launchOptions: { executablePath?: string } = {}
+  const baseLaunch: { executablePath?: string } = {}
   const chrome = process.env.CHROME_PATH || '/usr/bin/google-chrome'
-  if (existsSync(chrome)) launchOptions.executablePath = chrome
+  if (existsSync(chrome)) baseLaunch.executablePath = chrome
 
-  const browser = await chromium.launch(launchOptions)
+  // The scanner is a real camera surface: a fake media device makes its live
+  // path exercisable here. That device reports no `torch` capability, which is
+  // exactly what the torch gating must react to (button hidden, never dead).
+  const browser = await chromium.launch({
+    ...baseLaunch,
+    args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+  })
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
   const page = await context.newPage()
 
@@ -173,6 +179,32 @@ async function runChecks(baseUrl: string): Promise<void> {
   async function searchSettledWithin(query: string, timeout = 30000): Promise<boolean> {
     try {
       await waitForSearchSettled(query, timeout)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * Page-agnostic `waitForSearchSettled`: the scanner rows run on their own phone
+   * page (and for the no-camera case, a second browser), so the readiness contract
+   * is read from that page instead of the main one.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async function searchSettledOn(target: any, query: string, timeout = 30000): Promise<boolean> {
+    try {
+      await target.waitForFunction(
+        (q: string) => {
+          const el = document.querySelector('[data-search-state]')
+          if (!el) return false
+          return (
+            el.getAttribute('data-search-state') === 'ready' &&
+            el.getAttribute('data-search-query') === q
+          )
+        },
+        query,
+        { timeout },
+      )
       return true
     } catch {
       return false
@@ -488,6 +520,216 @@ async function runChecks(baseUrl: string): Promise<void> {
     'WU6.fix',
     unfaved === 1 && favoritesStorage === '[]',
     `unfavorite from product detail -> star back to "Agregar" (${unfaved}), favorites storage empty`,
+  )
+
+  // ---------------------------------------------------------------- scanner (/escanear)
+  // The scanner is a mobile-first surface: measure it on a 390×844 phone viewport.
+  await page.setViewportSize({ width: 390, height: 844 })
+
+  // A hard GET to the deep link must boot the app (the GH Pages 404 shell).
+  await page.goto(`${baseUrl}escanear`, { waitUntil: 'domcontentloaded' })
+  const scanBooted = await waitForVisible(page.locator('[data-scan-state]'))
+  record(
+    'SCAN-boot',
+    scanBooted,
+    `hard GET /escanear -> app ${scanBooted ? 'booted' : 'did NOT boot'} (data-scan-state present)`,
+  )
+
+  // A second browser with no fake camera: getUserMedia is denied, so the scanner must
+  // fall back to the compact layout instead of an empty camera box. The real rejection
+  // is only delayed, so the transient "requesting" state stays observable (the old
+  // page rendered that message twice).
+  const noCamBrowser = await chromium.launch({ ...baseLaunch, args: ['--deny-permission-prompts'] })
+  const noCamContext = await noCamBrowser.newContext({ viewport: { width: 390, height: 844 } })
+  await noCamContext.addInitScript(() => {
+    const md = navigator.mediaDevices
+    if (!md || typeof md.getUserMedia !== 'function') return
+    const original = md.getUserMedia.bind(md)
+    md.getUserMedia = (constraints?: MediaStreamConstraints) =>
+      new Promise((resolve, reject) => {
+        setTimeout(() => original(constraints).then(resolve, reject), 700)
+      })
+  })
+  const noCamPage = await noCamContext.newPage()
+  await noCamPage.goto(`${baseUrl}escanear`, { waitUntil: 'domcontentloaded' })
+
+  let requestingCount = -1
+  try {
+    await noCamPage.waitForFunction(
+      () => (document.body.textContent ?? '').includes('Pidiendo acceso a la cámara'),
+      undefined,
+      { timeout: 30000 },
+    )
+    requestingCount = await noCamPage.evaluate(
+      () => ((document.body.textContent ?? '').split('Pidiendo acceso a la cámara').length - 1),
+    )
+  } catch {
+    // Settled before the message could be observed; recorded as -1, never assumed.
+  }
+
+  let noCamState = 'never settled'
+  try {
+    await noCamPage.waitForFunction(
+      () =>
+        ['denied', 'unsupported', 'error'].includes(
+          document.querySelector('[data-scan-state]')?.getAttribute('data-scan-state') ?? '',
+        ),
+      undefined,
+      { timeout: 30000 },
+    )
+    noCamState =
+      (await noCamPage.getAttribute('[data-scan-state]', 'data-scan-state')) ?? 'unknown'
+  } catch {
+    noCamState = 'never settled'
+  }
+
+  const noCamMetrics = await noCamPage.evaluate(() => {
+    const manual = document.querySelector('input[aria-label="Código EAN"]')
+    const mr = manual ? manual.getBoundingClientRect() : null
+    const hasVisibleContent = (el: Element) =>
+      Array.from(el.querySelectorAll('*')).some((d) => {
+        const dr = d.getBoundingClientRect()
+        if (dr.width <= 0 || dr.height <= 0) return false
+        const tag = d.tagName.toLowerCase()
+        if (tag === 'video') return (d as HTMLVideoElement).videoWidth > 0
+        return ['img', 'canvas', 'input', 'button', 'a', 'ul', 'li', 'svg', 'textarea', 'select'].includes(tag)
+      })
+    const emptyBlocks: Array<{ tag: string; w: number; h: number }> = []
+    for (const el of Array.from(document.querySelectorAll('body *'))) {
+      const r = el.getBoundingClientRect()
+      if (r.height <= 200 || r.width <= 0) continue
+      if ((el.textContent ?? '').trim() !== '') continue
+      const tag = el.tagName.toLowerCase()
+      if (tag !== 'video' && hasVisibleContent(el)) continue
+      if (tag === 'video' && (el as HTMLVideoElement).videoWidth > 0) continue
+      emptyBlocks.push({ tag, w: Math.round(r.width), h: Math.round(r.height) })
+    }
+    return {
+      manualVisible: !!mr && mr.width > 0 && mr.height > 0 && mr.top >= 0 && mr.top < 844,
+      manualTop: mr ? Math.round(mr.top) : -1,
+      emptyBlocks,
+    }
+  })
+  record(
+    'SCAN-nocam',
+    noCamState !== 'never settled' &&
+      requestingCount === 1 &&
+      noCamMetrics.manualVisible &&
+      noCamMetrics.emptyBlocks.length === 0,
+    `settled "${noCamState}"; manual EAN input visible at top ${noCamMetrics.manualTop}px; ` +
+      `empty blocks >200px: ${noCamMetrics.emptyBlocks.length}`,
+    `"requesting" message occurrences while pending: ${requestingCount} (the old page rendered 2)` +
+      (noCamMetrics.emptyBlocks.length ? ` — offenders: ${JSON.stringify(noCamMetrics.emptyBlocks)}` : ''),
+  )
+
+  // The documented primary fallback must survive the redesign: type an EAN and land
+  // on the search screen with the product resolved.
+  const manualEan = '7793940219009'
+  await noCamPage.locator('input[aria-label="Código EAN"]').fill(manualEan)
+  await noCamPage.getByRole('button', { name: 'Buscar' }).click()
+  let manualNavigated = false
+  try {
+    await noCamPage.waitForURL(
+      (url: URL) => url.pathname.endsWith('/buscar') && url.searchParams.get('q') === manualEan,
+      { timeout: 30000 },
+    )
+    manualNavigated = true
+  } catch {
+    manualNavigated = false
+  }
+  const manualResolved = manualNavigated && (await searchSettledOn(noCamPage, manualEan))
+  const manualRows = manualResolved ? await noCamPage.locator('ul li').allTextContents() : []
+  record(
+    'SCAN-manual',
+    manualNavigated && manualResolved && manualRows.length === 1,
+    `manual EAN ${manualEan} -> /buscar?q=… resolved ${manualRows.length} product(s)`,
+  )
+
+  // The measured defect: every bottom-nav target below the 44×44 minimum.
+  const navTargets: Array<{ label: string; w: number; h: number }> | null =
+    await noCamPage.evaluate(() => {
+    const nav = document.querySelector('nav[aria-label="Navegación principal"]')
+    if (!nav) return null
+    return Array.from(nav.querySelectorAll('a')).map((a) => {
+      const r = a.getBoundingClientRect()
+      return {
+        label: (a.getAttribute('aria-label') || a.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 14),
+        w: r.width,
+        h: r.height,
+      }
+    })
+  })
+  record(
+    'SCAN-nav44',
+    !!navTargets &&
+      navTargets.length === 5 &&
+      navTargets.every((t) => t.w >= 43.99 && t.h >= 43.99),
+    `bottom-nav targets: ${
+      navTargets
+        ? navTargets.map((t) => `${t.label} ${t.w.toFixed(0)}×${t.h.toFixed(0)}`).join(', ')
+        : 'nav not found'
+    }`,
+  )
+
+  await noCamBrowser.close()
+
+  // With the fake camera the live path is reachable. The scan window must render, the
+  // manual fallback must stay reachable, and the torch button must mirror the real
+  // capability — never a dead control. No status message may appear twice.
+  await page.bringToFront()
+  let camActive = true
+  try {
+    await page.waitForFunction(
+      () => document.querySelector('[data-scan-state]')?.getAttribute('data-scan-state') === 'active',
+      undefined,
+      { timeout: 30000 },
+    )
+  } catch {
+    camActive = false
+  }
+  const camInfo = camActive
+    ? await page.evaluate(() => {
+        const video = document.querySelector('video') as HTMLVideoElement | null
+        const track =
+          video && video.srcObject ? (video.srcObject as MediaStream).getVideoTracks()[0] : null
+        const caps =
+          track && track.getCapabilities ? (track.getCapabilities() as { torch?: boolean }) : null
+        const torchCap = !!caps?.torch
+        const torchBtn = document.querySelector(
+          'button[aria-label="Prender la linterna"], button[aria-label="Apagar la linterna"]',
+        )
+        const win = document.querySelector('[data-scan-window]')
+        const wr = win ? win.getBoundingClientRect() : null
+        const statuses = Array.from(document.querySelectorAll('[role="status"]')).map((e) =>
+          (e.textContent ?? '').trim().replace(/\s+/g, ' '),
+        )
+        return {
+          windowW: wr ? Math.round(wr.width) : 0,
+          windowH: wr ? Math.round(wr.height) : 0,
+          caption: (document.body.textContent ?? '').includes('Poné el código dentro del recuadro'),
+          manualFallback: (document.body.textContent ?? '').includes('Escribí el EAN a mano'),
+          torchCap,
+          torchBtn: !!torchBtn,
+          statuses,
+        }
+      })
+    : null
+  const camDuplicates = camInfo ? camInfo.statuses.length - new Set(camInfo.statuses).size : -1
+  record(
+    'SCAN-cam',
+    !!camInfo &&
+      camInfo.windowW > 0 &&
+      camInfo.windowH > 0 &&
+      camInfo.caption &&
+      camInfo.manualFallback &&
+      camInfo.torchBtn === camInfo.torchCap &&
+      camDuplicates === 0,
+    camInfo
+      ? `data-scan-state="active"; scan window ${camInfo.windowW}×${camInfo.windowH}; ` +
+        `manual fallback ${camInfo.manualFallback ? 'reachable' : 'MISSING'}; ` +
+        `torch ${camInfo.torchBtn ? 'shown' : 'hidden'} (capability ${camInfo.torchCap ? 'present' : 'absent'})`
+      : 'data-scan-state never reached "active" with the fake camera',
+    camInfo ? `status messages: ${camInfo.statuses.length}, duplicates: ${camDuplicates}` : '',
   )
 
   await browser.close()
