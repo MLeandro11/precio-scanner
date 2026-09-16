@@ -1,8 +1,10 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { Bell, ClipboardList, Home, ScanBarcode, User } from 'lucide-react'
 
+// min-h-11/min-w-11 pin every tab to the 44×44 minimum touch target (§7) while the
+// icon, label, colours and spacing stay exactly as designed.
 const TAB_CLASS =
-  'flex flex-col items-center gap-0.5 rounded-xl px-1.5 py-1 text-[10px] font-medium transition'
+  'flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-xl px-1.5 py-1 text-[10px] font-medium transition'
 const ACTIVE = 'bg-surface-sunken/5 text-accent'
 const INACTIVE = 'text-text-muted'
 
@@ -54,7 +56,7 @@ export default function AppLayout() {
           <NavLink
             to="/escanear"
             aria-label="Escanear código de barras"
-            className="mx-1 flex flex-col items-center gap-0.5"
+            className="mx-1 flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5"
           >
             <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-accent text-accent-contrast shadow-md">
               <ScanBarcode size={22} strokeWidth={1.7} aria-hidden="true" />
