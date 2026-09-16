@@ -3,9 +3,13 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "engines": {
+    "node": ">=23.6"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "postbuild": "node scripts/postbuild.ts",
     "preview": "vite preview",
     "test": "vitest run",
     "normalize": "node scripts/normalize-catalog.ts",

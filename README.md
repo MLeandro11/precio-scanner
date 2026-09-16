@@ -45,11 +45,11 @@ react-router-dom v7. Tests con vitest; bike en worker (`src/workers/catalog.work
 ```sh
 npm install
 npm run dev          # dev server
-npm run build        # build a dist/
-npm run preview      # sirve el build
+npm run build        # build a dist/ (dispara postbuild: copia index.html → 404.html)
+npm run preview      # sirve el build (ojo: vite preview TIENE SPA fallback y GH Pages no)
 npm test             # vitest (lógica pura)
 npm run typecheck    # tsc --noEmit (strict)
-npm run acceptance   # Playwright contra preview (16 criterios AC/FR/WU)
+npm run acceptance   # Playwright; auto-sirve dist/ con semántica GH Pages (20 criterios)
 ```
 
 ## Pipeline de datos (con una sola tienda)
@@ -80,7 +80,13 @@ src/
 
 ## Notas técnicas
 
-- Node ≥ 23.6 para correr los scripts CLI como `.ts` (type stripping).
+- Node ≥ 23.6 para correr los scripts CLI como `.ts` (type stripping). Está declarado en
+  `package.json` (`engines`) y el workflow de deploy usa Node 24.
+- **GH Pages no tiene SPA fallback**: `postbuild` copia `dist/index.html` a `dist/404.html`
+  después del build. Gracias a eso un deep link o un reload en una subruta (`/buscar`,
+  `/lista`, `/producto/:ean`) sirve el shell de la app en vez de la página 404 de GitHub. La
+  respuesta sigue siendo HTTP 404 (Pages no tiene rewrites), pero la app arranca y el router
+  resuelve la ruta. Antes de esto, cualquier reload en una subruta rompía.
 - `tsconfig` con `strict`, `verbatimModuleSyntax`, `allowImportingTsExtensions`
   (los scripts usan imports `.ts` explícitos para el type stripping).
 - El worker sigue siendo dueño del catálogo; el main thread solo guarda `facets`.
