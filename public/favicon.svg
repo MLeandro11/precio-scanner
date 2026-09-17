@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" role="img" aria-label="Lupa">
+  <g fill="currentColor">
+    <rect x="2" y="2" width="4" height="12"/>
+    <rect x="2" y="10" width="12" height="4"/>
+  </g>
+</svg>
