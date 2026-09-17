@@ -1,7 +1,21 @@
 import { Monitor, Moon, Sun } from 'lucide-react'
 import Brand from '../components/Brand'
+import LupaLockup from '../components/LupaLockup'
 import { useTheme } from '../hooks/useTheme'
 import type { ThemePreference } from '../hooks/useTheme'
+import { version } from '../../package.json'
+
+/**
+ * "Acerca de" facts. There is deliberately no product count here: the shipped total
+ * changes every time the data pipeline is regenerated (`npm run normalize` /
+ * `npm run generate-index`), and `public/data/catalogo-facets.json` exposes no product
+ * total, so there is no cheap runtime source for it.
+ */
+const ABOUT: Array<{ label: string; value: string }> = [
+  { label: 'Versión', value: version },
+  { label: 'Datos', value: 'Precios Claros' },
+  { label: 'Tiendas', value: '1' },
+]
 
 const OPTIONS: Array<{ value: ThemePreference; label: string; icon: React.ReactNode }> = [
   { value: 'system', label: 'Sistema', icon: <Monitor size={16} aria-hidden="true" /> },
@@ -53,6 +67,27 @@ export default function SettingsPage() {
       <p className="mt-3 text-xs text-text-muted">
         "Sistema" usa el tema claro u oscuro de tu dispositivo.
       </p>
+
+      <h2 className="mt-6 text-xs font-semibold uppercase tracking-wide text-text-muted">
+        Acerca de
+      </h2>
+
+      <div className="mt-2 rounded-xl border border-border bg-surface-raised p-4">
+        <div className="flex justify-center text-text-primary">
+          {/* Full lockup: the L plus its barcode, centered as the card's hero. It is
+              decorative because the page header above already announces "Lupa". */}
+          <LupaLockup variant="full" height={65} gap={13} decorative />
+        </div>
+
+        <div className="mt-4 space-y-2">
+          {ABOUT.map((row) => (
+            <div key={row.label} className="flex items-center justify-between text-[13px]">
+              <span className="text-text-muted">{row.label}</span>
+              <span className="text-text-secondary">{row.value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </main>
   )
 }

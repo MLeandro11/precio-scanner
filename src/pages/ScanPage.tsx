@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react'
 import Brand from '../components/Brand'
+import LupaLockup from '../components/LupaLockup'
 import Button from '../components/ui/Button'
 import Input from '../components/ui/Input'
 import { useCatalog } from '../App'
@@ -225,8 +226,7 @@ export default function ScanPage() {
           {/* Top overlay bar: brand + list counter + torch (only when supported). */}
           <div className="absolute inset-x-0 top-0 z-20 flex items-center justify-between px-4 pt-[calc(1rem+env(safe-area-inset-top,0px))]">
             <div className="flex items-center gap-2">
-              <Search size={20} aria-hidden="true" strokeWidth={2.2} className="text-white drop-shadow" />
-              <span className="text-lg font-bold leading-none text-white drop-shadow">Lupa</span>
+              <LupaLockup variant="lite" height={22} gap={7} className="text-white drop-shadow" />
             </div>
             <div className="flex items-center gap-2">
               <button
