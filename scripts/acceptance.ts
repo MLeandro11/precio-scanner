@@ -19,6 +19,13 @@
  * fixed sleeps can read that browse page instead of the query's results — every
  * search wait below keys on the settled query instead.
  *
+ * The LIST-badge rows at the end pin the bottom-nav list counter (`data-list-badge` on the
+ * Lista tab). They matter because the badge lives in AppLayout, the *layout* route: it
+ * stays mounted while a page hook mutates the list, so a counter read only on mount would
+ * stay stale. The live row therefore adds an item from the search screen and requires the
+ * badge to follow **without a reload** — the exact assertion that fails when the hook
+ * instances are not subscribed to each other.
+ *
  * Requires a built app (`npm run build`), served in one of two modes:
  *
  *   - **Self-serve (default, no `BASE_URL`).** The harness starts
@@ -730,6 +737,185 @@ async function runChecks(baseUrl: string): Promise<void> {
         `torch ${camInfo.torchBtn ? 'shown' : 'hidden'} (capability ${camInfo.torchCap ? 'present' : 'absent'})`
       : 'data-scan-state never reached "active" with the fake camera',
     camInfo ? `status messages: ${camInfo.statuses.length}, duplicates: ${camDuplicates}` : '',
+  )
+
+  // ---------------------------------------------------------------- Lista badge (bottom nav)
+  // The Lista badge lives in AppLayout — the *layout* route, which stays mounted
+  // across every child route — so it must follow a list mutated by a page hook.
+  // These rows therefore drive the mutation from /buscar (SearchPage's own useList
+  // instance) with the badge already on screen, and never reload the page. A badge
+  // that read storage only on mount would stay empty here: that is the row's point.
+  const mainNav = () => page.locator('nav[aria-label="Navegación principal"]')
+  const listaBadge = () => mainNav().locator('[data-list-badge]')
+  /** Bounded badge read: an absent pill is null, never a 30 s wait that aborts the run. */
+  const listaBadgeValue = async (): Promise<string | null> =>
+    (await listaBadge().count()) === 0
+      ? null
+      : listaBadge().first().getAttribute('data-list-badge')
+  const listaRows = () =>
+    page.evaluate(() => {
+      try {
+        const raw = JSON.parse(localStorage.getItem('precio-scanner:lupa:lista') ?? '[]')
+        return Array.isArray(raw) ? raw.length : -1
+      } catch {
+        return -1
+      }
+    })
+
+  /** Bottom-bar geometry: the pill must never resize the tab or reflow the bar. */
+  const navMetrics = () =>
+    page.evaluate(() => {
+      const nav = document.querySelector('nav[aria-label="Navegación principal"]')
+      const bar = nav?.firstElementChild as HTMLElement | null
+      const lista = Array.from(nav?.querySelectorAll('a') ?? []).find((a) =>
+        (a.textContent ?? '').includes('Lista'),
+      )
+      const barRect = bar?.getBoundingClientRect()
+      const listaRect = lista?.getBoundingClientRect()
+      return {
+        barW: barRect ? Math.round(barRect.width) : -1,
+        barH: barRect ? Math.round(barRect.height) : -1,
+        barOverflow: bar ? bar.scrollWidth - bar.clientWidth : -1,
+        listaW: listaRect ? listaRect.width : -1,
+        listaH: listaRect ? listaRect.height : -1,
+      }
+    })
+
+  // Empty-list precondition, stated explicitly instead of assumed: nothing before
+  // this point touches the list, and this row pins the persisted list to zero.
+  await page.evaluate(() => localStorage.removeItem('precio-scanner:lupa:lista'))
+  await page.goto(`${baseUrl}lista`, { waitUntil: 'domcontentloaded' })
+  const emptyNavReady = await waitForVisible(mainNav())
+  const emptyNav = emptyNavReady ? await navMetrics() : null
+  const emptyBadges = await listaBadge().count()
+  record(
+    'LIST-badge-0',
+    emptyNavReady && emptyBadges === 0,
+    `empty list -> ${emptyBadges} badge(s) on the Lista tab; bar ${emptyNav?.barW}×${emptyNav?.barH}`,
+    'the app booted (nav visible) and the pill is absent, not a rendered "0"',
+  )
+
+  // The critical row. The scanner's manual EAN path navigates client-side, so
+  // AppLayout keeps the badge it rendered at mount; the add then happens on the
+  // search card, i.e. from SearchPage's useList instance — a different one.
+  const badgeEan = '7793940219009'
+  const rowsBefore = await listaRows()
+  const expectedCount = rowsBefore + 1
+  await page.goto(`${baseUrl}escanear`, { waitUntil: 'domcontentloaded' })
+  const scanPageReady = await waitForVisible(page.locator('[data-scan-state]'))
+  const manualToggle = page.locator('button:has-text("Escribí el EAN a mano")')
+  if ((await manualToggle.count()) > 0) await manualToggle.first().click()
+  const manualField = page.locator('input[aria-label="Código EAN"]').first()
+  const manualFieldShown = await waitForVisible(manualField)
+  await manualField.fill(badgeEan)
+  await page.getByRole('button', { name: 'Buscar' }).first().click()
+  let manualLanded = false
+  try {
+    await page.waitForURL(
+      (url: URL) => url.pathname.endsWith('/buscar') && url.searchParams.get('q') === badgeEan,
+      { timeout: 30000 },
+    )
+    manualLanded = true
+  } catch {
+    manualLanded = false
+  }
+  const readyToAdd = manualLanded && (await searchSettledWithin(badgeEan))
+  const addToList = page.locator('button[aria-label^="Agregar a la lista"]').first()
+  const addShown = await waitForVisible(addToList)
+  if (addShown) await addToList.click()
+  let badgeFollowed = false
+  try {
+    await page.waitForFunction(
+      (want: string) =>
+        document
+          .querySelector('nav[aria-label="Navegación principal"] [data-list-badge]')
+          ?.getAttribute('data-list-badge') === want,
+      String(expectedCount),
+      { timeout: 20000 },
+    )
+    badgeFollowed = true
+  } catch {
+    badgeFollowed = false
+  }
+  const rowsAfter = await listaRows()
+  const badgeValue = await listaBadgeValue()
+  const navAfterAdd = await navMetrics()
+  record(
+    'LIST-badge-live',
+    scanPageReady &&
+      manualFieldShown &&
+      readyToAdd &&
+      addShown &&
+      rowsBefore === 0 &&
+      rowsAfter === expectedCount &&
+      badgeFollowed,
+    `added ${badgeEan} from /escanear -> /buscar (client-side nav, no reload) -> ` +
+      `storage ${rowsBefore} -> ${rowsAfter} row(s), Lista badge "${badgeValue}" (wanted ${expectedCount})`,
+    `the add came from SearchPage's useList(), while AppLayout's own instance stayed mounted: ` +
+      `the badge only updates because the two are subscribed to each other`,
+  )
+
+  // Accessibility and touch target, measured with the pill on screen. The name is read
+  // the way the accessibility tree reads it (aria-hidden subtrees dropped), and the role
+  // lookup below re-checks it through Playwright's own accessible-name computation.
+  const listaName = await page.evaluate(() => {
+    const nav = document.querySelector('nav[aria-label="Navegación principal"]')
+    const link = Array.from(nav?.querySelectorAll('a') ?? []).find((a) =>
+      (a.textContent ?? '').includes('Lista'),
+    )
+    if (!link) return ''
+    const clone = link.cloneNode(true) as HTMLElement
+    clone.querySelectorAll('[aria-hidden="true"]').forEach((n) => n.remove())
+    // Element boundaries separate the accessible-name parts, so join the surviving
+    // children with a space instead of concatenating them ("Lista1" would be wrong).
+    return Array.from(clone.childNodes)
+      .map((n) => (n.textContent ?? '').trim())
+      .filter(Boolean)
+      .join(' ')
+  })
+  const srPhrase = `${expectedCount} producto${expectedCount === 1 ? '' : 's'} en la lista`
+  const byName = await page.getByRole('link', { name: `Lista ${srPhrase}`, exact: true }).count()
+  record(
+    'LIST-badge-a11y',
+    byName === 1 &&
+      listaName === `Lista ${srPhrase}` &&
+      !!navAfterAdd &&
+      navAfterAdd.listaW >= 43.99 &&
+      navAfterAdd.listaH >= 43.99,
+    `Lista link accessible name "${listaName}" (exact role lookup matched ${byName}); box ` +
+      `${navAfterAdd?.listaW}×${navAfterAdd?.listaH} with the pill visible (min 44×44)`,
+    'the pill is aria-hidden (so its digits never enter the name), which is why the name is ' +
+      'the visible label plus the sr-only sentence',
+  )
+
+  // Cap and bar stability: a big count renders "99+" and must not move the bar.
+  await page.evaluate(() => {
+    const items = Array.from({ length: 100 }, (_, i) => ({
+      ean: `77900000000${String(i).padStart(2, '0')}`,
+      cantidad: 1,
+      alerta: false,
+    }))
+    localStorage.setItem('precio-scanner:lupa:lista', JSON.stringify(items))
+  })
+  await page.goto(`${baseUrl}lista`, { waitUntil: 'domcontentloaded' })
+  const capReady = await waitForVisible(listaBadge())
+  const capValue = capReady ? await listaBadgeValue() : null
+  const capNav = capReady ? await navMetrics() : null
+  record(
+    'LIST-badge-cap',
+    capReady &&
+      capValue === '99+' &&
+      !!emptyNav &&
+      !!capNav &&
+      capNav.barW === emptyNav.barW &&
+      capNav.barH === emptyNav.barH &&
+      capNav.barOverflow <= 0 &&
+      capNav.listaW >= 43.99 &&
+      capNav.listaH >= 43.99,
+    `100 rows -> badge "${capValue}"; bar ${capNav?.barW}×${capNav?.barH} ` +
+      `vs ${emptyNav?.barW}×${emptyNav?.barH} with an empty list`,
+    `nav horizontal overflow ${capNav?.barOverflow}px (no wrap/shift); ` +
+      `Lista tab ${capNav?.listaW}×${capNav?.listaH}`,
   )
 
   await browser.close()

@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { Bell, ClipboardList, Home, ScanBarcode, User } from 'lucide-react'
+import { useList } from '../hooks/useList'
 
 // min-h-11/min-w-11 pin every tab to the 44×44 minimum touch target (§7) while the
 // icon, label, colours and spacing stay exactly as designed.
@@ -12,18 +13,41 @@ function Tab({
   to,
   label,
   icon,
+  badge,
 }: {
   to: string
   label: string
   icon: React.ReactNode
+  /** Item count shown as a pill on the icon; 0 renders nothing (a "0" is noise). */
+  badge?: number
 }) {
+  const count = badge ?? 0
+  const showBadge = count > 0
   return (
     <NavLink
       to={to}
       className={({ isActive }) => `${TAB_CLASS} ${isActive ? ACTIVE : INACTIVE}`}
     >
-      {icon}
+      {/* The wrapper anchors the pill: it is absolutely positioned, so a large count
+          can never grow, shift or wrap the bar. */}
+      <span className="relative inline-flex">
+        {icon}
+        {showBadge ? (
+          <span
+            data-list-badge={count > 99 ? '99+' : String(count)}
+            aria-hidden="true"
+            className="tnum absolute -right-2 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[9px] font-semibold leading-none text-accent-contrast"
+          >
+            {count > 99 ? '99+' : count}
+          </span>
+        ) : null}
+      </span>
       <span>{label}</span>
+      {/* The pill is decorative, so the count reaches screen readers as a sentence:
+          the link reads "Lista 3 productos en la lista", never an ambiguous "Lista 3". */}
+      {showBadge ? (
+        <span className="sr-only">{`${count} producto${count === 1 ? '' : 's'} en la lista`}</span>
+      ) : null}
     </NavLink>
   )
 }
@@ -34,8 +58,14 @@ function Tab({
  * Inicio · Alertas · [Escanear] · Lista · Perfil. Escanear is the primary
  * action: a filled green tile sits in the center of a floating rounded bar,
  * mirroring the product mockup.
+ *
+ * This is the layout route, so it stays mounted across every child route — which is
+ * exactly why it holds the top-level `useList()`: the Lista badge must follow a list
+ * changed from any page. It counts rows (`items.length`), not quantities.
  */
 export default function AppLayout() {
+  const { items } = useList()
+
   return (
     <div className="min-h-dvh bg-surface">
       <div className="pb-24">
@@ -66,6 +96,7 @@ export default function AppLayout() {
           <Tab
             to="/lista"
             label="Lista"
+            badge={items.length}
             icon={<ClipboardList size={18} strokeWidth={1.8} aria-hidden="true" />}
           />
           <Tab
