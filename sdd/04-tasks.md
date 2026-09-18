@@ -24,14 +24,14 @@ Ordered by dependency. Each work unit = one commit (reviewable, tests included).
 | Work unit | Done | Partial | Pending |
 | --- | --- | --- | --- |
 | WU1 Skeleton + deploy | 5 | 0 | 0 |
-| WU2 Data pipeline | 6 | 1 | 1 |
+| WU2 Data pipeline | 6 | 2 | 0 |
 | WU3 Loading + worker | 4 | 0 | 0 |
 | WU4 Search | 5 | 0 | 0 |
 | WU5 Filters + sorting | 4 | 0 | 0 |
 | WU6 Persistence | 4 | 0 | 0 |
 | WU7 Hardening + docs | 5 | 1 | 0 |
 | WU8 Lupa (rebrand + feature set) | 8 | 0 | 0 |
-| **Total (44 items)** | **41** | **2** | **1** |
+| **Total (44 items)** | **41** | **3** | **0** |
 
 Test suite at the Lupa merge: `npm test` → **11 files, 97 tests, all green**;
 `npm run typecheck` → clean. Build: worker chunk 28.75 kB gzip, main bundle 90.61 kB gzip.
@@ -122,7 +122,23 @@ AC-6 (deploy) verified via a real push.
 - [ ] 2.8 *(added — revealed by 2.7)* Wire CI to actually verify: run `npm run typecheck`,
       `npm test`, and a `normalize` + `generate-index` run on the real input, failing the job
       if the regenerated catalog differs from the committed one. Today the only CI job is
-      `build` + deploy.
+      `build` + deploy. — **PARTIAL.** A `verify` job now gates `deploy` (`needs: verify`) and
+      runs `npm run typecheck`, `npm test`, and a regen-and-diff of the search assets. The
+      asset check regenerates `public/data/catalogo-index.json` and `catalogo-facets.json`
+      from the committed `catalogo.json` and fails on any difference; proven locally to pass
+      byte-for-byte on a clean tree and to fail after mutating the catalog. The workflow was
+      also given a `contents: read` permission for the verify job, which otherwise inherits
+      the workflow's `pages: write` / `id-token: write`.
+      **The `normalize` half is not implementable in CI as written:** `scripts/normalize-catalog.ts`
+      reads `raw-catalog.json`, which `.gitignore` excludes deliberately ("Raw catalog
+      extraction (never commit; keep local only)"). CI therefore cannot re-derive
+      `public/data/catalogo.json` from its source of truth, and nothing asserts that a local
+      normalize run still reproduces the committed catalog. Closing that half needs the raw
+      input published somewhere CI can reach it (artifact store, LFS, or a release asset) — a
+      decision, not a code change. The cheap alternative that needs no raw input is the 2.7
+      missing half: assert structural invariants (record count, id uniqueness, version) over
+      the committed catalog. `scripts/acceptance.ts` is also still outside CI; it needs a
+      browser.
 
 ## Work Unit 3 — Catalog loading, caching, and worker
 

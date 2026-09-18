@@ -14,7 +14,52 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Gate: nothing reaches the deploy job unless this passes.
+  #
+  # Before this job existed the workflow ran `npm ci` and `npm run build` only, so
+  # typecheck, the test suite and the search-asset check never ran in CI at all — and
+  # since a push to main deploys, that meant publishing code no check had verified.
+  verify:
+    runs-on: ubuntu-latest
+    # Least privilege: this job only reads. It must not hold the Pages deploy
+    # credentials that the workflow grants by default.
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+      # The committed search assets must be exactly what the committed catalog
+      # produces. `catalogo-facets.json` carries the sha256 of `catalogo.json` as its
+      # `version`, so editing the catalog without regenerating is caught here.
+      #
+      # `--quiet` takes only the exit code, then `--stat` prints the file summary: the
+      # assets are single-line JSON, so a plain `git diff` would dump a 2 MB line into
+      # the log if the index ever goes stale.
+      - name: Search assets match the committed catalog
+        run: |
+          npm run generate-index
+          if ! git diff --quiet -- public/data; then
+            echo "::error::public/data is stale — run 'npm run generate-index' and commit the result."
+            git --no-pager diff --stat -- public/data
+            exit 1
+          fi
+
+      # NOT checkable here: `npm run normalize` reads `raw-catalog.json`, which is
+      # gitignored ("Raw catalog extraction (never commit; keep local only)"). CI
+      # therefore cannot re-derive `public/data/catalogo.json` from its source of
+      # truth, and nothing asserts that a local normalize run still reproduces the
+      # committed catalog. That half of task 2.8 needs the raw input published
+      # somewhere CI can reach it.
+
   deploy:
+    needs: verify
     runs-on: ubuntu-latest
     environment:
       name: github-pages
