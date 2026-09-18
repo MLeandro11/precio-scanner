@@ -48,7 +48,7 @@ function makeDeps({ cache = null, catalogStatus = 200 }: { cache?: CacheLike | n
 }
 
 describe('catalogLoader', () => {
-  it('fetches facets no-cache and catalog+index when cache misses, storing versioned copies', async () => {
+  it('fetches facets network-first and the catalog+index files, storing all three', async () => {
     const cache = fakeCache()
     const { deps, fetched } = makeDeps({ cache })
 
@@ -57,11 +57,11 @@ describe('catalogLoader', () => {
     expect(result.products).toEqual(CATALOG.products)
     expect(result.facets.version).toBe('abc123')
     expect(result.index.keys).toEqual(['nombre', 'categoria'])
-    // facets always bypasses the cache (fresh version check) and uses the
-    // exact public/data/ path (this caught a real bug: URLs missing /data/)
+    // facets try the network first (fresh version check) and use the exact
+    // public/data/ path (this caught a real bug: URLs missing /data/)
     expect(fetched.some((u) => u.endsWith('/data/catalogo-facets.json'))).toBe(true)
-    // catalog + index were stored under versioned keys
-    expect(cache.calls.put).toBe(2)
+    // all three are stored: facets under a stable key, the heavy two versioned
+    expect(cache.calls.put).toBe(3)
     expect(fetched.some((u) => u.endsWith('/data/catalogo.json?v=abc123'))).toBe(true)
     expect(fetched.some((u) => u.endsWith('/data/catalogo-index.json?v=abc123'))).toBe(true)
   })
@@ -98,7 +98,7 @@ describe('catalogLoader', () => {
       baseUrl: BASE,
     })
     expect(result.products).toEqual(CATALOG.products)
-    expect(cache.calls.put).toBe(4) // 2 from first load + 2 from re-download
+    expect(cache.calls.put).toBe(6) // 3 from the first load + 3 from the re-download
   })
 
   it('throws a clear error when the dev server returns HTML instead of JSON', async () => {
@@ -119,6 +119,63 @@ describe('catalogLoader', () => {
     await expect(
       loadCatalog({ fetchFn, baseUrl: BASE }),
     ).rejects.toThrow(/facets/)
+  })
+
+  /*
+   * Offline (FR-11.2). What matters is the distinction these two tests pin down: a
+   * request that never completed is offline and may fall back to the last known facets,
+   * while a server that answers badly stays fatal. Collapsing the two would let a stale
+   * cached copy hide a deployment where public/data/ stopped being published.
+   */
+  it('falls back to the cached facets when the network is unreachable', async () => {
+    const cache = fakeCache()
+    // one online boot populates both the facets copy and the versioned heavy files
+    await loadCatalog(makeDeps({ cache }).deps)
+
+    // offline: fetch rejects the way it does when the request never completes
+    const offline: typeof fetch = async () => {
+      throw new TypeError('Failed to fetch')
+    }
+    const result = await loadCatalog({
+      fetchFn: offline,
+      caches: { open: async () => cache },
+      baseUrl: BASE,
+    })
+
+    expect(result.facets.version).toBe('abc123')
+    expect(result.products).toEqual(CATALOG.products)
+    expect(result.index.keys).toEqual(['nombre', 'categoria'])
+  })
+
+  it('offline, reaches the network only for the facets and serves the heavy files from cache', async () => {
+    const cache = fakeCache()
+    await loadCatalog(makeDeps({ cache }).deps)
+
+    const attempts: string[] = []
+    const offline: typeof fetch = async (url: RequestInfo | URL) => {
+      attempts.push(String(url))
+      throw new TypeError('Failed to fetch')
+    }
+    const result = await loadCatalog({
+      fetchFn: offline,
+      caches: { open: async () => cache },
+      baseUrl: BASE,
+    })
+
+    expect(result.catalogVersion).toBe(CATALOG.version)
+    // The facets are attempted (network-first) and that is the ONLY request. The
+    // versioned catalog and index come from the cache, which is the whole point of
+    // storing 5.5 MB that was previously unreachable offline.
+    expect(attempts).toEqual([`${BASE}data/catalogo-facets.json`])
+  })
+
+  it('fails clearly when offline on a first visit, with nothing cached', async () => {
+    const offline: typeof fetch = async () => {
+      throw new TypeError('Failed to fetch')
+    }
+    await expect(
+      loadCatalog({ fetchFn: offline, caches: { open: async () => fakeCache() }, baseUrl: BASE }),
+    ).rejects.toThrow(/offline with no cached facets/)
   })
 
   it('throws a clear error when the catalog fails to download', async () => {

@@ -3,8 +3,11 @@
  *
  * Strategy (spec FR-4.2):
  *   1. `catalogo-facets.json` is tiny and carries the data `version` hash:
- *      always fetched with cache: 'no-cache' so a new data build is seen
- *      immediately.
+ *      network-first with `cache: 'no-cache'` so a new data build is seen
+ *      immediately, plus the last known copy as the offline fallback. Without
+ *      that fallback the boot cannot get past this step offline, which makes
+ *      every byte of the cache below unreachable: the app would hold 5.5 MB it
+ *      can never read.
  *   2. `catalogo.json` and `catalogo-index.json` (the heavy files) are cached
  *      in the Cache API under versioned keys (`path?v=<version>`): first
  *      visit downloads them, every later visit is served from cache with zero
@@ -67,20 +70,6 @@ function parseJsonResponse<T>(
   }
 }
 
-async function fetchJson<T>(
-  fetchFn: typeof fetch,
-  url: string,
-  init: RequestInit,
-  label: string,
-): Promise<T> {
-  const res = await fetchFn(url, init)
-  if (!res.ok) {
-    throw new Error(`catalogLoader: failed to download ${label} (${res.status} ${url})`)
-  }
-  const text = await res.text()
-  return parseJsonResponse<T>(res, text, label, url)
-}
-
 interface LoaderDeps {
   fetchFn?: typeof fetch
   caches?: CacheStore | null
@@ -100,17 +89,59 @@ export async function loadCatalog(deps: LoaderDeps = {}): Promise<LoadedCatalog>
   const baseUrl = deps.baseUrl ?? defaultBaseUrl()
   const url = (path: string) => baseUrl + 'data/' + path
 
-  // 1. facets: always fresh (tiny file, carries the version)
-  const facets = await fetchJson<Facets>(
-    fetchFn,
-    url('catalogo-facets.json'),
-    { cache: 'no-cache' },
-    'facets',
-  )
+  const cache = cachesApi ? await cachesApi.open(CACHE_NAME) : null
+
+  // 1. facets: network-first, so a new data build is still seen immediately, with the
+  // last known copy as the offline fallback.
+  const facetsKey = url('catalogo-facets.json')
+  const facets = await loadFacets()
   const version = facets.version
 
+  async function loadFacets(): Promise<Facets> {
+    let response: Response | null = null
+    try {
+      response = await fetchFn(facetsKey, { cache: 'no-cache' })
+    } catch {
+      // `fetch` rejects only when the request never completed — the offline signal.
+      response = null
+    }
+
+    if (!response) {
+      const hit = await cache?.match(facetsKey)
+      if (!hit) {
+        throw new Error(
+          `catalogLoader: offline with no cached facets (${facetsKey}). ` +
+            'The first visit needs a network connection once.',
+        )
+      }
+      return (await hit.json()) as Facets
+    }
+
+    // A server that is reached and answers badly is a deployment problem, not an
+    // offline condition. It must keep failing loudly instead of being masked by a
+    // stale cached copy.
+    if (!response.ok) {
+      throw new Error(
+        `catalogLoader: failed to download facets (${response.status} ${facetsKey})`,
+      )
+    }
+
+    const fresh = parseJsonResponse<Facets>(
+      response,
+      await response.text(),
+      'facets',
+      facetsKey,
+    )
+    await cache?.put(
+      facetsKey,
+      new Response(JSON.stringify(fresh), {
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+    return fresh
+  }
+
   // 2. heavy files: versioned cache, network only on miss
-  const cache = cachesApi ? await cachesApi.open(CACHE_NAME) : null
 
   async function fetchVersioned(path: string): Promise<Catalog | CatalogIndex> {
     const keyedUrl = `${url(path)}?v=${version}`
