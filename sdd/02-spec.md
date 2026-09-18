@@ -116,6 +116,28 @@
 - FR-10.3: Site loads and searches correctly at
   `https://MLeandro11.github.io/precio-scanner/`.
 
+### FR-11: PWA — install, offline boot, update freshness *(added — recorded from an audit)*
+Recorded from a measured audit of the deployed app (baseline in WU9, `04-tasks.md`) rather
+than from the original proposal, which never mentioned a service worker. Each clause is
+marked with whether the audit found it met.
+
+- FR-11.1: The app is installable to the home screen: a valid Web App Manifest wired from the
+  document (`name`/`short_name`, 192px and 512px icons plus a `maskable` one, `start_url`,
+  `scope`, `display: standalone`), and it launches standalone. — **Met at the audit.**
+- FR-11.2: **After one online visit, the app must boot, load its catalog and search with no
+  network at all.** A cold offline start must serve the app shell — document, JS, CSS, worker
+  chunk. The catalog half already survives offline through the versioned Cache API (FR-4.2).
+  — **Not met at the audit.**
+- FR-11.3: A deployed update must reach a returning visitor **without that visitor clearing
+  site data**, and no version may serve a stale shell indefinitely. Serving the previous
+  release for a bounded, defined window is acceptable; serving it forever is not.
+- FR-11.4: Offline degrades honestly. A first-ever visit with no network says so plainly
+  instead of rendering a broken or empty shell — the same stance FR-8.4 takes on modelled
+  data.
+- FR-11.5: On iOS the app launches in standalone mode with the correct theme colour, through
+  the manifest plus the platform `apple-*` meta tags. — **Partially met at the audit:**
+  `apple-touch-icon` is present; the standalone, status-bar and title tags are not.
+
 ## Non-functional requirements
 
 - NFR-1: Initial load (catalog + index, first visit) under ~3 s on a normal connection;
@@ -126,6 +148,9 @@
 - NFR-4: Worker messaging and cache versioning logic are unit-tested (Vitest).
 - NFR-5: *(added)* TypeScript strict (`tsc --noEmit` clean); list/scan math unit-tested in
   Node (`lib/lupa/*.test.ts`).
+- NFR-6: *(added)* The offline shell cache is versioned, and the version/invalidation decision
+  is unit-tested (Vitest) rather than left to an untested cache rule — the standard NFR-4
+  already applies to the data cache.
 
 ## Acceptance criteria
 
@@ -139,8 +164,17 @@
 - AC-7: Favorites and recent searches survive a full page reload.
 - AC-8: *(added)* An EAN added to the list persists across reload and resolves to its
   product; the barcode view renders.
+- AC-9: *(added)* After a first online visit, with the network unavailable, a cold start boots
+  the app and querying "serenisma" returns La Serenísima results (AC-2) from the cached
+  catalog.
+- AC-10: *(added)* After a new deploy, a browser still holding the previous version receives
+  the new version within one navigation, with no manual cache clear.
 
 ## Out of scope (Phase 1)
 
 Unit-of-measure parsing, price-per-unit comparison, live multi-store comparison, price
 history, daily updater, price alerts with data. (Models exist; no simulated data.)
+
+**PWA scope note.** FR-11 covers install, offline boot and update freshness only. Push
+notifications, background sync, an offline mutation queue and app-store packaging are out of
+scope and are not implied by it.

@@ -31,7 +31,8 @@ Ordered by dependency. Each work unit = one commit (reviewable, tests included).
 | WU6 Persistence | 4 | 0 | 0 |
 | WU7 Hardening + docs | 6 | 0 | 1 |
 | WU8 Lupa (rebrand + feature set) | 8 | 0 | 0 |
-| **Total (45 items)** | **42** | **2** | **1** |
+| WU9 PWA (FR-11) | 0 | 0 | 5 |
+| **Total (50 items)** | **42** | **2** | **6** |
 
 Test suite at the Lupa merge: `npm test` → **11 files, 97 tests, all green**;
 `npm run typecheck` → clean. Build: worker chunk 28.75 kB gzip, main bundle 90.61 kB gzip.
@@ -332,6 +333,50 @@ unit so the ledger stays honest about scope growth.
 - [x] 8.8 Lupa re-verification.
       — Evidence (2026-09-14): `npm run typecheck` clean; `npm test` → 11 files /
       97 tests; `npm run acceptance` → 16/16 PASS; build sizes recorded.
+
+## Work Unit 9 — PWA: install, offline boot, update freshness (FR-11)
+
+**Requirement recorded, not started.** The requirement lives in `02-spec.md` FR-11 with AC-9
+and AC-10. **No implementation is chosen yet** — that is task 9.1, and it belongs after the
+requirement is reviewed.
+
+Measured baseline (2026-09-18, against production `mleandro11.github.io/precio-scanner/`
+plus a local `vite preview`):
+
+- **Already correct.** The manifest is complete and valid (`name`, `short_name`,
+  `description`, `start_url: "./"`, `scope: "./"`, `display: standalone`, colours) and is
+  served as `application/manifest+json`. Icon dimensions read from the files themselves:
+  192x192, 512x512, maskable 512x512, apple-touch 180x180, `favicon.ico` with 3 images.
+  `theme-color` tracks light/dark from the inline boot script. HTTPS by GH Pages.
+- **Also already correct, and this is the expensive half.** The catalog (3.4 MB) and index
+  (2.1 MB) are cached through the Cache API under `precio-scanner-data-v1`, keyed by the
+  catalog sha256, network only on miss (FR-4.2).
+- **The gap.** No service worker: `getRegistrations()` → 0, `controller` → `null`,
+  `/precio-scanner/sw.js` → **404**. `caches.keys()` returns only
+  `precio-scanner-data-v1`, holding exactly `catalogo.json?v=…` and
+  `catalogo-index.json?v=…`. **The app shell sits in no app-controlled cache**, and it is only
+  ~137 kB (119 kB JS + 7.4 kB CSS + 10.7 kB worker).
+- **Why offline fails today.** GH Pages serves `cache-control: max-age=600` for the document,
+  the manifest **and** the hashed assets (no `immutable`), so once that window lapses a cold
+  offline start cannot fetch `index.html` at all. The data is cached; the code that reads it
+  is not.
+- **iOS.** `apple-touch-icon` is present; `apple-mobile-web-app-capable`,
+  `apple-mobile-web-app-status-bar-style` and `apple-mobile-web-app-title` are absent.
+
+- [ ] 9.1 Choose and record the implementation in `03-design.md`: a `sw.js` emitted by
+      `scripts/postbuild.ts` from the build's hashed asset list (no new dependency, matching
+      the repo's minimal-dependency stance) versus `vite-plugin-pwa` / Workbox. The update
+      policy (`skipWaiting` / `clientsClaim`) is part of that same decision, not an afterthought.
+- [ ] 9.2 Precache the shell, versioned, satisfying FR-11.2 and FR-11.3; make the
+      version/invalidation decision a **pure, unit-tested** function per NFR-6.
+- [ ] 9.3 The iOS meta tags and the remaining manifest fields (`id`, `lang`, `dir`,
+      `orientation`) for FR-11.5.
+- [ ] 9.4 Extend `scripts/acceptance.ts` with the offline row (AC-9); prove AC-10 with two
+      consecutive builds against one retained browser profile.
+- [ ] 9.5 *(risk — carry into the design)* A service worker sits between the deploy and the
+      user, so it can **hide a routing bug the harness currently catches** — WU7.6 exists
+      precisely because the harness must test real GH Pages routing semantics. The offline row
+      must keep exercising routing with the worker bypassed, not only through it.
 
 ## Phase 2 backlog (separate change, not started here)
 
