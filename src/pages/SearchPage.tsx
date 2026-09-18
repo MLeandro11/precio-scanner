@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, SlidersHorizontal } from 'lucide-react'
 import { useNavigate, useSearchParams, useNavigationType } from 'react-router-dom'
+import { toast } from 'sonner'
 import { createSearchSession } from '../lib/searchSession'
 import type { WorkerClient } from '../lib/workerClient'
 import type { Facets, SortOrder } from '../lib/types'
@@ -222,7 +223,10 @@ export default function SearchPage({
             search={search}
             onOpenProduct={(p) => navigate(`/producto/${encodeURIComponent(p.id)}`)}
             isInList={isInList}
-            onAddToList={(p) => addToList(p.barcode || p.id, p.nombre)}
+            onAddToList={(p) => {
+              addToList(p.barcode || p.id, p.nombre)
+              toast('Agregado a tu lista', { description: p.nombre })
+            }}
           />
         </div>
       </main>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Check, History, Plus, Star } from 'lucide-react'
+import { toast } from 'sonner'
 import Brand from '../components/Brand'
 import ProductImage from '../components/ProductImage'
 import { formatPrice } from '../components/ProductCard'
@@ -100,7 +101,15 @@ export default function ProductPage() {
             type="button"
             aria-pressed={favorites.isFavorite(product.id)}
             aria-label={favorites.isFavorite(product.id) ? 'Quitar de favoritos' : 'Agregar a favoritos'}
-            onClick={() => favorites.toggleFavorite(product.id)}
+            onClick={() => {
+              // Read the state BEFORE toggling so the toast reports the resulting
+              // state, not the one the user just left.
+              const wasFavorite = favorites.isFavorite(product.id)
+              favorites.toggleFavorite(product.id)
+              toast(wasFavorite ? 'Quitado de favoritos' : 'Agregado a favoritos', {
+                description: product.nombre,
+              })
+            }}
             className={`flex h-10 w-10 items-center justify-center rounded-full border transition ${
               favorites.isFavorite(product.id)
                 ? 'border-favorite/40 bg-favorite/10 text-favorite'
@@ -184,7 +193,10 @@ export default function ProductPage() {
           <Button
             variant="primary"
             className="w-full shadow-lg"
-            onClick={() => add(product.barcode || product.id, product.nombre)}
+            onClick={() => {
+              add(product.barcode || product.id, product.nombre)
+              toast('Agregado a tu lista', { description: product.nombre })
+            }}
           >
             <Plus size={18} aria-hidden="true" /> Agregar a mi lista
           </Button>
