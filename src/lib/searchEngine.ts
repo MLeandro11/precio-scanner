@@ -8,7 +8,17 @@
 import Fuse, { type IFuseOptions, type FuseResultMatch } from 'fuse.js'
 import type { Producto, QueryParams, QueryResult } from './types'
 
-const FUSE_OPTIONS: IFuseOptions<Producto> = {
+/**
+ * Fuzzy-match tunables. The only source of truth for them: `scripts/tune-threshold.ts`
+ * spreads this object and overrides `threshold`, so the tuning run measures the options
+ * the app actually ships instead of a copy that can silently drift (WU7.1). The chosen
+ * value is recorded in `sdd/03-design.md`.
+ *
+ * `keys` deliberately covers `categoria` as well as `nombre`, so a category word is a
+ * valid query ("bebidas"); `ignoreLocation` lets a match sit anywhere in the string,
+ * which is what makes a brand word in a long name findable.
+ */
+export const FUSE_OPTIONS = {
   includeScore: true,
   includeMatches: true,
   threshold: 0.35,
@@ -17,7 +27,7 @@ const FUSE_OPTIONS: IFuseOptions<Producto> = {
     { name: 'nombre', weight: 3 },
     { name: 'categoria', weight: 1 },
   ],
-}
+} satisfies IFuseOptions<Producto>
 
 export const DEFAULT_LIMIT = 50
 

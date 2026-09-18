@@ -191,7 +191,7 @@ navigation, floating outline nav bar.
 | Catalog becomes stale | Accepted for Phase 1; daily updater is Phase 2 |
 | Raw data has no brand field | `marca` kept as `''`; no brand filter/index in Phase 1 |
 | Zero-price noise | Excluded at normalize time with reported counts. `enTienda` is **not** an exclusion criterion (FR-1.3) |
-| Fuse threshold too loose/strict | Fixed at **0.35** (`searchEngine.ts`), verified against the real catalog: AC-2/AC-3 return 10/10 relevant in the top 10. Not yet tuned against a personal list of tricky searches (WU7.1) |
+| Fuse threshold too loose/strict | Fixed at **0.35** (`searchEngine.ts`). **Tuned** in WU7.1 by `scripts/tune-threshold.ts` against the real catalog: 6 queries × thresholds 0.25–0.40. Rank and precision@10 are **flat across the whole range** (`serenisma`/`cocacola` 10/10, `quilmes 1890` 6/10, `zero 1,5` and `yogurt griego` 1/10, `coca 2,5` 0/10), so the threshold does **not** decide ordering — it only sets tail volume. `0.35→0.40` multiplies total matches **×7.84** (106→831), so 0.35 is the tightest value below the flood cliff. The run's real finding is a defect no threshold can reach: `engine.fuse.search(q)` passes the raw string as **one** fuzzy pattern, so `coca 2,5` is not "coca AND 2,5" and the correct catalog entries never surface. Tracked as 7.7 |
 | GH Pages base-path mistakes | `base` set on day one; router `basename` follows `BASE_URL`; deploy verified live |
 | Scanner is Chromium-only | Replaced with a single pure-JS decoder (ZXing) that works on any device with `getUserMedia`; manual EAN entry remains as the always-available fallback (FR-9.2) |
 | Persisted EANs drift from catalog | `useResolveEans` resolves lazily through the worker; barcode-less products fall back to id |

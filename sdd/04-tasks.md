@@ -29,9 +29,9 @@ Ordered by dependency. Each work unit = one commit (reviewable, tests included).
 | WU4 Search | 5 | 0 | 0 |
 | WU5 Filters + sorting | 4 | 0 | 0 |
 | WU6 Persistence | 4 | 0 | 0 |
-| WU7 Hardening + docs | 5 | 1 | 0 |
+| WU7 Hardening + docs | 6 | 0 | 1 |
 | WU8 Lupa (rebrand + feature set) | 8 | 0 | 0 |
-| **Total (44 items)** | **41** | **3** | **0** |
+| **Total (45 items)** | **42** | **2** | **1** |
 
 Test suite at the Lupa merge: `npm test` → **11 files, 97 tests, all green**;
 `npm run typecheck` → clean. Build: worker chunk 28.75 kB gzip, main bundle 90.61 kB gzip.
@@ -214,11 +214,20 @@ AC-6 (deploy) verified via a real push.
 
 ## Work Unit 7 — Hardening and docs
 
-- [ ] 7.1 Tune Fuse threshold against AC-2/AC-3 and a personal list of 10 tricky real
-      searches; record final value in the design doc. — **PARTIAL.** `threshold: 0.35` is
-      recorded in `03-design.md` and AC-2/AC-3 pass on real data. The missing half is the
-      tuning run over the user's own tricky-search list — it must come from the user's
-      habits; inventing it would produce a fake "tuning" pass.
+- [x] 7.1 Tune Fuse threshold against AC-2/AC-3 and a personal list of 10 tricky real
+      searches; record final value in the design doc. — **Done**, and through a reproducible
+      run rather than a hand check: `scripts/tune-threshold.ts` sweeps thresholds over
+      `scripts/tuning-queries.ts` against the real catalog, and `FUSE_OPTIONS` is now
+      exported so the sweep tunes the object the app actually ships instead of a copy.
+      **4** personal searches were supplied, not 10 — recorded as a shortfall — and the run
+      still reached a conclusion. Outcome: **0.35 stands.** Rank and precision@10 are flat
+      from 0.25 to 0.40 (see `03-design.md`), so the threshold changes nothing a user can
+      perceive; it only sets tail volume, and `0.35→0.40` floods the set ×7.84. The run's
+      real value was falsifying its own premise: the broken searches (`coca 2,5` 0/10,
+      `zero 1,5` and `yogurt griego` 1/10) are **multi-token** failures that no threshold
+      fixes. A precision metric was added mid-run after a stated conclusion turned out to
+      be a measurement artifact: a ratio over the *returned* count reported a threshold that
+      truncated the set to one correct hit as "100% precision". Tracked as 7.7.
 - [x] 7.2 Long-typing responsiveness pass (AC-5); record observations.
       — Evidence: `05-acceptance-report.md` → 43 keystrokes in 1,515 ms, worst frame gap
       33 ms, 0 frames over 100 ms. Automated in `scripts/acceptance.ts`.
@@ -265,6 +274,23 @@ AC-6 (deploy) verified via a real push.
       own ids and the server answers `404 text/plain`; restored, the harness is green (20/20,
       twice). A port collision on 4173 (`vite preview` also defaults there) fails loudly with
       `EADDRINUSE` instead of silently testing the wrong server.
+- [ ] 7.7 *(added — revealed by 7.1)* **Make a multi-word query mean "all the words".**
+      `engine.fuse.search(q)` hands the raw string to Fuse as a **single** fuzzy pattern, so
+      the query is not "coca AND 2,5". Measured against the real catalog: `coca 2,5` never
+      reaches the top 50, even though `COCA COLA X 2.5` and `coca cola zero x 2.5` both
+      exist; `zero 1,5` buries `COCA COLA ZERO X 1,5L` under Zero drinks that have no 1.5;
+      `yogurt griego` never surfaces the 20 other Greek yogurts. The 7.1 sweep proved no
+      threshold touches any of this.
+      **A candidate was measured and rejected as-is.** `useExtendedSearch: true` fixes the
+      three broken queries (`coca 2,5` → #4, `zero 1,5` → #1) and leaves AC-2/AC-3 at #1, but
+      it turns user input into a query language. Measured: `!coca` returns all **20,294**
+      products, `=coca` returns **0**, `coca cola` jumps 158 → 1251 hits — and the catalog
+      itself carries **61** names containing `'`, `$`, `!` or `=`. Adopting it needs input
+      escaping plus tests over those operator characters. A naive per-token set intersection
+      was also measured and is **worse**: it discards relevance order, so `coca 2,5`
+      surfaces olive oil first.
+      Not verifiable by unit tests alone — the evidence lives in the catalog, so extend
+      `scripts/tuning-queries.ts` and re-run `scripts/tune-threshold.ts`.
 
 ## Work Unit 8 — Lupa (rebrand + feature set, `c34d0e7`)
 
@@ -357,6 +383,7 @@ across 11 files — slightly over the 400-line guidance — and was split from W
 WU8 landed as a feature-branch merge (`c34d0e7`) rather than a single oversized commit;
 single-branch delivery on `main` is acceptable, no chained PRs required.
 
-The GitHub remote is now set (public repo, deploy verified). Remaining open work is WU7.1
-(user-supplied tricky-search list), the CI half of 2.7 (tracked as 2.8), and the
-`generate-index.ts` guard that 2.7 left uncovered.
+The GitHub remote is now set (public repo, deploy verified). Remaining open work is the
+multi-token matching defect (7.7), the `normalize` half of 2.7 (tracked as 2.8 — not
+implementable in CI while `raw-catalog.json` stays local), and the structural-assertion /
+`generate-index.ts` guards that 2.7 left uncovered.
