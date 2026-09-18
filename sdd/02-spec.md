@@ -126,8 +126,14 @@ marked with whether the audit found it met.
   `scope`, `display: standalone`), and it launches standalone. — **Met at the audit.**
 - FR-11.2: **After one online visit, the app must boot, load its catalog and search with no
   network at all.** A cold offline start must serve the app shell — document, JS, CSS, worker
-  chunk. The catalog half already survives offline through the versioned Cache API (FR-4.2).
-  — **Not met at the audit.**
+  chunk. — **Met as of the service worker landing.** The audit that first recorded this clause
+  claimed the catalog half already survived offline through the versioned Cache API (FR-4.2);
+  **that was wrong**, and only an end-to-end test with the server stopped showed it:
+  `catalogo-facets.json` was fetched network-only by design, and because the boot reads the
+  data version from it, a failed facets request failed the whole boot. The app therefore held
+  5.5 MB of perfectly good cached data it could never reach. `catalogLoader` now fetches the
+  facets network-first with the last known copy as the fallback, so offline the boot proceeds
+  on the cached version and the heavy files are served from their versioned keys.
 - FR-11.3: A deployed update must reach a returning visitor **without that visitor clearing
   site data**, and no version may serve a stale shell indefinitely. Serving the previous
   release for a bounded, defined window is acceptable; serving it forever is not.

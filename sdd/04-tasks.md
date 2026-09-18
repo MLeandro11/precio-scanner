@@ -31,8 +31,8 @@ Ordered by dependency. Each work unit = one commit (reviewable, tests included).
 | WU6 Persistence | 4 | 0 | 0 |
 | WU7 Hardening + docs | 6 | 0 | 1 |
 | WU8 Lupa (rebrand + feature set) | 8 | 0 | 0 |
-| WU9 PWA (FR-11) | 0 | 0 | 5 |
-| **Total (50 items)** | **42** | **2** | **6** |
+| WU9 PWA (FR-11) | 2 | 1 | 2 |
+| **Total (50 items)** | **44** | **3** | **3** |
 
 Test suite at the Lupa merge: `npm test` → **11 files, 97 tests, all green**;
 `npm run typecheck` → clean. Build: worker chunk 28.75 kB gzip, main bundle 90.61 kB gzip.
@@ -350,7 +350,8 @@ plus a local `vite preview`):
   `theme-color` tracks light/dark from the inline boot script. HTTPS by GH Pages.
 - **Also already correct, and this is the expensive half.** The catalog (3.4 MB) and index
   (2.1 MB) are cached through the Cache API under `precio-scanner-data-v1`, keyed by the
-  catalog sha256, network only on miss (FR-4.2).
+  catalog sha256, network only on miss (FR-4.2). **But see the correction below: they were
+  unreachable offline until the facets fix.**
 - **The gap.** No service worker: `getRegistrations()` → 0, `controller` → `null`,
   `/precio-scanner/sw.js` → **404**. `caches.keys()` returns only
   `precio-scanner-data-v1`, holding exactly `catalogo.json?v=…` and
@@ -358,21 +359,34 @@ plus a local `vite preview`):
   ~137 kB (119 kB JS + 7.4 kB CSS + 10.7 kB worker).
 - **Why offline fails today.** GH Pages serves `cache-control: max-age=600` for the document,
   the manifest **and** the hashed assets (no `immutable`), so once that window lapses a cold
-  offline start cannot fetch `index.html` at all. The data is cached; the code that reads it
-  is not.
+  offline start cannot fetch `index.html` at all.
+
+**Correction to this baseline (the audit was incomplete).** The line above used to read "the
+catalogue is cached, the code that reads it is not". That was only half the story: the *code*
+was the visible gap, but `catalogLoader` also fetched `catalogo-facets.json` **network-only**,
+and since the boot takes its data version from that file, an offline start died there even with
+every heavy file cached. The 5.5 MB were unreachable. Found by stopping a local server and
+reloading — not by reading the code, which is why the E2E test existed.
 - **iOS.** `apple-touch-icon` is present; `apple-mobile-web-app-capable`,
   `apple-mobile-web-app-status-bar-style` and `apple-mobile-web-app-title` are absent.
 
-- [ ] 9.1 Choose and record the implementation in `03-design.md`: a `sw.js` emitted by
-      `scripts/postbuild.ts` from the build's hashed asset list (no new dependency, matching
-      the repo's minimal-dependency stance) versus `vite-plugin-pwa` / Workbox. The update
-      policy (`skipWaiting` / `clientsClaim`) is part of that same decision, not an afterthought.
+- [x] 9.1 Choose and record the implementation in `03-design.md`: `vite-plugin-pwa` over a
+      hand-written worker, with the reasoning and the update policy recorded there.
 - [ ] 9.2 Precache the shell, versioned, satisfying FR-11.2 and FR-11.3; make the
       version/invalidation decision a **pure, unit-tested** function per NFR-6.
-- [ ] 9.3 The iOS meta tags and the remaining manifest fields (`id`, `lang`, `dir`,
-      `orientation`) for FR-11.5.
+      — **Partial.** The shell precache works (13 entries, 912 KiB, `data/` excluded) and the
+      app-side offline cache decision is now covered by tests in `catalogLoader.test.ts`,
+      including the distinction between "unreachable network" (fall back) and "server answered
+      badly" (stay fatal). FR-11.3 / AC-10 are **not yet proven** with two consecutive builds.
+- [x] 9.3 The iOS meta tags and the remaining manifest fields (`id`, `lang`, `dir`,
+      `orientation`) for FR-11.5. `mobile-web-app-capable` and `apple-mobile-web-app-title`
+      were added; `apple-mobile-web-app-status-bar-style` is deliberately NOT set because
+      choosing it is a visual decision that needs a real iOS device to check.
 - [ ] 9.4 Extend `scripts/acceptance.ts` with the offline row (AC-9); prove AC-10 with two
       consecutive builds against one retained browser profile.
+      — **AC-9 is verified, but by hand, not in the harness:** with a local server **stopped**,
+      a reloaded `/buscar?q=serenisma` reported `data-search-state="ready"`, 50 cards, "Mostrando
+      50 de 64 productos" and the AC-2 results. That manual proof needs to become a row.
 - [ ] 9.5 *(risk — carry into the design)* A service worker sits between the deploy and the
       user, so it can **hide a routing bug the harness currently catches** — WU7.6 exists
       precisely because the harness must test real GH Pages routing semantics. The offline row

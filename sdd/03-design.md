@@ -176,9 +176,61 @@ navigation, floating outline nav bar.
 ## Deployment
 
 - `vite.config.ts`: `base: '/precio-scanner/'`.
-- `.github/workflows/deploy.yml`: checkout → node 24 → `npm ci` → `npm run build` →
-  `upload-pages-artifact` → `deploy-pages`. Trigger: push to `main`.
+- `.github/workflows/deploy.yml` runs two jobs. **`verify`**: `npm ci` → `npm run typecheck` →
+  `npm test` → regenerate the search assets and fail if `public/data/` is stale. **`deploy`**
+  (`needs: verify`): `npm run build` → `upload-pages-artifact` → `deploy-pages`. Trigger: push
+  to `main`. A red `verify` blocks the release instead of publishing it.
 - Pages source set to "GitHub Actions"; verified live (`AC-6`).
+
+## PWA: service worker and offline boot (FR-11, WU9)
+
+### Decision (WU9.1)
+
+`vite-plugin-pwa` v1.3.0, `generateSW` mode (Workbox 7), `registerType: 'autoUpdate'`.
+
+Taken over a hand-written `sw.js` emitted by `scripts/postbuild.ts`. The repo's
+minimal-dependency stance made the hand-written route genuinely attractive, but the work the
+plugin does is precisely the work that is easy to get subtly wrong: an asset manifest keyed to
+Vite's content hashes, a versioned precache with old-cache cleanup, and a navigation fallback
+that respects `base`. Hand-rolling it would mean reimplementing all of that and owning its
+bugs. The cost is build-time only — ~1.6 MB of `node_modules`, and nothing shipped to the
+browser beyond Workbox's small runtime chunk.
+
+### Update policy
+
+`autoUpdate` (`skipWaiting` + `clientsClaim`). FR-11.3 asks that a new deploy reach a
+returning visitor within one navigation and without clearing site data, and this is what
+delivers it. The known cost is the classic mismatch where a page still open on the old bundle
+tries to fetch a chunk the new deploy replaced.
+
+### What is precached, and what deliberately is not
+
+13 entries / ~912 KiB: the document, the three JS chunks (including the 467 kB `ScanPage`
+chunk, so the scanner works offline the first time it is opened in a store), the CSS, the
+icons and the manifest.
+
+`public/data/**` is excluded with `globIgnores`. The catalog (3.4 MB) and index (2.1 MB) are
+**not** the service worker's business: `catalogLoader` already caches them under keys keyed by
+the catalog's sha256 (FR-4.2), and `catalogo.json` alone exceeds Workbox's 2 MiB per-file
+default. Precaching them would double ~5.5 MB of storage and leave the app with two competing
+opinions about which copy of the data is current.
+
+`globPatterns` covers build output only (`**/*.{js,css,html}`); the `public/` icons arrive
+through `includeAssets`. Listing them in both places precached every one of them twice — the
+first build produced 21 entries that were 13 unique files with 7 duplicated pairs.
+
+### The offline boot needed an application fix, not a service worker one
+
+This is the part the service worker does not solve. `catalogo-facets.json` is read before the
+heavy files because it carries the data version, and it used to be fetched **network-only** by
+design. Offline, that failed the entire boot — so the app held 5.5 MB of perfectly cached data
+it could never reach. `catalogLoader` now treats the facets as network-first with the last
+known copy as the fallback.
+
+The distinction that matters, and that the tests pin down: a request that **never completed**
+is the offline signal and may fall back to cache, while a server that is reached and **answers
+badly** (404, or HTML from an SPA fallback) stays fatal. Collapsing the two would let a stale
+cached copy hide a deployment where `public/data/` stopped being published.
 
 ## Risks and mitigations
 
@@ -196,6 +248,10 @@ navigation, floating outline nav bar.
 | Scanner is Chromium-only | Replaced with a single pure-JS decoder (ZXing) that works on any device with `getUserMedia`; manual EAN entry remains as the always-available fallback (FR-9.2) |
 | Persisted EANs drift from catalog | `useResolveEans` resolves lazily through the worker; barcode-less products fall back to id |
 | Multi-store / history / alerts have no data | Modelled (`AlmacenPrecio`, `HistorialPrecio`) but never simulated; placeholders are honest |
+| Service worker serves a stale shell | `registerType: 'autoUpdate'` plus Workbox's versioned precache and `cleanupOutdatedCaches`, so the previous cache is dropped when the new worker activates (FR-11.3) |
+| A service worker hides a routing bug | It sits between the deploy and the user. `scripts/acceptance.ts` must keep exercising real GH Pages routing with the worker bypassed, not only through it (WU9.5) — WU7.6 exists because that harness is the only thing watching the host contract |
+| First visit happens offline, nothing cached | `catalogLoader` fails with a message naming the condition rather than rendering a broken shell (FR-11.4) |
+| Offline serves a stale data version indefinitely | The facets fallback only applies when the request cannot complete. Every online boot still refetches them, so a new data build invalidates the versioned keys on the next visit |
 
 ## Testing strategy
 
