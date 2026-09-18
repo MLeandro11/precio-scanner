@@ -73,6 +73,170 @@ html[data-theme="dark"] {
 }
 
 /*
+ * §7c Toasts — sonner theming (docs/design-system.md §7c).
+ *
+ * These rules are intentionally UNLAYERED. sonner's own stylesheet is completely
+ * unlayered and declares its palette on `[data-sonner-toaster][data-sonner-theme=...]`
+ * (specificity 0,2,0); a rule inside `@layer base/components/utilities` would lose to
+ * it no matter how specific it is. The composite selector plus the `html` ancestor
+ * also puts us at 0,2,1 — so we beat sonner's palette even if source order changes.
+ *
+ * sonner portals the toaster into <body>, so `html` is always an ancestor. The theme
+ * is driven by the `html[data-theme]` attribute (and the prefers-color-scheme
+ * fallback) exactly like §2 — never by a React `theme` prop: useTheme has no
+ * cross-instance sync, so a second instance would go stale on theme switch.
+ */
+html [data-sonner-toaster][data-sonner-theme] {
+  /* §3 typography / §4 radius — sonner sets its own stack and `8px` otherwise. */
+  font-family: var(--font-sans);
+  --border-radius: var(--radius-md);
+
+  --normal-bg: var(--surface-raised);
+  --normal-text: var(--text-primary);
+  --normal-border: var(--border);
+  /* Hover recedes to the page surface, the app's existing idiom (`hover:bg-surface`).
+     There is no distinct border-hover token, so the border holds. */
+  --normal-bg-hover: var(--surface);
+  --normal-border-hover: var(--border);
+
+  /* Status variants: this design conveys state with a semantic text/icon on a flat
+     surface, never with a tinted block, so only the text token differs. */
+  --success-bg: var(--surface-raised);
+  --success-border: var(--border);
+  --success-text: var(--accent);
+  --info-bg: var(--surface-raised);
+  --info-border: var(--border);
+  --info-text: var(--text-primary);
+  --warning-bg: var(--surface-raised);
+  --warning-border: var(--border);
+  --warning-text: var(--favorite);
+  --error-bg: var(--surface-raised);
+  --error-border: var(--border);
+  --error-text: var(--danger);
+}
+
+/*
+ * Dark: a cascade anchor kept deliberately but currently redundant — not a requirement.
+ *
+ * The toaster is mounted without a `theme` prop, so sonner always renders
+ * `data-sonner-theme="light"` (its default is `theme = 'light'`) and its own dark
+ * palette rule never matches. Everything dark here already comes from the base block
+ * above, whose `var()` references flip with `html[data-theme]`; this block re-declares
+ * the same values and changes no computed result. It is kept so the dark palette stays
+ * documented next to the base mapping, not because it wins any cascade contest.
+ */
+html[data-theme="dark"] [data-sonner-toaster][data-sonner-theme] {
+  --normal-bg: var(--surface-raised);
+  --normal-text: var(--text-primary);
+  --normal-border: var(--border);
+  --normal-bg-hover: var(--surface);
+  --normal-border-hover: var(--border);
+  --success-bg: var(--surface-raised);
+  --success-border: var(--border);
+  --success-text: var(--accent);
+  --info-bg: var(--surface-raised);
+  --info-border: var(--border);
+  --info-text: var(--text-primary);
+  --warning-bg: var(--surface-raised);
+  --warning-border: var(--border);
+  --warning-text: var(--favorite);
+  --error-bg: var(--surface-raised);
+  --error-border: var(--border);
+  --error-text: var(--danger);
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme="light"]) [data-sonner-toaster][data-sonner-theme] {
+    --normal-bg: var(--surface-raised);
+    --normal-text: var(--text-primary);
+    --normal-border: var(--border);
+    --normal-bg-hover: var(--surface);
+    --normal-border-hover: var(--border);
+    --success-bg: var(--surface-raised);
+    --success-border: var(--border);
+    --success-text: var(--accent);
+    --info-bg: var(--surface-raised);
+    --info-border: var(--border);
+    --info-text: var(--text-primary);
+    --warning-bg: var(--surface-raised);
+    --warning-border: var(--border);
+    --warning-text: var(--favorite);
+    --error-bg: var(--surface-raised);
+    --error-border: var(--border);
+    --error-text: var(--danger);
+  }
+}
+
+/*
+ * sonner hard-codes its description colour instead of routing it through a variable,
+ * so no token mapping can reach it: its own value is a mid grey tuned for a white
+ * toast, and it lands at ~1.4:1 on our dark surface. §2: secondary text is
+ * `--text-secondary`.
+ */
+html [data-sonner-toaster][data-sonner-theme] [data-description] {
+  color: var(--text-secondary);
+}
+
+/*
+ * §5/§9: the accent focus ring, tokenised. sonner's own ring is a hard-coded rgba
+ * that is invisible in dark mode, and the base ring in `@layer base` cannot beat an
+ * unlayered stylesheet. Outline is additive, so sonner's box-shadow stays everywhere
+ * except the action button, which drops it below to avoid a doubled ring.
+ */
+html [data-sonner-toaster] [data-button]:focus-visible,
+html [data-sonner-toaster] [data-close-button]:focus-visible,
+html [data-sonner-toaster] [data-sonner-toast]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/*
+ * §7c Action button ("Deshacer") — the accent chip, the same idiom §7b's ProductCard and
+ * ProductPage already use for an accented affordance (`bg-accent/10` fill, `border-accent/40`
+ * edge), so the toast action reads as a sibling of the app's own chips.
+ *
+ * sonner's default inverts the toast palette (`background: var(--normal-text)`,
+ * `color: var(--normal-bg)`), painting a near-black slab inside a light toast at the 44px
+ * §9 touch-target floor. It also hard-codes `border-radius: 4px` (not on the §4 scale) and
+ * `font-size: 12px` (the toast title is 13px).
+ *
+ * Raw CSS has no `/10` alpha modifier, so this uses `color-mix(in oklab, …)` — the same
+ * function Tailwind emits for `bg-accent/10`. Tokens only, no hex.
+ */
+html [data-sonner-toaster][data-sonner-theme] [data-action] {
+  /* §9: ≥44px touch target. */
+  min-height: 44px;
+  padding: 0 0.875rem;
+  border-radius: var(--radius-full);
+  font-size: 0.8125rem; /* one step up from sonner's 12px — level with the toast title */
+  font-weight: 600;
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent);
+  /* sonner's own `opacity 400ms` sits outside §8's 150–300ms band. */
+  transition: background-color 150ms ease-out, border-color 150ms ease-out;
+}
+
+/* Press/hover feedback walks the same alpha ramp as the chips. */
+html [data-sonner-toaster][data-sonner-theme] [data-action]:hover {
+  background: color-mix(in oklab, var(--accent) 18%, transparent);
+}
+
+html [data-sonner-toaster][data-sonner-theme] [data-action]:active {
+  background: color-mix(in oklab, var(--accent) 26%, transparent);
+}
+
+/*
+ * Drop sonner's hard-coded `rgba(0, 0, 0, 0.4)` ring so only the §5 accent outline shows.
+ * This needs 0,4,1 to beat sonner's
+ * `[data-sonner-toast][data-styled] [data-button]:focus-visible` at 0,4,0 — the toaster-level
+ * selector above is not enough once `:focus-visible` is appended.
+ */
+html [data-sonner-toaster][data-sonner-theme] [data-action]:focus-visible {
+  box-shadow: none;
+}
+
+/*
  * Tailwind v4 theme mapping. `@theme inline` emits the referenced var() directly
  * into the generated utilities, so redefining a token (e.g. under .dark) flips
  * every `bg-*`/`text-*` utility with no component change.

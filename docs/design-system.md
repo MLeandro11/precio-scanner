@@ -189,6 +189,69 @@ New dependency: `lucide-react` (SVG icons only — no component system).
 
 ---
 
+## 7c. Transient feedback: toasts (sonner)
+
+Silent actions — remove, undo, "added to my list", favourite — confirm themselves with a
+**toast**. The app uses **sonner** for that (the one UI dependency beyond `lucide-react`;
+it is a toast primitive, not a component library, so §7b still holds).
+
+One `<Toaster />` lives in `src/main.tsx` as a sibling of `<App />`, never inside a page and
+never inside `App` itself: `App` returns early for the boot and error screens, so a Toaster
+in its final return would be missing exactly when feedback matters.
+
+**The toaster is themed only through the token mapping block in `src/index.css` (§2 tokens,
+no bare hex).** sonner's own stylesheet is completely unlayered and declares its palette on
+`[data-sonner-toaster][data-sonner-theme=…]` (specificity 0,2,0), so:
+
+- The overrides stay **unlayered**. Moved into `@layer base`, `@layer components` or
+  `@layer utilities`, they would silently lose to sonner regardless of specificity.
+- The **composite selector is load-bearing**: `html [data-sonner-toaster][data-sonner-theme]`
+  reaches specificity 0,2,1 and beats sonner's `[data-sonner-toaster][data-sonner-theme=…]`
+  palette at 0,2,0. That is specificity, not source order, which is why it wins regardless of
+  where the two bundles land. Do not "tidy" it into a plain `[data-sonner-toaster]` rule.
+- The two dark re-declarations (`html[data-theme="dark"] …` and the
+  `@media (prefers-color-scheme: dark)` block scoped to `html:not([data-theme="light"])`) are
+  a **cascade anchor kept deliberately but currently redundant**. The toaster is mounted
+  without a `theme` prop, so sonner always renders `data-sonner-theme="light"` (its default)
+  and its own dark palette never matches; the base block's `var()` references already flip
+  with `html[data-theme]`, so both dark blocks restate the same values and change no computed
+  result. They are kept to document the dark palette, not because they win anything.
+- `font-family: var(--font-sans)`, `--border-radius: var(--radius-md)`, and the description
+  colour (sonner hard-codes it) belong to the same block: sonner's defaults are a foreign
+  font stack and a grey that fails contrast on the dark surface.
+- The **action button** (`Deshacer`) is styled as the accent chip — the same idiom §7b's
+  `ProductCard` and `ProductPage` use for an accented affordance: `--accent` text on a 10%
+  accent fill with a 40% accent edge, `--radius-full`, and `min-height: 44px` (§9). sonner's
+  default inverts the toast palette instead (`background: var(--normal-text)`, `color:
+  var(--normal-bg)`), which paints a near-black slab inside a light toast. Raw CSS has no
+  `/10` alpha modifier, so the block uses `color-mix(in oklab, var(--accent) 10%,
+  transparent)` — the same function Tailwind emits for `bg-accent/10`, so it is still a
+  token, not a hex. sonner's hard-coded `rgba(0, 0, 0, .4)` focus ring is dropped so only
+  the §5 accent outline shows; that override needs the `[data-action]:focus-visible`
+  compound to out-specify sonner's own button ring.
+- The theme comes from the `html[data-theme]` attribute (§2), **not** from sonner's `theme`
+  prop: `useTheme` has no cross-instance sync, so a second instance in `main.tsx` would go
+  stale when the user switches theme on the Perfil page.
+
+**Placement.** `position="bottom-center"`, with `offset` and `mobileOffset` bottom set to
+`calc(6.5rem + env(safe-area-inset-bottom, 0px))`. The bottom nav (§7) is ~87px tall at a
+390px viewport, and its padding carries the same `env(safe-area-inset-bottom)`, so the gap
+between the two stays constant on notched devices. The value is **measured, not guessed**:
+the nav pill's top edge sits 83px above the viewport bottom, and an earlier 5.5rem left the
+toast touching the nav at ~5px, so 6.5rem holds ~21px. sonner's default `bottom-0` would hide
+every toast behind the nav. If the nav's height changes, re-measure rather than re-estimate.
+If the nav's height changes, revisit that value.
+
+**Copy.** Phone UI: short title, long product name in `description`
+(`toast('Quitado de la lista', { description: nombre })`). Prefer plain `toast` over
+`toast.success`/`toast.error` unless the type adds meaning. Destructive actions are
+reversible (a `Deshacer` action), not prevented by a blocking `window.confirm`.
+
+**Motion.** sonner already ships its own `prefers-reduced-motion` block — do not add a
+second one (§8).
+
+---
+
 ## 8. Motion
 
 Sober, purposeful.
