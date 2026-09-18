@@ -77,6 +77,46 @@ export function removeItem(list: ListaItem[], ean: string): ListaItem[] {
   return list.filter((i) => i.ean !== key)
 }
 
+/**
+ * Reinserta un ítem EXACTO en su índice original (undo de removeItem).
+ *
+ * A diferencia de `addItem`, conserva `cantidad`, `alerta`, `nombre` y
+ * `productoId` tal como venían: deshacer un borrado no debe re-derivar estado
+ * ni aplicar defaults. El índice se recorta a `[0, list.length]`, y si el EAN
+ * ya está en la lista devuelve una copia sin tocar (nunca duplica).
+ */
+export function restoreItem(
+  list: ListaItem[],
+  item: ListaItem,
+  index: number,
+): ListaItem[] {
+  const key = normalizeEan(item.ean)
+  if (list.some((i) => i.ean === key)) return list.slice()
+  const at = Math.max(0, Math.min(list.length, Math.trunc(index) || 0))
+  return [...list.slice(0, at), { ...item, ean: key }, ...list.slice(at)]
+}
+
+/**
+ * Reconstruye la lista tras un vaciado sin perder lo agregado mientras tanto.
+ *
+ * `snapshot` es lo que el usuario está restaurando, así que gana ante un EAN
+ * duplicado; de `current` sólo se agregan los EAN que no estaban en el snapshot,
+ * conservando el orden relativo de `current`. Todos los campos se copian verbatim
+ * — deshacer no re-deriva defaults — y ninguno de los dos arrays se muta. Los EAN
+ * se comparan y devuelven normalizados (mismo idioma que `restoreItem`).
+ */
+export function restoreList(snapshot: ListaItem[], current: ListaItem[]): ListaItem[] {
+  const seen = new Set(snapshot.map((i) => normalizeEan(i.ean)))
+  const merged = snapshot.map((i) => ({ ...i, ean: normalizeEan(i.ean) }))
+  for (const item of current) {
+    const key = normalizeEan(item.ean)
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push({ ...item, ean: key })
+  }
+  return merged
+}
+
 export function toggleAlerta(list: ListaItem[], ean: string): ListaItem[] {
   const key = normalizeEan(ean)
   return list.map((i) => (i.ean === key ? { ...i, alerta: !i.alerta } : i))

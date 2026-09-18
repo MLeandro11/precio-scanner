@@ -3,6 +3,8 @@ import { getStored, setStored, STORAGE_PREFIX } from '../lib/storage'
 import {
   addItem as addItemTo, 
   removeItem as removeItemFrom, 
+  restoreItem as restoreItemTo,
+  restoreList as restoreListTo,
   setCantidad as setCantidadIn, 
   toggleAlerta as toggleAlertaIn,
   clearList,
@@ -90,6 +92,14 @@ export function useList() {
     (ean: string) => commit(removeItemFrom(itemsRef.current, ean)),
     [commit],
   )
+  const restore = useCallback(
+    (item: ListaItem, index: number) => commit(restoreItemTo(itemsRef.current, item, index)),
+    [commit],
+  )
+  const restoreAll = useCallback(
+    (snapshot: ListaItem[]) => commit(restoreListTo(parseListaItems(snapshot), itemsRef.current)),
+    [commit],
+  )
   const setCantidad = useCallback(
     (ean: string, cantidad: number) => commit(setCantidadIn(itemsRef.current, ean, cantidad)),
     [commit],
@@ -103,7 +113,7 @@ export function useList() {
 
   const isInList = useCallback((ean: string) => itemsRef.current.some((i) => i.ean === ean), [])
 
-  return { items, add, remove, setCantidad, toggleAlerta, clear, isInList }
+  return { items, add, remove, restore, restoreAll, setCantidad, toggleAlerta, clear, isInList }
 }
 
 export type ListControls = ReturnType<typeof useList>

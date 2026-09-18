@@ -3,6 +3,8 @@ import {
   addItem,
   setCantidad,
   removeItem,
+  restoreItem,
+  restoreList,
   toggleAlerta,
   isInList,
   clearList,
@@ -69,6 +71,152 @@ describe('setCantidad / removeItem', () => {
 
   it('removes by normalized ean', () => {
     expect(removeItem(base, 'a-1')).toEqual([base[1]])
+  })
+})
+
+describe('restoreItem', () => {
+  const removed: ListaItem = {
+    ean: 'B2',
+    cantidad: 3,
+    alerta: true,
+    nombre: 'Yerba Canarias 1kg',
+    productoId: 'p-42',
+  }
+
+  it('reinserts every field verbatim (cantidad, alerta, nombre, productoId)', () => {
+    const list: ListaItem[] = [{ ean: 'A1', cantidad: 1, alerta: false }]
+    const next = restoreItem(list, removed, 1)
+    expect(next[1]).toEqual(removed)
+  })
+
+  it('inserts at the original index so ordering is restored', () => {
+    const list: ListaItem[] = [
+      { ean: 'A1', cantidad: 1, alerta: false },
+      { ean: 'C3', cantidad: 1, alerta: false },
+    ]
+    expect(restoreItem(list, removed, 1).map((i) => i.ean)).toEqual(['A1', 'B2', 'C3'])
+  })
+
+  it('clamps a negative index to the head', () => {
+    const list: ListaItem[] = [{ ean: 'A1', cantidad: 1, alerta: false }]
+    expect(restoreItem(list, removed, -5).map((i) => i.ean)).toEqual(['B2', 'A1'])
+  })
+
+  it('clamps an index past the end to append', () => {
+    const list: ListaItem[] = [{ ean: 'A1', cantidad: 1, alerta: false }]
+    expect(restoreItem(list, removed, 99).map((i) => i.ean)).toEqual(['A1', 'B2'])
+  })
+
+  it('restores into an empty list', () => {
+    expect(restoreItem([], removed, 0)).toEqual([removed])
+  })
+
+  it('does not duplicate when the normalized ean is already present', () => {
+    const list: ListaItem[] = [{ ean: 'B2', cantidad: 9, alerta: false }]
+    const next = restoreItem(list, { ...removed, ean: 'b-2' }, 0)
+    expect(next).toEqual(list)
+    expect(next).not.toBe(list)
+  })
+
+  it('never mutates the input list', () => {
+    const list: ListaItem[] = [{ ean: 'A1', cantidad: 1, alerta: false }]
+    const snapshot = [...list]
+    const next = restoreItem(list, removed, 0)
+    expect(list).toEqual(snapshot)
+    expect(next).not.toBe(list)
+  })
+
+  it('normalizes the ean of the restored item', () => {
+    const next = restoreItem([], { ...removed, ean: 'b-2' }, 0)
+    expect(next[0]!.ean).toBe('B2')
+    expect(next[0]!.cantidad).toBe(3)
+  })
+
+  it('restores a minimal item without inventing optional fields', () => {
+    const minimal: ListaItem = { ean: 'D4', cantidad: 2, alerta: false }
+    expect(restoreItem([], minimal, 0)).toEqual([minimal])
+  })
+
+  it('appends when the index equals the current length', () => {
+    const list: ListaItem[] = [
+      { ean: 'A1', cantidad: 1, alerta: false },
+      { ean: 'C3', cantidad: 1, alerta: false },
+    ]
+    expect(restoreItem(list, removed, 2).map((i) => i.ean)).toEqual(['A1', 'C3', 'B2'])
+  })
+})
+
+describe('restoreList', () => {
+  it('keeps a product added after the wipe by appending it to the snapshot', () => {
+    // The D3 failure mode: undo of "Vaciar" silently destroyed anything added
+    // while the toast was up.
+    const snapshot: ListaItem[] = [{ ean: 'A1', cantidad: 2, alerta: true }]
+    const current: ListaItem[] = [{ ean: 'B2', cantidad: 1, alerta: false }]
+    expect(restoreList(snapshot, current).map((i) => i.ean)).toEqual(['A1', 'B2'])
+  })
+
+  it('appends in the current list order, after the whole snapshot', () => {
+    const snapshot: ListaItem[] = [
+      { ean: 'A1', cantidad: 1, alerta: false },
+      { ean: 'C3', cantidad: 1, alerta: false },
+    ]
+    const current: ListaItem[] = [
+      { ean: 'D4', cantidad: 1, alerta: false },
+      { ean: 'B2', cantidad: 1, alerta: false },
+    ]
+    expect(restoreList(snapshot, current).map((i) => i.ean)).toEqual(['A1', 'C3', 'D4', 'B2'])
+  })
+
+  it('lets the snapshot win when both hold the same normalized ean', () => {
+    const snapshot: ListaItem[] = [{ ean: 'A1', cantidad: 3, alerta: true }]
+    const current: ListaItem[] = [{ ean: 'A1', cantidad: 1, alerta: false }]
+    const next = restoreList(snapshot, current)
+    expect(next).toHaveLength(1)
+    expect(next[0]).toEqual(snapshot[0])
+  })
+
+  it('matches the duplicate guard on normalized ean (separator/case insensitive)', () => {
+    const snapshot: ListaItem[] = [{ ean: 'A1', cantidad: 1, alerta: false }]
+    const current: ListaItem[] = [{ ean: 'a-1', cantidad: 9, alerta: false }]
+    expect(restoreList(snapshot, current)).toHaveLength(1)
+  })
+
+  it('copies every field of an appended item verbatim (no re-derived defaults)', () => {
+    const current: ListaItem[] = [
+      { ean: 'B2', cantidad: 7, alerta: true, nombre: 'Yerba Canarias 1kg', productoId: 'p-9' },
+    ]
+    expect(restoreList([], current)[0]).toEqual(current[0])
+  })
+
+  it('keeps every snapshot field verbatim', () => {
+    const snapshot: ListaItem[] = [
+      { ean: 'A1', cantidad: 4, alerta: true, nombre: 'Arroz', productoId: 'p-1' },
+    ]
+    expect(restoreList(snapshot, [])[0]).toEqual(snapshot[0])
+  })
+
+  it('returns the snapshot when the current list is already contained in it', () => {
+    const snapshot: ListaItem[] = [
+      { ean: 'A1', cantidad: 1, alerta: false },
+      { ean: 'B2', cantidad: 1, alerta: false },
+    ]
+    expect(restoreList(snapshot, [snapshot[0]!])).toEqual(snapshot)
+  })
+
+  it('returns an empty list for two empty inputs', () => {
+    expect(restoreList([], [])).toEqual([])
+  })
+
+  it('never mutates either input and returns a new array', () => {
+    const snapshot: ListaItem[] = [{ ean: 'A1', cantidad: 1, alerta: false }]
+    const current: ListaItem[] = [{ ean: 'B2', cantidad: 1, alerta: false }]
+    const snapshotBefore = [...snapshot]
+    const currentBefore = [...current]
+    const next = restoreList(snapshot, current)
+    expect(snapshot).toEqual(snapshotBefore)
+    expect(current).toEqual(currentBefore)
+    expect(next).not.toBe(snapshot)
+    expect(next).not.toBe(current)
   })
 })
 

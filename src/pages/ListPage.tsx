@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Barcode as BarcodeIcon, Minus, Plus, Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
 import Brand from '../components/Brand'
 import Barcode from '../components/Barcode'
 import { formatPrice } from '../components/ProductCard'
@@ -20,7 +21,7 @@ type ListView = 'lista' | 'codigos'
 export default function ListPage() {
   const [view, setView] = useState<ListView>('lista')
   const { client } = useCatalog()
-  const { items, remove, setCantidad, clear } = useList()
+  const { items, remove, restore, restoreAll, setCantidad, clear } = useList()
 
   const eans = useMemo(() => items.map((i) => i.ean), [items])
   const products = useResolveEans(client, eans)
@@ -32,11 +33,21 @@ export default function ListPage() {
   }, 0)
 
 
+  /*
+   * Emptied, not blocked: the safety model moved from "prevented" (window.confirm,
+   * which blocks and does not feel native on a phone) to "reversible" — the same
+   * undo the per-row delete gets. `restoreAll` merges the snapshot back with whatever
+   * landed in the list after the wipe, so undoing never discards a product added
+   * while the toast was still up.
+   */
   function onClearAll() {
-    const n = items.length
-    if (window.confirm(`¿Vaciar toda la lista (${n} producto${n === 1 ? '' : 's'})?`)) {
-      clear()
-    }
+    if (items.length === 0) return
+    const snapshot = items
+    clear()
+    toast('Lista vaciada', {
+      description: `${snapshot.length} producto${snapshot.length === 1 ? '' : 's'}`,
+      action: { label: 'Deshacer', onClick: () => restoreAll(snapshot) },
+    })
   }
 
   return (
@@ -116,7 +127,15 @@ export default function ListPage() {
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
-                    onClick={() => remove(item.ean)}
+                    onClick={() => {
+                      remove(item.ean)
+                      toast('Quitado de la lista', {
+                        description: name,
+                        // `restoreItem` reinserts the exact item at its original
+                        // index; `add` would reset cantidad/alerta.
+                        action: { label: 'Deshacer', onClick: () => restore(item, idx) },
+                      })
+                    }}
                     aria-label={`Quitar ${name} de la lista`}
                     className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border text-text-muted transition hover:text-danger"
                   >
@@ -142,7 +161,20 @@ export default function ListPage() {
                     <div className="flex items-center gap-2 rounded-full border border-border px-1">
                       <button
                         type="button"
-                        onClick={() => setCantidad(item.ean, item.cantidad - 1)}
+                        onClick={() => {
+                          // At 1, `setCantidad` drops the row, so this path is
+                          // destructive (not a plain decrement): give it the same
+                          // undo as the delete button above.
+                          if (item.cantidad === 1) {
+                            remove(item.ean)
+                            toast('Quitado de la lista', {
+                              description: name,
+                              action: { label: 'Deshacer', onClick: () => restore(item, idx) },
+                            })
+                            return
+                          }
+                          setCantidad(item.ean, item.cantidad - 1)
+                        }}
                         aria-label="Restar uno"
                         className="flex h-6 w-6 items-center justify-center text-text-secondary"
                       >
