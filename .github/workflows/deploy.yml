@@ -71,7 +71,21 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # The Firebase web config reaches the build here and nowhere else. `verify` does not
+      # need it: typecheck and the tests do not depend on it, and the app is written to
+      # degrade to "no auth configured" when the values are absent — which is also what
+      # makes a fork, a fresh clone and a local `npm run build` work unchanged.
+      #
+      # Repository **variables**, not secrets: none of these is confidential. `apiKey`
+      # identifies the project, it does not authorise anything on its own, and it is visible
+      # in every request the browser makes anyway. Storing it as a secret would imply a
+      # sensitivity it does not have and make a misconfiguration harder to diagnose.
       - run: npm run build
+        env:
+          VITE_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
