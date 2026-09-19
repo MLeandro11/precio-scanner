@@ -58,16 +58,23 @@ npm run acceptance   # Playwright; auto-sirve dist/ con semántica GH Pages (31 
 La app funciona sin esto. Sin configurar, `/perfil` dice que no hay Firebase y **el SDK no se
 carga**.
 
-Se usa **Firebase Auth** porque hace el canje OAuth en su infraestructura: el `client_secret`
-de GitHub vive en la consola y no en el bundle. Es la única forma de ofrecer GitHub sin
-escribir un backend.
+Se usa **Firebase Auth** y solo **Google** como proveedor. Firebase no es un backend que
+mantengas vos: es uno gestionado, y hace el canje OAuth en su infraestructura, así que no hay
+servidor propio.
+
+> **Nota de decisión.** El motivo original para elegir Firebase era GitHub: su `client_secret`
+es obligatorio en el canje de código, así que sin algo del lado servidor no se puede ofrecer.
+Firebase lo resolvía dejando el secreto en su consola. **GitHub se descartó**, así que ese
+argumento ya no aplica y queda una alternativa que no se puede ignorar si algún día molesta el
+tamaño del SDK: **Google Identity Services** hace Google solo con **cero dependencias y ~0 KB**,
+a cambio de que la gestión de sesión, expiración y persistencia pasa a ser tuya. Firebase se
+mantiene porque ya está funcionando y resuelve esa parte; el SDK es lazy, así que no toca el
+primer load ni la búsqueda.
 
 Configuración (una vez, en la consola de Firebase):
 
 1. Crear el proyecto y una Web App; copiar `apiKey`, `authDomain`, `projectId` y `appId`.
-2. Authentication → Sign-in method → habilitar **Google** y/o **GitHub**. Para GitHub hace
-   falta una OAuth App de GitHub con su Client ID y Secret, que van **en la consola**, nunca
-   en el repo.
+2. Authentication → Sign-in method → habilitar **Google**.
 3. Authentication → Settings → Authorized domains → agregar `localhost` y
    `mleandro11.github.io`.
 

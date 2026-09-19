@@ -81,14 +81,11 @@ export default function SettingsPage() {
           <>
             <p className="text-sm font-semibold text-text-primary">Iniciá sesión</p>
             <p className="mt-1 text-xs text-text-secondary">
-              Con Google o GitHub. Te identifica: no protege nada ni sincroniza nada.
+              Con tu cuenta de Google. Te identifica: no protege nada ni sincroniza nada.
             </p>
-            <div className="mt-3 flex flex-col gap-2">
-              <Button variant="secondary" className="w-full" onClick={() => signIn('google')}>
+            <div className="mt-3">
+              <Button variant="secondary" className="w-full" onClick={signIn}>
                 Continuar con Google
-              </Button>
-              <Button variant="secondary" className="w-full" onClick={() => signIn('github')}>
-                Continuar con GitHub
               </Button>
             </div>
           </>

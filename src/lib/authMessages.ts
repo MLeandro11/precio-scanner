@@ -30,15 +30,15 @@ export function describeAuthError(code: unknown): string {
 
   switch (id) {
     case 'auth/operation-not-allowed':
-      return 'Ese proveedor todavía no está habilitado en la consola de Firebase.'
+      // Named rather than generic: with a single provider, "that provider" would leave the
+      // reader guessing which one, and `signIn` no longer takes an argument.
+      return 'Google no está habilitado en la consola de Firebase.'
     case 'auth/unauthorized-domain':
       return 'Este dominio no está autorizado en Firebase. Agregalo en Authentication → Settings → Authorized domains.'
     case 'auth/popup-blocked':
       return 'El navegador bloqueó la ventana de login. Permitila y reintentá.'
     case 'auth/network-request-failed':
       return 'Sin conexión: iniciar sesión necesita red.'
-    case 'auth/account-exists-with-different-credential':
-      return 'Ya existe una cuenta con ese email usando otro proveedor.'
     default:
       return id ? `No se pudo iniciar sesión (${id}).` : 'No se pudo iniciar sesión.'
   }

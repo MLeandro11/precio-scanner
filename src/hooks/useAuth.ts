@@ -4,8 +4,6 @@ import { getAuthClient } from '../lib/firebaseAuth'
 import { describeAuthError, isSilentAuthCode } from '../lib/authMessages'
 import { readFirebaseConfig } from '../lib/firebaseConfig'
 
-export type AuthProviderId = 'google' | 'github'
-
 /**
  * useAuth — the Firebase session as a thin React adapter.
  *
@@ -47,14 +45,12 @@ export function useAuth() {
     }
   }, [configured])
 
-  const signIn = useCallback(async (id: AuthProviderId) => {
+  const signIn = useCallback(async () => {
     setError(null)
     const client = await getAuthClient()
     if (!client) return
-    const provider =
-      id === 'google' ? new client.mod.GoogleAuthProvider() : new client.mod.GithubAuthProvider()
     try {
-      await client.mod.signInWithPopup(client.auth, provider)
+      await client.mod.signInWithPopup(client.auth, new client.mod.GoogleAuthProvider())
     } catch (err: unknown) {
       const code = (err as { code?: unknown })?.code
       // Closing the popup is a decision, not a failure worth an error message.
