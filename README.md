@@ -37,8 +37,9 @@ Navegación inferior: **Inicio · Alertas · [Escanear] · Lista · Perfil** (ba
 
 ## Stack
 
-Vite + React 19 + **TypeScript (strict)** + Tailwind v4 + lucide-react +
-react-router-dom v7. Tests con vitest; bike en worker (`src/workers/catalog.worker.ts`).
+Vite + React 19 + **TypeScript (strict)** + Tailwind v4 + lucide-react + react-router-dom v7 +
+**sonner** (toasts) + **firebase** (auth, opcional y cargado por demanda). Tests con vitest;
+búsqueda en worker (`src/workers/catalog.worker.ts`).
 
 ## Comandos
 
@@ -49,8 +50,51 @@ npm run build        # build a dist/ (dispara postbuild: copia index.html → 40
 npm run preview      # sirve el build (ojo: vite preview TIENE SPA fallback y GH Pages no)
 npm test             # vitest (lógica pura)
 npm run typecheck    # tsc --noEmit (strict)
-npm run acceptance   # Playwright; auto-sirve dist/ con semántica GH Pages (20 criterios)
+npm run acceptance   # Playwright; auto-sirve dist/ con semántica GH Pages (31 filas)
 ```
+
+## Login (Firebase Auth) — opcional
+
+La app funciona sin esto. Sin configurar, `/perfil` dice que no hay Firebase y **el SDK no se
+carga**.
+
+Se usa **Firebase Auth** porque hace el canje OAuth en su infraestructura: el `client_secret`
+de GitHub vive en la consola y no en el bundle. Es la única forma de ofrecer GitHub sin
+escribir un backend.
+
+Configuración (una vez, en la consola de Firebase):
+
+1. Crear el proyecto y una Web App; copiar `apiKey`, `authDomain`, `projectId` y `appId`.
+2. Authentication → Sign-in method → habilitar **Google** y/o **GitHub**. Para GitHub hace
+   falta una OAuth App de GitHub con su Client ID y Secret, que van **en la consola**, nunca
+   en el repo.
+3. Authentication → Settings → Authorized domains → agregar `localhost` y
+   `mleandro11.github.io`.
+
+Y en el entorno (`.env`, gitignoreado) o como secrets del build:
+
+```sh
+VITE_FIREBASE_API_KEY=
+VITE_FIREBASE_AUTH_DOMAIN=
+VITE_FIREBASE_PROJECT_ID=
+VITE_FIREBASE_APP_ID=
+```
+
+Ninguno es secreto: el `apiKey` de Firebase identifica el proyecto, no autoriza nada por sí
+solo. Lo que restringe quién entra es la configuración de proveedores y la lista de dominios
+autorizados.
+
+Notas de implementación:
+
+- El SDK (`firebase/auth`, ~34 KB gzip medidos) se **carga por demanda**, solo al abrir
+  `/perfil` — el mismo criterio con el que `ScanPage` se lazy-loadea. No pesa en el arranque
+  ni en la búsqueda.
+- Sin config, `readFirebaseConfig()` devuelve `null` y todo degrada a un mensaje. Es el caso
+  normal en CI y en `scripts/acceptance.ts`, así que **no puede romper el build**.
+- `auth/operation-not-allowed` y `auth/unauthorized-domain` son los dos errores que aparecen
+  primero al configurar; los mensajes de la app los nombran explícitamente.
+- Esto **identifica** usuarios. No protege archivos ni sincroniza nada: el catálogo sigue
+  público y la lista sigue en `localStorage`.
 
 ## Pipeline de datos (con una sola tienda)
 

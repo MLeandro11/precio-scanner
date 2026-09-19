@@ -15,3 +15,10 @@ raw-catalog.json
 # Logs / editor noise
 *.log
 .DS_Store
+
+# Local environment (Firebase config). `.env.example` is committed; the real file is not.
+# The Firebase web config is not a secret in itself, but this file is where a secret would
+# end up next, so the rule lands before the first variable does.
+.env
+.env.local
+.env.*.local

@@ -5,6 +5,21 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
   base: '/precio-scanner/',
+  build: {
+    rollupOptions: {
+      output: {
+        // The Firebase SDK is reached only through a dynamic import (the account screen), so
+        // it must stay a lazily-fetched chunk. Naming it is what lets the service worker
+        // exclude it below: Vite's default `index.esm-<hash>.js` name gives the precache
+        // nothing stable to match on.
+        manualChunks(id) {
+          if (id.includes('node_modules/firebase') || id.includes('node_modules/@firebase')) {
+            return 'firebase'
+          }
+        },
+      },
+    },
+  },
   plugins: [
     react(),
     tailwindcss(),
@@ -53,7 +68,13 @@ export default defineConfig({
         // default. Precaching them would double ~5.5 MB of storage and leave the app with
         // two competing answers about which copy of the data is current. `globPatterns`
         // already excludes JSON, so this is the explicit guard, not the mechanism.
-        globIgnores: ['**/data/**'],
+        //
+        // The Firebase chunk is excluded for the opposite reason: it is small, but nothing
+        // needs it unless someone opens the account screen, and `signInWithPopup` needs the
+        // network anyway — so a precached copy would be downloaded by every visitor to no
+        // purpose and could never be used offline. Without this line the service worker
+        // quietly undoes the lazy import.
+        globIgnores: ['**/data/**', '**/firebase-*.js'],
         // Build output only. The `public/` assets (icons, favicon) arrive through
         // `includeAssets`; listing them in both places precaches each of them twice.
         globPatterns: ['**/*.{js,css,html}'],
