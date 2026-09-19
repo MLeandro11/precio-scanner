@@ -50,7 +50,7 @@
  */
 import { createRequire } from 'node:module'
 import { existsSync } from 'node:fs'
-import { startServer } from './ghpages-server.ts'
+import { startServer, type GhPagesServer } from './ghpages-server.ts'
 
 const EXTERNAL_BASE_URL = process.env.BASE_URL
 const SELF_SERVE_PORT = 4173
@@ -92,7 +92,7 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
  * process always exits cleanly.
  */
 async function main(): Promise<void> {
-  let server: { url: string; close(): Promise<void> } | undefined
+  let server: GhPagesServer | undefined
   let baseUrl: string
   if (EXTERNAL_BASE_URL) {
     baseUrl = EXTERNAL_BASE_URL
@@ -102,13 +102,16 @@ async function main(): Promise<void> {
   }
 
   try {
-    await runChecks(baseUrl)
+    // The offline row stops the server itself, so the handle has to reach it.
+    await runChecks(baseUrl, server)
   } finally {
-    await server?.close()
+    // ghpages-server's close() rejects when called twice (ERR_SERVER_NOT_RUNNING), and
+    // shutting down an already-stopped server is not a failure here.
+    await server?.close().catch(() => undefined)
   }
 }
 
-async function runChecks(baseUrl: string): Promise<void> {
+async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void> {
   const { chromium } = resolvePlaywright()
 
   try {
@@ -917,6 +920,107 @@ async function runChecks(baseUrl: string): Promise<void> {
     `nav horizontal overflow ${capNav?.barOverflow}px (no wrap/shift); ` +
       `Lista tab ${capNav?.listaW}×${capNav?.listaH}`,
   )
+
+  /*
+   * The host contract itself (WU7.6, WU9.5). This runs from Node, so it bypasses the
+   * page and therefore the service worker by construction: the worker cannot answer a
+   * request it never sees.
+   *
+   * That matters because the DEEP-* rows above assert only that a deep link boots the
+   * app, and the worker's navigateFallback produces that same outcome straight from its
+   * precache. The worker also calls clientsClaim, so it controls the page from
+   * activation onward and those rows may never reach the host at all. The HTTP status
+   * is the part of the contract they cannot observe.
+   */
+  const missingRes = await fetch(`${baseUrl}definitely-not-a-real-path`)
+  const missingBody = await missingRes.text()
+  const shellPresent = /<div id="root">/.test(missingBody)
+  const realFileRes = await fetch(`${baseUrl}manifest.webmanifest`)
+  record(
+    'HOST-404',
+    missingRes.status === 404 && shellPresent && realFileRes.status === 200,
+    `unknown path -> HTTP ${missingRes.status} carrying the app shell ` +
+      `(${missingBody.length} bytes, root div ${shellPresent ? 'present' : 'MISSING'}); ` +
+      `an existing file -> HTTP ${realFileRes.status}`,
+    'Node-side: the service worker cannot answer for the host',
+  )
+
+  /*
+   * Offline boot (FR-11.2 / AC-9, WU9.4).
+   *
+   * The server is stopped for real rather than emulated with `context.setOffline`. If
+   * the app's request still reaches the server it succeeds, the loader's offline
+   * fallback never runs, and the row would pass without having tested anything.
+   *
+   * It runs last because every row above needs the server.
+   */
+  if (!server) {
+    info(
+      'OFFLINE',
+      'skipped: BASE_URL is set, so this harness has no server to stop. Run without ' +
+        'BASE_URL for the self-served offline check.',
+    )
+  } else {
+    await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
+
+    // The worker must be active AND controlling. Stopping the server while the page is
+    // uncontrolled would only prove that an uncontrolled page cannot load.
+    const workerState = () =>
+      page.evaluate(async () => {
+        if (!('serviceWorker' in navigator)) {
+          return { supported: false, ready: false, controlled: false }
+        }
+        const ready = await Promise.race([
+          navigator.serviceWorker.ready.then(() => true),
+          new Promise<boolean>((r) => setTimeout(() => r(false), 15000)),
+        ])
+        return { supported: true, ready, controlled: !!navigator.serviceWorker.controller }
+      })
+
+    let sw = await workerState()
+    if (sw.ready && !sw.controlled) {
+      // clientsClaim normally takes over open pages on activation; reloading makes it
+      // deterministic instead of depending on that.
+      await page.reload({ waitUntil: 'domcontentloaded' })
+      sw = await workerState()
+    }
+
+    // The offline boot needs the app's own data cache populated, facets included:
+    // they carry the version every other cached file is keyed by.
+    const cacheEntries: string[] = await page.evaluate(async () => {
+      const names = await caches.keys()
+      const data = names.find((n) => n.includes('data-v1'))
+      if (!data) return [] as string[]
+      const c = await caches.open(data)
+      return (await c.keys()).map((r) => new URL(r.url).pathname)
+    })
+    const facetsCached = cacheEntries.some((p) => p.endsWith('catalogo-facets.json'))
+
+    await server.close()
+
+    const offlineQuery = 'serenisma'
+    let booted = true
+    try {
+      await page.goto(`${baseUrl}buscar?q=${offlineQuery}`, { waitUntil: 'domcontentloaded' })
+    } catch {
+      // A navigation the worker cannot answer rejects here; that is a FAIL row, not an
+      // aborted run.
+      booted = false
+    }
+    const settled = booted && (await searchSettledWithin(offlineQuery))
+    const offlineCards: string[] = settled ? await cards().allTextContents() : []
+    const relevant = offlineCards.filter((t: string) => /seren[ií]sima/i.test(t)).length
+
+    record(
+      'OFFLINE',
+      sw.supported && sw.ready && sw.controlled && facetsCached && settled && relevant > 0,
+      `server stopped -> /buscar?q=${offlineQuery} ${settled ? 'settled' : 'did NOT settle'}, ` +
+        `${offlineCards.length} result(s), ${relevant} La Serenísima`,
+      `worker ${sw.supported ? (sw.ready ? 'ready' : 'never became ready') : 'unsupported'}, ` +
+        `${sw.controlled ? 'controlling' : 'NOT controlling'}; data cache before shutdown: ` +
+        `${facetsCached ? 'facets present' : 'facets MISSING'} (${cacheEntries.length} entries)`,
+    )
+  }
 
   await browser.close()
 }

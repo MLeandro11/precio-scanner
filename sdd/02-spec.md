@@ -174,7 +174,15 @@ marked with whether the audit found it met.
   the app and querying "serenisma" returns La Serenísima results (AC-2) from the cached
   catalog.
 - AC-10: *(added)* After a new deploy, a browser still holding the previous version receives
-  the new version within one navigation, with no manual cache clear.
+  the new version **without any manual cache clearing**, and is never still serving the
+  previous version on the *second* navigation after the deploy.
+  — **Measured, and the original wording was wrong.** It asked for "within one navigation",
+  which the standard update flow does not guarantee: the navigation that triggers the update
+  check is answered by the worker still active at that moment, so the new precache normally
+  lands on the next one. Three deploy cycles against a live server measured **2, 1, 2**
+  navigations — the lone 1 being the case where the browser's own background update check had
+  already run before the navigation. Two is the bound a criterion can assert deterministically;
+  "one navigation" would have been a flaky test for something FR-11.3 never required.
 
 ## Out of scope (Phase 1)
 

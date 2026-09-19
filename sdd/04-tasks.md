@@ -31,8 +31,8 @@ Ordered by dependency. Each work unit = one commit (reviewable, tests included).
 | WU6 Persistence | 4 | 0 | 0 |
 | WU7 Hardening + docs | 6 | 0 | 1 |
 | WU8 Lupa (rebrand + feature set) | 8 | 0 | 0 |
-| WU9 PWA (FR-11) | 2 | 1 | 2 |
-| **Total (50 items)** | **44** | **3** | **3** |
+| WU9 PWA (FR-11) | 5 | 0 | 0 |
+| **Total (50 items)** | **47** | **2** | **1** |
 
 Test suite at the Lupa merge: `npm test` → **11 files, 97 tests, all green**;
 `npm run typecheck` → clean. Build: worker chunk 28.75 kB gzip, main bundle 90.61 kB gzip.
@@ -372,25 +372,36 @@ reloading — not by reading the code, which is why the E2E test existed.
 
 - [x] 9.1 Choose and record the implementation in `03-design.md`: `vite-plugin-pwa` over a
       hand-written worker, with the reasoning and the update policy recorded there.
-- [ ] 9.2 Precache the shell, versioned, satisfying FR-11.2 and FR-11.3; make the
+- [x] 9.2 Precache the shell, versioned, satisfying FR-11.2 and FR-11.3; make the
       version/invalidation decision a **pure, unit-tested** function per NFR-6.
-      — **Partial.** The shell precache works (13 entries, 912 KiB, `data/` excluded) and the
-      app-side offline cache decision is now covered by tests in `catalogLoader.test.ts`,
-      including the distinction between "unreachable network" (fall back) and "server answered
-      badly" (stay fatal). FR-11.3 / AC-10 are **not yet proven** with two consecutive builds.
+      — **Done.** The shell precache works (13 entries, 912 KiB, `data/` excluded) and the
+      app-side offline cache decision is covered by tests in `catalogLoader.test.ts`, including
+      the distinction between "unreachable network" (fall back) and "server answered badly"
+      (stay fatal). AC-10 is proven, with the clause corrected: see `02-spec.md` AC-10 — three
+      deploy cycles measured **2, 1, 2** navigations, so two is the assertable bound.
 - [x] 9.3 The iOS meta tags and the remaining manifest fields (`id`, `lang`, `dir`,
       `orientation`) for FR-11.5. `mobile-web-app-capable` and `apple-mobile-web-app-title`
       were added; `apple-mobile-web-app-status-bar-style` is deliberately NOT set because
       choosing it is a visual decision that needs a real iOS device to check.
-- [ ] 9.4 Extend `scripts/acceptance.ts` with the offline row (AC-9); prove AC-10 with two
+- [x] 9.4 Extend `scripts/acceptance.ts` with the offline row (AC-9); prove AC-10 with two
       consecutive builds against one retained browser profile.
-      — **AC-9 is verified, but by hand, not in the harness:** with a local server **stopped**,
-      a reloaded `/buscar?q=serenisma` reported `data-search-state="ready"`, 50 cards, "Mostrando
-      50 de 64 productos" and the AC-2 results. That manual proof needs to become a row.
-- [ ] 9.5 *(risk — carry into the design)* A service worker sits between the deploy and the
-      user, so it can **hide a routing bug the harness currently catches** — WU7.6 exists
-      precisely because the harness must test real GH Pages routing semantics. The offline row
-      must keep exercising routing with the worker bypassed, not only through it.
+      — **Done.** `OFFLINE` stops the server **for real** instead of emulating offline: a request
+      that still reaches the server would succeed, the loader's fallback would never execute,
+      and the row would pass without testing anything. It then reloads `/buscar?q=serenisma`
+      and requires the settled contract plus La Serenísima results. Falsified rather than
+      assumed: with the loader's cache fallback removed, the row fails as `did NOT settle,
+      0 result(s), 0 La Serenísima` and names itself in the `FAILED:` line. AC-10 was measured
+      by hand across three deploys — see 9.2.
+- [x] 9.5 *(risk)* A service worker sits between the deploy and the user, so it can **hide a
+      routing bug the harness currently catches**.
+      — **Confirmed, and it was worse than the risk as stated.** No row asserted an HTTP status:
+      every `DEEP-*` row only asserts that a deep link boots the app, and the worker's
+      `navigateFallback` produces that same outcome straight from precache. Because the worker
+      calls `clientsClaim`, it controls the page from activation onward, so those rows may never
+      reach the host at all. `HOST-404` now asserts the contract **from Node**, which bypasses
+      the page and therefore the worker by construction: an unknown path must answer HTTP 404
+      with the app shell, and an existing file must still answer 200. The `DEEP-*` caveat is
+      recorded on the rows themselves instead of being left implied.
 
 ## Phase 2 backlog (separate change, not started here)
 

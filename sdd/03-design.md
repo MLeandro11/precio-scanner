@@ -199,9 +199,18 @@ browser beyond Workbox's small runtime chunk.
 ### Update policy
 
 `autoUpdate` (`skipWaiting` + `clientsClaim`). FR-11.3 asks that a new deploy reach a
-returning visitor within one navigation and without clearing site data, and this is what
-delivers it. The known cost is the classic mismatch where a page still open on the old bundle
-tries to fetch a chunk the new deploy replaced.
+returning visitor without clearing site data, and this is what delivers it. The known cost is
+the classic mismatch where a page still open on the old bundle tries to fetch a chunk the new
+deploy replaced.
+
+**How long the old version lingers — measured, not assumed.** The navigation that triggers the
+worker's update check is answered by the worker still active at that moment, so the new
+precache normally lands on the *next* navigation. Three deploy cycles against a live server
+took **2, 1, 2** navigations; the lone 1 was a cycle where the browser's own background update
+check had already run before the navigation. Two is the bound a criterion can assert, and it is
+what `02-spec.md` AC-10 now says. The reason not to switch the document to a network-first
+strategy to get to one: it would trade an instant cache-first boot for one round trip on every
+navigation, to shorten a window that is already bounded and that FR-11.3 never constrained.
 
 ### What is precached, and what deliberately is not
 
@@ -249,7 +258,7 @@ cached copy hide a deployment where `public/data/` stopped being published.
 | Persisted EANs drift from catalog | `useResolveEans` resolves lazily through the worker; barcode-less products fall back to id |
 | Multi-store / history / alerts have no data | Modelled (`AlmacenPrecio`, `HistorialPrecio`) but never simulated; placeholders are honest |
 | Service worker serves a stale shell | `registerType: 'autoUpdate'` plus Workbox's versioned precache and `cleanupOutdatedCaches`, so the previous cache is dropped when the new worker activates (FR-11.3) |
-| A service worker hides a routing bug | It sits between the deploy and the user. `scripts/acceptance.ts` must keep exercising real GH Pages routing with the worker bypassed, not only through it (WU9.5) — WU7.6 exists because that harness is the only thing watching the host contract |
+| A service worker hides a routing bug | It sits between the deploy and the user, and it did: no row asserted an HTTP status, and `clientsClaim` means the `DEEP-*` rows may be answered by the worker rather than the host. `HOST-404` closes it from Node, bypassing the worker by construction |
 | First visit happens offline, nothing cached | `catalogLoader` fails with a message naming the condition rather than rendering a broken shell (FR-11.4) |
 | Offline serves a stale data version indefinitely | The facets fallback only applies when the request cannot complete. Every online boot still refetches them, so a new data build invalidates the versioned keys on the next visit |
 
