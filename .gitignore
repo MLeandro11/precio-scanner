@@ -2,6 +2,8 @@
 .atl/
 .pi/
 .codegraph/
+# Impeccable working artifacts: PRODUCT.md/DESIGN.md are the tracked truth, this is generated
+.impeccable/
 
 # Node / build
 node_modules/

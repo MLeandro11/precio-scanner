@@ -1,6 +1,12 @@
-# Design System — precio-scanner
+# Design System — Lupa
 
-Source of truth for all UI decisions. Every component must consume these tokens, never
+> **The token authority is [`DESIGN.md`](../DESIGN.md)** at the repository root, mirrored from the
+> CSS custom properties in `src/index.css`, which stay the normative source of the values. This
+> file is the human-readable companion: it explains intent, rationale and anti-patterns. If a
+> value here disagrees with the code, the code wins — and correcting it here is a doc fix, not a
+> design change.
+
+The visual rules for all UI decisions. Every component must consume these tokens, never
 raw ad-hoc values. Derived from UI/UX best practices (accessibility, touch, layout,
 typography) and tuned for this product's job: **find a product and read its price fast**.
 
@@ -56,20 +62,25 @@ Light is the default theme. Dark mode is ACTIVE: the app follows the device
 on the Perfil page, persisted in `lupa:theme`. The override sets `data-theme` on `<html>`, a
 mapping change — not a component refactor.
 
-| Token | Purpose | Light | Dark |
-| --- | --- | --- | --- |
-| `surface` | Page background | `#f8fafc` (slate-50) | `#0f172a` (slate-900) |
-| `surface-raised` | Cards, inputs, chips | `#ffffff` | `#1e293b` (slate-800) |
-| `surface-sunken` | Selected chip (pressed category) | `#0f172a` (slate-900) | `#e2e8f0` (slate-200) |
-| `border` | Card / input borders | `#e2e8f0` (slate-200) | `#334155` (slate-700) |
-| `text-primary` | Product names, headings | `#0f172a` (slate-900) | `#f8fafc` (slate-50) |
-| `text-secondary` | Metadata, counts | `#64748b` (slate-500) | `#94a3b8` (slate-400) |
-| `text-muted` | Placeholders, hints | `#94a3b8` (slate-400) | `#64748b` (slate-500) |
-| `accent` | Price emphasis, primary actions | `#15803d` (green-700) | `#4ade80` (green-400) |
-| `accent-contrast` | Text/icon on accent | `#ffffff` | `#052e16` (green-950) |
-| `favorite` | Favorite star (kept distinct from accent) | `#b45309` (amber-700) | `#fbbf24` (amber-400) |
-| `danger` | Errors | `#dc2626` (red-600) | `#f87171` (red-400) |
-| `highlight` | Fuse match `<mark>` background | `#fef08a` (yellow-200) | `#78350f` (amber-900) |
+| Token | DESIGN.md | Purpose | Light | Dark |
+| --- | --- | --- | --- | --- |
+| `surface` | `aisle-light` | Page background | `#f8fafc` (slate-50) | `#171717` (neutral-900) |
+| `surface-raised` | `shelf` | Cards, inputs, chips | `#ffffff` | `#262626` (neutral-800) |
+| `surface-sunken` | `ink-slab` | Selected chip (pressed category) | `#0f172a` (slate-900) | `#e5e5e5` (neutral-200) |
+| `border` | `shelf-edge` | Card / input borders | `#e2e8f0` (slate-200) | `#404040` (neutral-700) |
+| `text-primary` | `label-ink` | Product names, headings | `#0f172a` (slate-900) | `#fafafa` (neutral-50) |
+| `text-secondary` | `label-muted` | Metadata, counts | `#64748b` (slate-500) | `#a3a3a3` (neutral-400) |
+| `text-muted` | `label-faint` | Placeholders, hints | `#94a3b8` (slate-400) | `#737373` (neutral-500) |
+| `accent` | `price-green` | Price emphasis, primary actions | `#15803d` (green-700) | `#4ade80` (green-400) |
+| `accent-contrast` | `price-ink` | Text/icon on accent | `#ffffff` | `#052e16` (green-950) |
+| `favorite` | `star-amber` | Favorite star (kept distinct from accent) | `#b45309` (amber-700) | `#fbbf24` (amber-400) |
+| `danger` | `stop-red` | Errors | `#dc2626` (red-600) | `#f87171` (red-400) |
+| `highlight` | `marker-yellow` | Fuse match `<mark>` background | `#fef08a` (yellow-200) | `#78350f` (amber-900) |
+
+The light neutrals are **slate**-derived and the dark ones are **neutral**-derived — two different
+families. An earlier version of this table listed the dark column in slate values (`#0f172a`,
+`#1e293b`, `#334155`, `#f8fafc`, `#94a3b8`, `#64748b`) that the code never used; corrected against
+`src/index.css`. The four semantic colors are identical in both themes.
 
 **Rules:**
 - Body text on surface must be ≥ **4.5:1**; secondary ≥ **3:1**.
@@ -87,15 +98,21 @@ font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
              "Helvetica Neue", Arial, sans-serif;
 ```
 
-Scale (base 16px, line-height 1.5):
+Scale (base 16px, line-height 1.5). The steps are **hand-picked, not a ratio** — each one exists
+because a surface needed it:
 
 | Role | Size / weight | Usage |
 | --- | --- | --- |
-| `display` | 20px / 700 | App title (header) |
-| `title` | 15px / 600 | Product name |
-| `body` | 14px | Metadata (category, code) |
-| `caption` | 12px / 500 | Counts, labels, chips |
-| `price` | 18px / 700 | **Price** — always `font-variant-numeric: tabular-nums` |
+| `price-hero` | 24px / 700 | Price on the product page |
+| `price` | 18px / 700 | **Price** in cards and lists — always `tabular-nums`; the size is shared by page and section headings |
+| `field` | 16px / 400 | Inputs and the sheet title (smaller makes iOS zoom the page on focus) |
+| `title` | 14px / 600 | Product name (`leading-snug`, two lines max) |
+| `body` | 14px | Metadata (category, code), button labels |
+| `label` | 12px / 500 | Counts, labels, chips, uppercase section headings |
+| `micro` | 10px / 500 | Bottom-nav labels, EAN chip. 11px and 9px are the floor, for dense list metadata and the nav badge |
+
+An earlier version of this table listed `display 20px/700` and `title 15px/600`, neither of which
+exists in the code; corrected against the utilities actually used in `src/`.
 
 **Rule:** prices render with `tabular-nums` so rows of `$ 1.290` vs `$ 12.345` don't wiggle
 while scrolling. Never rigger layout shift when a price changes width.
@@ -104,8 +121,8 @@ while scrolling. Never rigger layout shift when a price changes width.
 
 ## 4. Spacing & radius
 
-4px rhythm (Tailwind default scale) → `space-y-2` (8px) between cards, `p-4` (16px) page
-gutter, `gap-1.5` (6px) chip clusters.
+4px rhythm (Tailwind default scale) → `space-y-2` (8px) between cards, `px-4` (16px) page
+gutter and `p-4` (16px) card padding, `gap-1.5` (6px) chip clusters.
 
 | Token | Value |
 | --- | --- |
@@ -113,14 +130,22 @@ gutter, `gap-1.5` (6px) chip clusters.
 | `radius-md` | 8px — cards |
 | `radius-full` | 999px — search input, category chips |
 
-Elevation: flat, one subtle `shadow-sm` on cards only. No layered shadows.
+Elevation: flat by default, with a **named shadow hierarchy** — rest (none), card (`shadow-sm`),
+accent tile (`shadow-md`), floating (`shadow-lg`), floating-raised (`shadow-xl`). Tone and the 1px
+border separate surfaces first; a shadow is reserved for what floats above the plane. The levels
+and what each one means live in `DESIGN.md` → Elevation & Depth.
+
+*(This line previously read "flat, one subtle `shadow-sm` on cards only. No layered shadows."
+which did not match the code: `shadow-md`, `shadow-lg` and `shadow-xl` are all in use, each for a
+different kind of floating surface.)*
 
 ---
 
 ## 5. Components & interaction
 
 ### Search input
-Full width, pill (`radius-full`), `py-3` (min 44px touch target), sticky under header.
+Full width, pill (`radius-full`), `min-h-11` (44px) with 16px text so iOS never zooms the page,
+sticky under header.
 Visible `focus-visible` ring (2px, offset 2px) using `accent`. Label via `aria-label`
 (`aria-label="Buscar productos"`). `type="search"`.
 
@@ -133,7 +158,8 @@ Compact native `<select>` with a visible label ("Ordenar por"). Keep native cont
 do not rebuild a custom dropdown.
 
 ### Product card
-- `surface-raised`, `radius-md`, `shadow-sm`, `p-4`.
+- `surface-raised`, `rounded-2xl` (16px), 1px `shelf-edge` border, `p-3` (12px). **No shadow** —
+  the card is separated by tone and its edge, per the Tone First rule.
 - **Name** (title) top-left; **favorite** star (SVG) top-right, min 44×44 hit area.
 - Bottom row: category + barcode (caption, secondary) left; **price** (price role, accent
   color) right, `tabular-nums`.
@@ -174,18 +200,22 @@ Required set (initial):
 
 ## 7b. Implementation route: in-house JS (decided)
 
-**No component library.** The repo stays plain `.jsx`/`.js` — no TS, no alias, no
-`@/*` migration. shadcn was evaluated and rejected for this untyped repo: it would drag
-in a `@/*` alias, `.tsx` sources coexisting with `.js`, and a shared `@theme` reset —
-cost with no matching benefit for a mobile tool whose core (list/card/chips) is custom
-anyway.
+**No component library.** shadcn was evaluated and rejected: it would drag in a `@/*` alias (which
+the repo still does not have), `.tsx` sources coexisting with `.js`, and a shared `@theme` reset —
+cost with no matching benefit for a mobile tool whose core (list/card/chips) is custom anyway.
 
 Shared UI is built by hand with the semantic tokens from §2, keeping identical a11y
-guarantees (focus rings, ≥44px, `aria-*`). A minimal `src/components/ui/` folder can hold
-`Button`, `Input`, and a bottom `Sheet` built directly. Deps stay: none beyond `lucide-react`
-for icons.
+guarantees (focus rings, ≥44px, `aria-*`). `src/components/ui/` now holds `Button`, `Input`,
+`Skeleton` and the bottom `Sheet`, built directly.
 
-New dependency: `lucide-react` (SVG icons only — no component system).
+Runtime dependencies today: `lucide-react` (icons), `react-router-dom` (routing), `sonner`
+(toasts, §7c), `@zxing/browser` (camera scanning), `fuse.js` (search), `jsbarcode` (list barcode
+view), `firebase` (auth and saved lists, lazily loaded) and `vite-plugin-pwa`. None of them is a
+component library, so the decision this section records still holds.
+
+*(Correction: this section used to say the repo "stays plain `.jsx`/`.js` — no TS" and that deps
+stayed "none beyond `lucide-react`". Both stopped being true when the codebase migrated to strict
+TypeScript and grew its other runtime dependencies.)*
 
 ---
 
@@ -256,7 +286,9 @@ second one (§8).
 
 Sober, purposeful.
 - Durations **150–300ms**, `ease-out` entering, `ease-in` exiting.
-- Allowed: card entrance stagger (30ms), search input focus ring, press feedback.
+- Allowed: search input focus ring, press feedback, sheet entrance, skeleton shimmer.
+  *(The "card entrance stagger (30ms)" formerly listed here was never implemented; removed rather
+  than left as a rule nobody follows.)*
 - **Honor `prefers-reduced-motion`** — disable decorative motion.
 - No width/height animation (transform/opacity only), no layout reflow.
 
@@ -275,6 +307,9 @@ Sober, purposeful.
 ---
 
 ## 10. Migration plan (component → token)
+
+*Historical: this was the plan for the token migration, which landed. The implementation is strict
+TypeScript, so the `.jsx` filenames below are the plan's version names, not the current paths.*
 
 | Component | Changes |
 | --- | --- |
