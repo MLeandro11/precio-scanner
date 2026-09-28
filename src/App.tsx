@@ -11,6 +11,10 @@ import SearchPage from './pages/SearchPage'
 // ScanPage pulls in the webcam decoder (ZXing) — lazy-loaded so the ~400 kB
 // decoder is only downloaded when the user actually opens /escanear.
 const ScanPage = lazy(() => import('./pages/ScanPage'))
+// Saved lists reach Firestore, and the hooks behind them load the Firebase SDK. Lazy so that
+// code — and the SDK chunk — stays out of the main bundle and out of `/lista`.
+const SavedListsPage = lazy(() => import('./pages/SavedListsPage'))
+const SavedListDetailPage = lazy(() => import('./pages/SavedListDetailPage'))
 import ProductPage from './pages/ProductPage'
 import HistoryPage from './pages/HistoryPage'
 import ListPage from './pages/ListPage'
@@ -82,6 +86,8 @@ function AppRoutes() {
           <Route path="/producto/:ean" element={<ProductPage />} />
           <Route path="/historial/:ean" element={<HistoryPage />} />
           <Route path="/lista" element={<ListPage />} />
+          <Route path="/guardadas" element={<SavedListsPage />} />
+          <Route path="/guardadas/:listId" element={<SavedListDetailPage />} />
           <Route
             path="/alertas"
             element={

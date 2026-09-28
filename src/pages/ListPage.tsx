@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Barcode as BarcodeIcon, Minus, Plus, Trash2 } from 'lucide-react'
+import { Barcode as BarcodeIcon, Bookmark, Minus, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import Brand from '../components/Brand'
 import Barcode from '../components/Barcode'
@@ -69,6 +69,22 @@ export default function ListPage() {
           ) : null}
         </div>
       </div>
+
+      {/*
+       * A link, not a "Guardar" button, and that is a measured decision rather than a style
+       * one: `useSavedLists` reaches `useAuth`, which loads the Firebase SDK on mount. Calling
+       * it here would make every visit to /lista download ~46 kB and give a core route a
+       * dependency on a lazily-fetched chunk that is deliberately outside the precache. So
+       * this route stays SDK-free and the save action lives on /guardadas, where the session
+       * is already loaded. Always present, so "Mis listas" stays reachable with an empty list.
+       */}
+      <Link
+        to="/guardadas"
+        data-saved-lists-link
+        className="mt-3 flex min-h-11 items-center justify-center gap-2 rounded-sm border border-border bg-surface-raised px-4 text-sm font-medium text-text-primary transition hover:bg-surface"
+      >
+        <Bookmark size={16} strokeWidth={1.8} aria-hidden="true" /> Mis listas guardadas
+      </Link>
 
       {/* View selector: lista | códigos de barras */}
       <div
