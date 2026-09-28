@@ -946,6 +946,90 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
   )
 
   /*
+   * Saved lists (FR-12, WU10).
+   *
+   * Only the logged-out half is assertable here: the harness drives one unauthenticated
+   * browser, and handing it credentials is precisely what it must not have. So these rows pin
+   * the contract a visitor without a session actually gets. The authenticated behaviours are
+   * covered by the unit tests over the pure mapper plus a manual two-account probe, and
+   * `02-spec.md` AC-15 records that seam instead of implying coverage that does not exist.
+   */
+  await page.goto(`${baseUrl}lista`, { waitUntil: 'domcontentloaded' })
+  const savedLink = page.locator('[data-saved-lists-link]')
+  const savedLinkShown = await waitForVisible(savedLink)
+  const savedLinkBox = savedLinkShown ? await savedLink.boundingBox() : null
+  const savedLinkHref = savedLinkShown ? await savedLink.getAttribute('href') : null
+  record(
+    'SAVED-link',
+    savedLinkShown &&
+      !!savedLinkBox &&
+      savedLinkBox.height >= 43.99 &&
+      !!savedLinkHref &&
+      savedLinkHref.endsWith('/guardadas'),
+    `/lista offers "Mis listas guardadas" -> ${savedLinkHref} ` +
+      `(${savedLinkBox ? savedLinkBox.height.toFixed(0) : '?'}px tall)`,
+    'a link, not a save button: /lista must not pull the Firebase SDK, so the save action ' +
+      'lives on /guardadas where the session is already loaded',
+  )
+
+  // A known working list, so "unchanged" is a comparison and not merely an absence.
+  const sentinelItems = [
+    { ean: '7793940219009', cantidad: 2, alerta: true },
+    { ean: '7790895000016', cantidad: 1, alerta: false },
+  ]
+  await page.evaluate(
+    (items: Array<{ ean: string; cantidad: number; alerta: boolean }>) => {
+      localStorage.setItem('precio-scanner:lupa:lista', JSON.stringify(items))
+    },
+    sentinelItems,
+  )
+  const listBeforeSaved = await page.evaluate(() =>
+    localStorage.getItem('precio-scanner:lupa:lista'),
+  )
+
+  await page.goto(`${baseUrl}guardadas`, { waitUntil: 'domcontentloaded' })
+  const savedStateEl = page.locator('[data-saved-lists-state]')
+  const savedStateShown = await waitForVisible(savedStateEl)
+  let savedState: string | null = null
+  if (savedStateShown) {
+    try {
+      // The page starts in 'loading' and settles once the session resolves; a stuck 'loading'
+      // is a FAIL row, not an aborted run.
+      await page.waitForFunction(
+        () => {
+          const v = document
+            .querySelector('[data-saved-lists-state]')
+            ?.getAttribute('data-saved-lists-state')
+          return !!v && v !== 'loading'
+        },
+        undefined,
+        { timeout: 20000 },
+      )
+    } catch {
+      // read whatever it is below and let the row judge it
+    }
+    savedState = await savedStateEl.getAttribute('data-saved-lists-state')
+  }
+  const listAfterSaved = await page.evaluate(() =>
+    localStorage.getItem('precio-scanner:lupa:lista'),
+  )
+  record(
+    'SAVED-page',
+    savedStateShown && (savedState === 'unconfigured' || savedState === 'signed-out'),
+    `/guardadas -> data-saved-lists-state="${savedState}"`,
+    'an unauthenticated browser is told it has no session; the page never invents one and ' +
+      'never leaves "loading" on screen',
+  )
+  record(
+    'SAVED-no-write',
+    listBeforeSaved !== null && listAfterSaved === listBeforeSaved,
+    `working list ${listBeforeSaved === listAfterSaved ? 'identical' : 'CHANGED'} across the ` +
+      `visit (${listBeforeSaved?.length ?? 0} -> ${listAfterSaved?.length ?? 0} chars)`,
+    'AC-11, logged-out half: opening the saved-lists page cannot touch ' +
+      'precio-scanner:lupa:lista — saving is the only path to the cloud (FR-12.1)',
+  )
+
+  /*
    * Offline boot (FR-11.2 / AC-9, WU9.4).
    *
    * The server is stopped for real rather than emulated with `context.setOffline`. If
