@@ -76,8 +76,9 @@
 - FR-6.1: The SPA uses `react-router-dom` v7 with `basename = BASE_URL`
   (`/precio-scanner/`) so it works from the GH Pages path.
 - FR-6.2: Routes: Home `/`, Search `/buscar` (accepts `?q=`), Scan `/escanear`,
-  Product `/producto/:ean`, History `/historial/:ean`, List `/lista`, placeholders for
-  `/alertas` and `/perfil`, and a catch-all redirect to `/`.
+  Product `/producto/:ean`, History `/historial/:ean`, List `/lista`, Saved lists
+  `/guardadas` (reached from the list page, not the bottom nav — FR-12.8), placeholders
+  for `/alertas` and `/perfil`, and a catch-all redirect to `/`.
 - FR-6.3: A bottom navigation (floating outline bar) exposes **Inicio · Alertas ·
   [Escanear] · Lista · Perfil**.
 - FR-6.4: Home is search-first: a search box deep-links to `/buscar?q=…`, and a "Mi
@@ -144,13 +145,61 @@ marked with whether the audit found it met.
   the manifest plus the platform `apple-*` meta tags. — **Partially met at the audit:**
   `apple-touch-icon` is present; the standalone, status-bar and title tags are not.
 
+### FR-12: Saved lists — opt-in snapshots in Firestore *(added — the app's first backend)*
+The working list stays exactly what it was. This is the first feature that persists anything
+off-device, and it does so only when asked. The model is a **draft and named snapshots**: the
+list under `lupa:lista` is scratch space, and saving freezes a copy of it into the user's
+account. Nothing is ever synced continuously, which is why the list hook stays synchronous
+(FR-8) and why saving cannot destroy anything.
+
+- FR-12.1: The working list remains **local, synchronous and session-free** (FR-5.3). No login
+  is required to use it, and no background write ever leaves the device. The cloud is reached
+  only through an explicit save action.
+- FR-12.2: Saving creates a **new** named snapshot and never overwrites an existing saved
+  list. The name defaults to something derived from the date and is editable before saving.
+  Saving is therefore additive: there is no input for which saving loses a list.
+- FR-12.3: One saved list is one document at `users/{uid}/lists/{listId}` holding
+  `{ nombre, creada, items }`, with the `ListaItem[]` **embedded in the document**. Measured:
+  a serialized item is ~152 bytes, so a 100-item list is ~15 KB — 1.45% of Firestore's 1 MiB
+  document limit. A subcollection would buy nothing.
+- FR-12.4: **Opening a saved list is read-only and cannot destroy unsaved work.** The saved
+  list opens as a view; moving an item into the working list is an explicit per-item action
+  with the ordinary add semantics (an EAN already in the draft increments, exactly as adding
+  from a product page does). The app provides **no replace and no merge-all operation**, so
+  there is no confirmation dialog to get wrong and no quantity-inflation rule to specify. This
+  was chosen over "replace with confirmation" and "merge" precisely because it removes the
+  destructive path instead of guarding it.
+- FR-12.5: Saved lists require a session. With no session the save action explains why and
+  offers sign-in; the working list is left untouched.
+- FR-12.6: A saved list must open **even when its EANs no longer resolve in the catalog**. A
+  snapshot outlives the catalog it was taken from, so the stored `nombre` is the fallback label
+  and an unresolvable item is still shown (as its raw code) rather than silently dropped.
+- FR-12.7: Saved lists are private to their owner. `users/{uid}/lists/**` is readable and
+  writable only when `request.auth.uid === uid`; no user can read or enumerate another user's
+  lists, and the client never relies on UI hiding for this.
+- FR-12.8: The saved-lists page is reached from the list page, **not** from the bottom
+  navigation: FR-6.3 fixes five nav slots at 44px targets and the acceptance harness asserts
+  that count. A sixth would trade a working affordance for a broken one.
+- FR-12.9: A saved list that has already been fetched must open with **no network**
+  (Firestore's persistent local cache). One that was never fetched must say so honestly rather
+  than appearing empty — an empty view and a failed read are different facts.
+- FR-12.10: Deleting a saved list is **reversible, not prevented** — the same undo the working
+  list's destructive actions already use, rather than a blocking confirm, which the list page
+  deliberately moved away from.
+
 ## Non-functional requirements
 
 - NFR-1: Initial load (catalog + index, first visit) under ~3 s on a normal connection;
   repeat visits boot from cache without re-downloading.
 - NFR-2: Search latency imperceptible (<50 ms perceived) once loaded, with the UI thread
   never blocked by search work.
-- NFR-3: Fully static; no runtime dependency on any backend.
+- NFR-3: Fully static, with **no runtime dependency on any backend for the features this spec
+  requires today** — and exactly one deliberate, opt-in exception: FR-12 (saved lists). That
+  feature degrades to an explanation rather than failing the app when the backend is
+  unreachable. *(Amended when FR-12 landed. The clause originally read "Fully static; no
+  runtime dependency on any backend", full stop, which Firestore contradicts. Amending the
+  claim was the honest option; leaving it would have left this spec asserting something
+  false.)*
 - NFR-4: Worker messaging and cache versioning logic are unit-tested (Vitest).
 - NFR-5: *(added)* TypeScript strict (`tsc --noEmit` clean); list/scan math unit-tested in
   Node (`lib/lupa/*.test.ts`).
@@ -183,6 +232,29 @@ marked with whether the audit found it met.
   navigations — the lone 1 being the case where the browser's own background update check had
   already run before the navigation. Two is the bound a criterion can assert deterministically;
   "one navigation" would have been a flaky test for something FR-11.3 never required.
+- AC-11: *(added)* Saving is additive and non-destructive. With a working list in place,
+  saving twice yields two saved lists, and the working list is unchanged by both saves.
+- AC-12: *(added)* Opening a saved list while unsaved work sits in the draft leaves the draft
+  untouched until an item is explicitly brought over; bringing over an item already in the
+  draft increments its quantity instead of duplicating it. The draft can never be replaced or
+  merged away.
+- AC-13: *(added)* A saved list whose EANs no longer resolve in the catalog still opens, still
+  names its items from the stored `nombre`, and still shows the unresolvable entries rather
+  than dropping them.
+- AC-14: *(added)* A saved list round-trips without loss: saving and reopening reproduces
+  every item's EAN, `cantidad` and `alerta`, plus the optional `nombre`/`productoId`. The
+  Firestore mapping is a pure function under unit test, so this is asserted without a network.
+- AC-15: *(added — verified out of band)* A second account cannot read, list or write the
+  first account's documents. The acceptance harness drives a single unauthenticated browser,
+  so this is verified by the security rules plus a manual two-account probe rather than by an
+  automated row.
+
+  **Coverage note for FR-12.** `scripts/acceptance.ts` has no credentials and must not have
+  any, so the authenticated half of FR-12 cannot be an acceptance row. What the harness *can*
+  assert is the logged-out contract — that the save action explains itself, offers sign-in and
+  leaves `lupa:lista` untouched — while the authenticated behaviours are covered by unit tests
+  over the pure mapper and the draft transitions, plus a manual probe. Recording the seam is
+  the point: a written-down automation gap is a gap, an implied-to-be-covered one is a lie.
 
 ## Out of scope (Phase 1)
 

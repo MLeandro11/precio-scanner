@@ -32,7 +32,8 @@ Ordered by dependency. Each work unit = one commit (reviewable, tests included).
 | WU7 Hardening + docs | 6 | 0 | 1 |
 | WU8 Lupa (rebrand + feature set) | 8 | 0 | 0 |
 | WU9 PWA (FR-11) | 5 | 0 | 0 |
-| **Total (50 items)** | **47** | **2** | **1** |
+| WU10 Saved lists (FR-12) | 10 | 0 | 0 |
+| **Total (60 items)** | **57** | **2** | **1** |
 
 Test suite at the Lupa merge: `npm test` → **11 files, 97 tests, all green**;
 `npm run typecheck` → clean. Build: worker chunk 28.75 kB gzip, main bundle 90.61 kB gzip.
@@ -403,6 +404,90 @@ reloading — not by reading the code, which is why the E2E test existed.
       with the app shell, and an existing file must still answer 200. The `DEEP-*` caveat is
       recorded on the rows themselves instead of being left implied.
 
+## Work Unit 10 — Saved lists (FR-12)
+
+**Requirement in `02-spec.md` FR-12, design in `03-design.md`.** The tasks below were written
+*after* the requirement and the design note, because the two product decisions in FR-12.4
+(read-only open) and FR-12.8 (entry from the list page) change what gets built, not just how.
+
+Baseline before starting: `npm test` → 13 files, 145 tests, all green; `npm run typecheck` clean;
+`npm run acceptance` → 31/31 against a fresh build.
+
+Split into two sequentially reviewable halves, so the mapping can be accepted before any UI
+exists:
+
+### WU10a — Data layer (no UI, no browser)
+
+- [x] 10.1 `src/lib/firestoreLists.ts`: the lazy `import('firebase/firestore')` behind a memoized
+      promise (mirroring `getAuthClient`), plus `initializeFirestore` with `persistentLocalCache`
+      behind a guard that falls back to a memory cache. — **Done.** The IndexedDB capability is
+      probed *before* initializing rather than caught afterwards, because `initializeFirestore`
+      throws if called twice on one app, so a retry after a failed attempt is not a safe recovery
+      path.
+- [x] 10.2 The **pure** mapper in the same module: `toDocument(items)` and
+      `fromDocument(id, data)`, with `creada` converted to an ISO string at the boundary so no
+      `firebase/*` type reaches React state. — **Done.** `describeFirestoreError`,
+      `defaultListName` and `formatSavedDate` joined it for the same reason: the UI's data
+      handling is where a silent loss would happen, and it is the part that needs no network.
+- [x] 10.3 `src/lib/firestoreLists.test.ts`: the mapper round-trips every item field (EAN,
+      `cantidad`, `alerta`, optional `nombre`/`productoId`), tolerates a missing or odd `nombre`,
+      and never drops an entry whose EAN no longer resolves (AC-13, AC-14). Plain Node — no SDK,
+      no network. — **Done, 19 tests.** The `undefined`-key test asserts on `Object.keys` rather
+      than deep equality, because a key present-and-undefined compares equal to an absent one and
+      deep equality would pass while the Firestore write still failed.
+- [x] 10.4 `firestore.rules`: owner-only read/write on `users/{uid}/lists/{listId}` plus an
+      explicit deny-all catch-all, and a README note that publishing it is **manual**
+      (`firebase deploy --only firestore:rules`) because the pipeline publishes GH Pages only.
+      — **Done.** The README bullet claiming auth "no protege nada ni sincroniza nada" was
+      falsified by this feature and was rewritten with it; the same stale claim in
+      `SettingsPage`'s sign-in copy was corrected too.
+
+### WU10b — UI (no data-layer changes)
+
+- [x] 10.5 `src/hooks/useSavedLists.ts`: save / list / delete, uid from `useAuth()`, with a
+      discriminated `loading | ready | error` state so an unreachable backend cannot render as an
+      empty account (FR-12.9). — **Done.** Five states, not three: `unconfigured` (the normal
+      case in CI), `signed-out`, `loading`, `ready` and `error`. A failed save or delete is kept
+      in a separate `actionError` so it cannot wipe the loaded list from the screen.
+- [x] 10.6 `src/pages/SavedListsPage.tsx` at `/guardadas`, plus the read-only detail at
+      `/guardadas/:listId`. The detail's **only** mutator is `add` — no `restoreAll`, no `clear` —
+      which is what makes AC-12 structural rather than a dialog (FR-12.4). Item labels reuse
+      `ListPage.tsx:126`'s `p?.nombre ?? item.nombre ?? item.ean` fallback (FR-12.6). — **Done.**
+      `restoreSavedList` was added to the data layer for the delete undo (FR-12.10): it writes the
+      same id and the same `creada`, because a re-save would mint a new id and the list would come
+      back as a different object that merely looks the same. `creada` is written back as a
+      `Timestamp` rather than the ISO string so the field keeps one type, since mixing the two
+      would quietly break the `orderBy` that sorts the list.
+- [x] 10.7 `src/App.tsx`: register both routes, lazily imported. — **Done.**
+- [x] 10.8 `src/pages/ListPage.tsx`: the affordance row **below** the header — "Guardar"
+      (disabled when the list is empty, but still enabled when logged out, because that is the
+      path that explains and offers sign-in per FR-12.5) and "Mis listas". — **Changed, and the
+      change is the interesting part.** A "Guardar" button on `/lista` was dropped: it would have
+      required `useAuth`, which calls `getAuthClient()` in a mount effect (`useAuth.ts:26`), so
+      every visit to a core route would have loaded the Firebase SDK — and, because that chunk sits
+      outside the precache, it would also have given `/lista` a new offline failure mode. `/lista`
+      now carries a single "Mis listas guardadas" link and the save action lives on `/guardadas`,
+      where the session is already loaded. Recorded in `03-design.md`.
+- [x] 10.9 Acceptance rows for the **logged-out contract only**: the row exists, "Guardar" on an
+      empty list is disabled, and clicking it logged out explains itself **without touching
+      `precio-scanner:lupa:lista`** — the harness can assert AC-11's logged-out half and nothing
+      more. The new page needs a stable `data-*` state attribute; the harness never sleeps.
+      — **Done, 3 rows, and they are the strongest available.** `SAVED-link` (the link exists, is
+      44px tall, and points at `/guardadas`), `SAVED-page` (`data-saved-lists-state` settles on
+      `unconfigured` or `signed-out` and is never left on `loading`), and `SAVED-no-write` (a
+      sentinel working list of 104 chars is byte-identical after the visit). The sentinel matters:
+      "unchanged" is only meaningful as a comparison, not as an absence.
+- [x] 10.10 Verify: `npm run typecheck`, `npm test`, `npm run build`, `npm run acceptance`, and
+      re-read the precache entry list — the page chunk should appear and the `firebase` chunk
+      should still be absent. — **Done, and it caught a regression.** The `firebase` chunk had
+      silently grown from 46.21 to **213.04 kB gzip** because Firestore joined it, so `/perfil`
+      would have downloaded a database client it never uses. `manualChunks` now splits
+      `@firebase/firestore`, `firebase/firestore` and `@firebase/webchannel-wrapper` into a
+      `firestore` chunk, and `globIgnores` gained `**/firestore-*.js` — without that second half
+      the new chunk name would have joined the precache, which is precisely the trap. Measured
+      after: `firebase` 46.78 kB gzip (was 46.21 before this work unit), `firestore` 165.85 kB gzip
+      fetched only by the saved-lists pages, precache 16 entries / 930 KiB with no SDK in it.
+
 ## Phase 2 backlog (separate change, not started here)
 
 - Live multi-store price comparison (models exist: `AlmacenPrecio`).
@@ -457,3 +542,26 @@ The GitHub remote is now set (public repo, deploy verified). Remaining open work
 multi-token matching defect (7.7), the `normalize` half of 2.7 (tracked as 2.8 — not
 implementable in CI while `raw-catalog.json` stays local), and the structural-assertion /
 `generate-index.ts` guards that 2.7 left uncovered.
+
+**WU10 (saved lists).** Over the 400-line review guidance as one lump — hence the split into
+**WU10a (data layer)** and **WU10b (UI + acceptance)**. Each is reviewable on its own, and WU10a
+is testable in plain Node with no browser, so a reviewer can accept the mapping before any UI
+exists.
+
+The forecast above was ~600–750 changed lines across 9 files. **Realized: 465 additions and 19
+deletions across the 9 files that already existed, plus 953 new lines in 6 new files** — about
+1.44k changed lines over 15 files, roughly 2× the forecast. Both figures are taken before this
+note itself, which is not part of what was estimated. Recorded rather than left standing,
+because an estimate nobody checks against the result is decoration.
+
+**The chunk claim in an earlier version of this paragraph was wrong, and 10.10 is what disproved
+it.** It said the feature was "close to free" because the existing `globIgnores` already covered
+the `firebase` chunk. What the build actually showed: Firestore **joined** that chunk and grew it
+from 46.21 to **213.04 kB gzip**, so `/perfil` — a route that needs only auth — would have
+downloaded a database client it never uses. It took an explicit `firestore` chunk
+(`@firebase/firestore`, `firebase/firestore`, and `@firebase/webchannel-wrapper`, which matches
+the generic `@firebase` test but is never used by auth) **plus** a second `globIgnores` pattern;
+without that second half the new chunk name would have quietly joined the precache. Measured
+after: `firebase` 46.78 kB gzip, `firestore` 165.85 kB gzip, precache 16 entries / 930 KiB with
+no SDK in it. The new page chunk joins the precache **deliberately**, because FR-12.9 needs that
+page offline.

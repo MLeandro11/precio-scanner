@@ -241,6 +241,141 @@ is the offline signal and may fall back to cache, while a server that is reached
 badly** (404, or HTML from an SPA fallback) stays fatal. Collapsing the two would let a stale
 cached copy hide a deployment where `public/data/` stopped being published.
 
+## Saved lists: opt-in snapshots in Firestore (FR-12, WU10)
+
+### The decision: snapshots, not sync
+
+The requirement (FR-12) already fixes the shape, so the design question was narrower: **where
+does the cloud sit relative to the working list?** The rejected alternative was continuous
+two-way sync of `lupa:lista`. It loses on three counts:
+
+1. It would make `useList` asynchronous. The hook is a synchronous localStorage adapter today
+   (`useList.ts:53,56-61`) with six consumers — `AppLayout` (badge), `HomePage`, `ListPage`,
+   `ProductPage`, `ScanPage`, `SearchPage`. Every one would have to grow a loading state.
+2. It would need conflict semantics: two devices, last-write-wins, an offline mutation queue
+   and a merge rule for quantities. All of that is new, and all of it is the kind of code that
+   loses user data quietly.
+3. It would make a session mandatory for the core list, degrading the app for anyone who never
+   signs in.
+
+With snapshots, **the cloud never touches the hook**. Saving reads `items` and writes a
+document; opening a saved list calls the same `add` a product page calls. The working list is
+byte-identical before and after every save — which is exactly what AC-11 asserts.
+
+### Document shape
+
+`users/{uid}/lists/{listId}` holding `{ nombre: string, creada: Timestamp, items: ListaItem[] }`,
+items embedded.
+
+Embedded and not a subcollection because the numbers are unambiguous: a serialized `ListaItem`
+is ~152 bytes, so a 100-item list is ~15 KB — **1.45% of Firestore's 1 MiB document limit**. A
+subcollection would add a read per list and buy nothing.
+
+### The lazy loader (`lib/firestoreLists.ts`)
+
+Mirrors `getAuthClient` (`firebaseAuth.ts:26-41`): a module-level memoized promise around the
+single dynamic `import('firebase/firestore')`, so the SDK is fetched once and a failure is not
+memoized as a success.
+
+**The design note that was wrong, and what the build actually showed.** The first version of this
+section claimed the existing chunking already covered Firestore: `manualChunks` funnelled every
+`node_modules/firebase` and `@firebase` module into one `firebase` chunk, and
+`globIgnores: ['**/firebase-*.js']` excluded it, so Firestore would add "zero precached bytes".
+The first half was true and the conclusion was not, and only building it showed why:
+
+- The funnel **merged Firestore into the auth chunk**. `firebase-*.js` went from 46.21 kB gzip to
+  **213.04 kB**, so `/perfil` — a route that exists and needs only auth — would have downloaded a
+  database client it never uses. "Not precached" is not the same claim as "not paid".
+- Fixing it needed a real chunk split. `@firebase/firestore` and `firebase/firestore` now name
+  their own `firestore` chunk, and so does `@firebase/webchannel-wrapper` — Firestore's transport,
+  which matches the generic `@firebase` test but is never used by auth, and which by itself kept
+  `/perfil` at 65.59 kB gzip until it was moved.
+- **A new chunk name is exactly the precache trap.** `globIgnores` matches on the chunk name, so a
+  `firestore-*.js` chunk matching only `firebase-*` would have quietly joined the precache.
+  `globIgnores` now lists both patterns.
+
+Measured after the split (build output, gzip):
+
+| Chunk | Size | Who fetches it |
+| --- | --- | --- |
+| `firebase-*.js` | 46.78 kB | `/perfil`, and the saved-lists pages |
+| `firestore-*.js` | 165.85 kB | **only** the saved-lists pages |
+| `firestoreLists-*.js` | 1.78 kB | the saved-lists pages (app code) |
+
+So `/perfil` is back where it started (46.78 against 46.21 kB — noise), and the SDK is still
+absent from the precache: 16 entries, 930 KiB, no `firebase-*` and no `firestore-*`.
+
+The **page** chunks are a different matter: `globPatterns: '**/*.{js,css,html}'` precaches
+`SavedListsPage-*.js` and `SavedListDetailPage-*.js`, and that is **wanted, not tolerated**.
+FR-12.9 requires an already-fetched saved list to open with no network, and precaching the page is
+what makes that reachable at all. The cost is ~3.5 kB gzip downloaded by visitors who never open
+them.
+
+### The mapper is pure, and no SDK type escapes it
+
+`toDocument(items)` and `fromDocument(id, data)` are pure functions, and `creada` is converted to
+an ISO string at that boundary. Two reasons:
+
+- The Firestore calls need a network and a session; the mapping — which is where data actually
+  gets dropped — does not. So it is unit-testable in plain Node (AC-14).
+- It keeps `firebase/*` types out of React state, so no component depends on the SDK's shape.
+
+### FR-12.4 is structural, not a guard
+
+The feature's **only** mutator is `add`. There is no `restoreAll`, no `clear`, and no code path
+that writes the working list wholesale. The read-only detail view renders the saved document and
+offers a per-item "agregar". So "opening a saved list cannot destroy unsaved work" is not
+enforced by a confirmation dialog — it is enforced by the absence of the operation. AC-12 has
+nothing to get wrong because there is nothing to get wrong.
+
+### Stale EANs are already handled by convention (FR-12.6)
+
+`ListPage.tsx:126` already reads `const name = p?.nombre ?? item.nombre ?? item.ean`, and
+`useResolveEans` returns `undefined` for an unknown EAN without dropping the entry. The saved
+list detail view reuses that exact fallback. FR-12.6 adds no new mechanism — it records an
+existing convention and makes it a requirement, which is why AC-13 is cheap.
+
+### Offline, and failing honestly (FR-12.9)
+
+`initializeFirestore` with `persistentLocalCache` (not `getFirestore`) so an already-fetched list
+resolves with no network. The page tracks a discriminated state — `loading | ready | error` —
+and **must not render "no tenés listas guardadas" for a failed read**. An empty account and an
+unreachable backend are different facts and have to look different.
+
+*Open risk:* the persistent cache needs IndexedDB, which some private modes do not provide. The
+implementation must not let that turn into a blank page — see the risks table.
+
+### Route and entry point (FR-12.8)
+
+`/guardadas` (save the current list, and list the saved ones) and `/guardadas/:listId` (the
+read-only detail). Reached from `/lista`, never the bottom nav: FR-6.3 fixes five slots and
+`SCAN-nav44` (`scripts/acceptance.ts:675`) asserts `navTargets.length === 5`.
+
+**`/lista` gets one link, not a "Guardar" button, and that is a measured constraint.** The first
+draft of this section put both affordances on `/lista`. It does not survive contact with the SDK:
+`useSavedLists` reaches `useAuth`, and `useAuth` calls `getAuthClient()` in a mount effect
+(`useAuth.ts:26`). A "Guardar" button there would load the Firebase SDK on every visit to a core
+route — and because that chunk sits deliberately outside the precache, it would also hand `/lista`
+a new offline failure mode. So `/lista` stays SDK-free and carries a single "Mis listas guardadas"
+link, while the save action lives on `/guardadas`, where the session is already loaded. The link is
+always present, so it stays reachable with an empty list.
+
+The save control there is disabled when the working list is empty (saving nothing is meaningless)
+and stays enabled for a logged-out user, because that is the path that explains why a session is
+needed and offers sign-in (FR-12.5) — and it is the one half of FR-12 the acceptance harness can
+assert.
+
+### Security rules are versioned here, published by hand (FR-12.7)
+
+`firestore.rules` in the repository is the source of truth: `users/{uid}/lists/{listId}` is
+readable and writable only when `request.auth.uid == uid`, with an explicit deny-all catch-all so
+a future collection is never open by accident.
+
+**This file does not ship with a push.** There is no `firebase.json` and the deploy pipeline
+publishes GH Pages only, so publishing the rules is a manual
+`firebase deploy --only firestore:rules`. Recorded because "the rules are in the repo" and "the
+rules are live" are different claims, and only the first one is automatic.
+
 ## Risks and mitigations
 
 | Risk | Mitigation |
@@ -261,6 +396,12 @@ cached copy hide a deployment where `public/data/` stopped being published.
 | A service worker hides a routing bug | It sits between the deploy and the user, and it did: no row asserted an HTTP status, and `clientsClaim` means the `DEEP-*` rows may be answered by the worker rather than the host. `HOST-404` closes it from Node, bypassing the worker by construction |
 | First visit happens offline, nothing cached | `catalogLoader` fails with a message naming the condition rather than rendering a broken shell (FR-11.4) |
 | Offline serves a stale data version indefinitely | The facets fallback only applies when the request cannot complete. Every online boot still refetches them, so a new data build invalidates the versioned keys on the next visit |
+| Saved lists quietly grow into a sync feature | The feature's only mutator is `add`; no `restoreAll` or `clear` path exists inside it. AC-12 is asserted over an operation that was never implemented, not over a dialog that might be dismissed |
+| A failed saved-list read looks like an empty account | The page keeps `loading`/`ready`/`error` apart and never renders the empty state for a failed read (FR-12.9) |
+| Persistent Firestore cache needs IndexedDB, absent in some private modes | The cache is initialized behind a guard with a memory-cache fallback, so a browser without IndexedDB degrades to online-only reads instead of a blank page |
+| Firestore rules are versioned but published manually | `firestore.rules` is the source of truth and the manual publish step is documented; AC-15 is explicitly marked out-of-band rather than implied to be automated |
+| A saved snapshot outlives the catalog it came from | The stored `nombre` is the fallback label and unresolvable entries are still rendered (FR-12.6, AC-13) — the existing `ListPage` convention, reused rather than reinvented |
+| The saved-lists page chunk joins the precache | Wanted: FR-12.9 needs that page offline. The SDK chunk stays excluded by the existing `globIgnores`, so the heavy part still loads on demand |
 
 ## Testing strategy
 
@@ -270,5 +411,10 @@ cached copy hide a deployment where `public/data/` stopped being published.
 - Normalization + index scripts tested with fixture raw catalogs (valid, truncated,
   corrupt): exit codes, output shape, id stability.
 - `npm test` → 11 files, 97 tests; `npm run typecheck` clean.
+- **Saved lists (FR-12).** The pure mapper is unit-tested in plain Node (AC-14), the draft
+  transitions are tested at the state level, and the acceptance harness covers the **logged-out**
+  contract only — it has no credentials and must not have any. AC-15 (cross-account privacy) is
+  verified by the rules plus a manual two-account probe; the spec records that seam instead of
+  implying automated coverage.
 - Manual/automated acceptance per AC-1..AC-8 (`scripts/acceptance.ts` → 16 checks),
   including the network-panel cache-hit check and a long-typing responsiveness pass.
