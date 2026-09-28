@@ -8,11 +8,22 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        // The Firebase SDK is reached only through a dynamic import (the account screen), so
-        // it must stay a lazily-fetched chunk. Naming it is what lets the service worker
-        // exclude it below: Vite's default `index.esm-<hash>.js` name gives the precache
-        // nothing stable to match on.
+        // The Firebase SDK is reached only through dynamic imports (the account screen and the
+        // saved-lists pages), so it must stay lazily-fetched chunks. Naming them is what lets
+        // the service worker exclude them below: Vite's default `index.esm-<hash>.js` name
+        // gives the precache nothing stable to match on.
+        //
+        // Firestore gets its own name deliberately. Both SDKs used to share one `firebase`
+        // chunk, and adding Firestore to it silently grew what `/perfil` downloads from
+        // ~46 kB gzip to ~213 kB — the account screen would have pulled a database client it
+        // never uses. Order matters: every firestore path also matches the test below it.
         manualChunks(id) {
+          if (id.includes('node_modules/@firebase/firestore')) return 'firestore'
+          if (id.includes('node_modules/firebase/firestore')) return 'firestore'
+          // Firestore's WebChannel transport. It matches the generic `@firebase` test below, but
+          // auth never uses it, and leaving it there is what kept `/perfil` at ~66 kB gzip
+          // instead of its previous ~46 kB once Firestore joined the app.
+          if (id.includes('node_modules/@firebase/webchannel-wrapper')) return 'firestore'
           if (id.includes('node_modules/firebase') || id.includes('node_modules/@firebase')) {
             return 'firebase'
           }
@@ -69,12 +80,13 @@ export default defineConfig({
         // two competing answers about which copy of the data is current. `globPatterns`
         // already excludes JSON, so this is the explicit guard, not the mechanism.
         //
-        // The Firebase chunk is excluded for the opposite reason: it is small, but nothing
-        // needs it unless someone opens the account screen, and `signInWithPopup` needs the
-        // network anyway — so a precached copy would be downloaded by every visitor to no
-        // purpose and could never be used offline. Without this line the service worker
-        // quietly undoes the lazy import.
-        globIgnores: ['**/data/**', '**/firebase-*.js'],
+        // The SDK chunks are excluded for the opposite reason: nothing needs them unless
+        // someone opens the account screen or the saved-lists page, and `signInWithPopup`
+        // needs the network anyway — so a precached copy would be downloaded by every visitor
+        // to no purpose and could never be used offline. Both names are listed because the
+        // pattern has to match the chunk name: a `firestore` chunk that only matched
+        // `firebase-*` would quietly join the precache and undo the lazy import.
+        globIgnores: ['**/data/**', '**/firebase-*.js', '**/firestore-*.js'],
         // Build output only. The `public/` assets (icons, favicon) arrive through
         // `includeAssets`; listing them in both places precaches each of them twice.
         globPatterns: ['**/*.{js,css,html}'],
