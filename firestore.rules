@@ -1,0 +1,25 @@
+rules_version = '2';
+
+// Saved lists (FR-12.7). One document per saved list, items embedded, and only the
+// owner can see or touch it — the client never relies on hiding a screen for this.
+//
+// This file is the source of truth, but it does NOT ship with a push: the deploy
+// pipeline publishes GitHub Pages only. Publishing the rules is a manual step:
+//
+//     firebase deploy --only firestore:rules
+//
+// "The rules are in the repo" and "the rules are live" are different claims, and only
+// the first one is automatic.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid}/lists/{listId} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Deny-all catch-all: a collection added later is closed by default rather than
+    // accidentally inheriting something open.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

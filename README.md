@@ -100,8 +100,25 @@ Notas de implementación:
   normal en CI y en `scripts/acceptance.ts`, así que **no puede romper el build**.
 - `auth/operation-not-allowed` y `auth/unauthorized-domain` son los dos errores que aparecen
   primero al configurar; los mensajes de la app los nombran explícitamente.
-- Esto **identifica** usuarios. No protege archivos ni sincroniza nada: el catálogo sigue
-  público y la lista sigue en `localStorage`.
+- Esto **identifica** usuarios. No protege archivos: el catálogo sigue público. Lo único
+  privado es lo que el usuario guarda a propósito (las listas guardadas, abajo), y la lista de
+  trabajo sigue en `localStorage` hasta que la guarde.
+
+### Listas guardadas (Firestore) — reglas de seguridad
+
+Las listas guardadas (FR-12) sí escriben en Firestore, pero **solo cuando apretás "Guardar"**:
+la lista de trabajo sigue en `localStorage` y no necesita sesión.
+
+`firestore.rules` en este repo es la fuente de verdad de quién puede leer y escribir (solo el
+dueño de cada lista), pero **no se publica con un push**: el pipeline deploya únicamente GitHub
+Pages. Subirlas es a mano:
+
+```sh
+firebase deploy --only firestore:rules
+```
+
+"Las reglas están en el repo" y "las reglas están aplicadas" son dos afirmaciones distintas, y
+solo la primera es automática.
 
 ## Pipeline de datos (con una sola tienda)
 

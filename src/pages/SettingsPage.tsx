@@ -81,7 +81,7 @@ export default function SettingsPage() {
           <>
             <p className="text-sm font-semibold text-text-primary">Iniciá sesión</p>
             <p className="mt-1 text-xs text-text-secondary">
-              Con tu cuenta de Google. Te identifica: no protege nada ni sincroniza nada.
+              Con tu cuenta de Google. Te identifica, y guarda tus listas solo cuando se lo pedís.
             </p>
             <div className="mt-3">
               <Button variant="secondary" className="w-full" onClick={signIn}>
