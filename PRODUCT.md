@@ -77,7 +77,11 @@ snapshots behind a Google sign-in; PWA install; offline boot; dark mode.
   price-watching is a real job of the product, and the repo forbids the cheap way to satisfy it —
   `sdd/02-spec.md` FR-8.4: **"nothing simulates data that does not exist."**
 - No multi-store comparison, no per-unit or price-per-unit comparison, no brand filter (the source
-  carries no brand field), no product count in the UI, no native app.
+  carries no brand field), no **catalog total** in the UI, no native app. Result counts *are*
+  shown, and they are real: the search line reports how many of the matches carry a price, and the
+  filter surface reports the count of the current query. What is deliberately absent is the
+  catalog's total product count on the About screen (`SettingsPage.tsx:10-14`), because it changes
+  with every pipeline run and `catalogo-facets.json` exposes no total to read.
 
 **Constraints future work must not break:**
 
@@ -123,7 +127,8 @@ Real, present, and not to be replaced by placeholders:
   authoritative ledger.
 
 **Must never be fabricated:** multi-store prices, price-history points, real price alerts, brand
-data (`marca` is always empty), testimonials, usage numbers, or a product count in the UI.
+data (`marca` is always empty), testimonials, usage numbers, or a **catalog total** in the UI.
+Result counts for an actual query are measured, not invented, and are shown.
 
 ## Product Principles
 

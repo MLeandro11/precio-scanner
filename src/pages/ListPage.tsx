@@ -62,7 +62,7 @@ export default function ListPage() {
             <button
               type="button"
               onClick={onClearAll}
-              className="flex items-center gap-1 rounded-lg border border-danger/30 bg-danger/5 px-2 py-1 text-xs font-semibold text-danger transition active:bg-danger/10"
+              className="flex items-center gap-1 rounded-lg border border-danger/30 bg-danger/5 min-h-11 px-2 text-xs font-semibold text-danger transition active:bg-danger/10"
             >
               <Trash2 size={14} aria-hidden="true" /> Vaciar
             </button>
@@ -96,7 +96,7 @@ export default function ListPage() {
           type="button"
           onClick={() => setView('lista')}
           aria-pressed={view === 'lista'}
-          className={`flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition ${
+          className={`flex items-center justify-center gap-1.5 rounded-lg min-h-11 text-xs font-semibold transition ${
             view === 'lista' ? 'bg-surface-raised shadow-sm text-text-primary' : 'text-text-muted'
           }`}
         >
@@ -106,7 +106,7 @@ export default function ListPage() {
           type="button"
           onClick={() => setView('codigos')}
           aria-pressed={view === 'codigos'}
-          className={`flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition ${
+          className={`flex items-center justify-center gap-1.5 rounded-lg min-h-11 text-xs font-semibold transition ${
             view === 'codigos' ? 'bg-surface-raised shadow-sm text-accent' : 'text-text-muted'
           }`}
         >
@@ -153,7 +153,7 @@ export default function ListPage() {
                       })
                     }}
                     aria-label={`Quitar ${name} de la lista`}
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border text-text-muted transition hover:text-danger"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border text-text-muted transition hover:text-danger"
                   >
                     <Minus size={16} aria-hidden="true" />
                   </button>
@@ -192,7 +192,7 @@ export default function ListPage() {
                           setCantidad(item.ean, item.cantidad - 1)
                         }}
                         aria-label="Restar uno"
-                        className="flex h-6 w-6 items-center justify-center text-text-secondary"
+                        className="flex h-11 w-11 items-center justify-center text-text-secondary"
                       >
                         −
                       </button>
@@ -203,7 +203,7 @@ export default function ListPage() {
                         type="button"
                         onClick={() => setCantidad(item.ean, item.cantidad + 1)}
                         aria-label="Sumar uno"
-                        className="flex h-6 w-6 items-center justify-center text-accent"
+                        className="flex h-11 w-11 items-center justify-center text-accent"
                       >
                         <Plus size={13} aria-hidden="true" />
                       </button>

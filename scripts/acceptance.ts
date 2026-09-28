@@ -742,6 +742,152 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
     camInfo ? `status messages: ${camInfo.statuses.length}, duplicates: ${camDuplicates}` : '',
   )
 
+  /*
+   * Touch targets (docs/design-system.md §7/§9: every interactive target >= 44×44).
+   * These rows measure the real bounding boxes on /lista and /producto with the same
+   * idiom SCAN-nav44 uses for the bottom nav: read getBoundingClientRect in the page,
+   * judge >= 43.99 on both axes.
+   *
+   * Seeding: useList persists to `precio-scanner:lupa:lista`, so writing that key
+   * before the goto gives the list page real rows (the same approach the SAVED-* rows
+   * use with the sentinel items). The two EANs are the working list's own seed, so
+   * useResolveEans resolves names/prices from the catalog and the steppers render.
+   */
+  const touchItems = [
+    { ean: '7793940219009', cantidad: 2, alerta: true },
+    { ean: '7790895000016', cantidad: 1, alerta: false },
+  ]
+  /** Maps every control in a page snapshot to {label, w, h}; null when the page never booted. */
+  const touchTargets = () =>
+    page.evaluate(
+      () => {
+        const sizeOf = (el: Element) => {
+          const r = el.getBoundingClientRect()
+          return { w: r.width, h: r.height }
+        }
+        const label = (el: Element) =>
+          (el.getAttribute('aria-label') || el.textContent || '')
+            .trim()
+            .replace(/\s+/g, ' ')
+            .slice(0, 24)
+        const asTarget = (el: Element) => ({ label: label(el), ...sizeOf(el) })
+        const byAria = (a: string) => {
+          const el = document.querySelector(`button[aria-label="${a}"]`)
+          return el ? asTarget(el) : null
+        }
+        const viewButtons = Array.from(
+          document.querySelectorAll('[role="group"] button'),
+        ).map(asTarget)
+        const vaciar = Array.from(document.querySelectorAll('button')).find((b) =>
+          (b.textContent ?? '').includes('Vaciar'),
+        )
+        const quitar = Array.from(document.querySelectorAll('button')).filter((b) =>
+          (b.getAttribute('aria-label') ?? '').startsWith('Quitar '),
+        )
+        const historial = Array.from(document.querySelectorAll('a')).find((a) =>
+          (a.textContent ?? '').includes('Historial'),
+        )
+        return {
+          steppers: [
+            byAria('Restar uno'),
+            byAria('Sumar uno'),
+          ],
+          viewButtons,
+          vaciar: vaciar ? asTarget(vaciar) : null,
+          quitar: quitar.map(asTarget),
+          volver: byAria('Volver'),
+          favorite: (() => {
+            const el = document.querySelector(
+              'button[aria-label="Agregar a favoritos"], button[aria-label="Quitar de favoritos"]',
+            )
+            return el ? asTarget(el) : null
+          })(),
+          historial: historial ? asTarget(historial) : null,
+          rowH: (() => {
+            const li = document.querySelector('main ul li')
+            return li ? { w: Math.round(li.getBoundingClientRect().width), h: Math.round(li.getBoundingClientRect().height) } : null
+          })(),
+        }
+      },
+    )
+  const touchOk = (t: { w: number; h: number } | null | undefined) =>
+    !!t && t.w >= 43.99 && t.h >= 43.99
+
+  // The exact left column of the four: the list's controls at phone size.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.evaluate(
+    (items: Array<{ ean: string; cantidad: number; alerta: boolean }>) => {
+      localStorage.setItem('precio-scanner:lupa:lista', JSON.stringify(items))
+    },
+    touchItems,
+  )
+  await page.goto(`${baseUrl}lista`, { waitUntil: 'domcontentloaded' })
+  // The bottom nav is the layout's client the page always booted with; wait for it
+  // instead of guessing — it is also the element the LIST-badge rows measure below.
+  const navShownForTouch = await page.locator('nav[aria-label="Navegación principal"]').first().waitFor({ state: 'visible', timeout: 30000 }).then(() => true).catch(() => false)
+  // Ready when the empty/loaded list contract is on screen: "Vaciar" only renders
+  // with items, so its presence is the readiness contract for the seeded rows.
+  const vaciarReady = await waitForVisible(page.locator('button:has-text("Vaciar")'))
+  const listaTouch = navShownForTouch && vaciarReady ? await touchTargets() : null
+  // Row heights for the density note: what the list renders now vs the 73px the defect report measured.
+  const listaRowH = listaTouch?.rowH?.h ?? -1
+  const baselineRowH = 73
+
+  const listaSteppersOk =
+    !!listaTouch && listaTouch.steppers.length === 2 && listaTouch.steppers.every((t: any) => touchOk(t))
+  record(
+    'TOUCH-lista-steppers',
+    listaSteppersOk,
+    `list quantity steppers (${listaTouch?.steppers.length ?? 0}): ${
+      listaTouch
+        ? listaTouch.steppers.map((t: { label: string; w: number; h: number }) => `${t.label} ${Math.round(t.w)}×${Math.round(t.h)}`).join(', ')
+        : 'page never settled'
+    }`,
+  )
+  record(
+    'TOUCH-lista-quitar',
+    !!listaTouch && listaTouch.quitar.length === 2 && listaTouch.quitar.every(touchOk),
+    `per-item Quitar buttons (${listaTouch?.quitar.length ?? 0}): ${
+      listaTouch
+        ? listaTouch.quitar.map((t: { label: string; w: number; h: number }) => `${t.label} ${Math.round(t.w)}×${Math.round(t.h)}`).join(', ')
+        : 'page never settled'
+    }`,
+    `list-row height with h-11 controls: ${listaRowH}px (baseline before this change: ${baselineRowH}px; the density cost is accepted and expected)`,
+  )
+  record(
+    'TOUCH-lista-vaciar',
+    touchOk(listaTouch?.vaciar),
+    `"Vaciar" button: ${
+      listaTouch?.vaciar ? `${listaTouch.vaciar.w.toFixed(0)}×${listaTouch.vaciar.h.toFixed(0)}` : 'page never settled'
+    }`,
+  )
+  record(
+    'TOUCH-lista-view',
+    !!listaTouch && listaTouch.viewButtons.length === 2 && listaTouch.viewButtons.every(touchOk),
+    `view selector buttons (${listaTouch?.viewButtons.length ?? 0}): ${
+      listaTouch
+        ? listaTouch.viewButtons.map((t: { label: string; w: number; h: number }) => `${t.label} ${Math.round(t.w)}×${Math.round(t.h)}`).join(', ')
+        : 'page never settled'
+    }`,
+  )
+
+  // The product detail controls on the same rule.
+  await page.goto(`${baseUrl}producto/7793940219009`, { waitUntil: 'domcontentloaded' })
+  // The star renders only after the worker resolves the EAN; wait for it, never sleep.
+  const prodReady = await waitForVisible(page.locator('button[aria-label="Agregar a favoritos"], button[aria-label="Quitar de favoritos"]'))
+  const prodTouch = prodReady ? await touchTargets() : null
+  record(
+    'TOUCH-prod-control',
+    touchOk(prodTouch?.volver) && touchOk(prodTouch?.favorite) && touchOk(prodTouch?.historial),
+    `/producto controls: Volver ${
+      prodTouch?.volver ? `${prodTouch.volver.w.toFixed(0)}×${prodTouch.volver.h.toFixed(0)}` : 'not found'
+    }, favorite ${
+      prodTouch?.favorite ? `${prodTouch.favorite.w.toFixed(0)}×${prodTouch.favorite.h.toFixed(0)}` : 'not found'
+    }, Historial ${
+      prodTouch?.historial ? `${prodTouch.historial.w.toFixed(0)}×${prodTouch.historial.h.toFixed(0)}` : 'not found'
+    }`,
+  )
+
   // ---------------------------------------------------------------- Lista badge (bottom nav)
   // The Lista badge lives in AppLayout — the *layout* route, which stays mounted
   // across every child route — so it must follow a list mutated by a page hook.
@@ -1094,7 +1240,6 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
     const settled = booted && (await searchSettledWithin(offlineQuery))
     const offlineCards: string[] = settled ? await cards().allTextContents() : []
     const relevant = offlineCards.filter((t: string) => /seren[ií]sima/i.test(t)).length
-
     record(
       'OFFLINE',
       sw.supported && sw.ready && sw.controlled && facetsCached && settled && relevant > 0,

@@ -92,7 +92,7 @@ export default function ProductPage() {
           type="button"
           onClick={() => navigate(-1)}
           aria-label="Volver"
-          className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-surface-raised text-text-primary transition hover:bg-surface"
+          className="flex h-11 w-11 items-center justify-center rounded-full border border-border bg-surface-raised text-text-primary transition hover:bg-surface"
         >
           <ArrowLeft size={18} aria-hidden="true" />
         </button>
@@ -110,7 +110,7 @@ export default function ProductPage() {
                 description: product.nombre,
               })
             }}
-            className={`flex h-10 w-10 items-center justify-center rounded-full border transition ${
+            className={`flex h-11 w-11 items-center justify-center rounded-full border transition ${
               favorites.isFavorite(product.id)
                 ? 'border-favorite/40 bg-favorite/10 text-favorite'
                 : 'border-border bg-surface-raised text-text-secondary hover:text-favorite'
@@ -120,7 +120,7 @@ export default function ProductPage() {
           </button>
           <Link
             to={`/historial/${encodeURIComponent(normalizeEan(product.barcode))}`}
-            className="flex items-center gap-1.5 rounded-full border border-border bg-surface-raised px-4 py-2 text-xs font-medium text-text-primary transition hover:bg-surface"
+            className="flex items-center gap-1.5 rounded-full border border-border bg-surface-raised min-h-11 px-4 text-xs font-medium text-text-primary transition hover:bg-surface"
           >
             <History size={15} aria-hidden="true" /> Historial
           </Link>
