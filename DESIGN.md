@@ -42,7 +42,6 @@ typography:
     lineHeight: 1.5
   dense-row:
     fontSize: "13px"
-    fontWeight: 400
     lineHeight: 1.4
   label:
     fontSize: "12px"
@@ -50,7 +49,6 @@ typography:
     lineHeight: 1.4
   caption:
     fontSize: "11px"
-    fontWeight: 500
     lineHeight: 1.4
   micro:
     fontSize: "10px"
@@ -313,18 +311,25 @@ exist for a single dense surface. The prose says which is which.
 - **Title** (600, 14px, 1.375): product names, with `leading-snug` and up to two lines
   (`line-clamp-2`).
 - **Body** (400, 14px): metadata, descriptions, button labels.
-- **Dense row** (400, 13px): compact label/value rows (the About block) and the sonner toast action
-  button. Reused across those two surfaces; not a licence for general body text.
+- **Dense row** (13px): compact label/value rows (the About block) and the sonner toast action
+  button. The weight comes from the surface rather than the step — 400 on the About rows, 600 on the
+  toast action — which is why this role carries no weight in the frontmatter. Reused across those two
+  surfaces; not a licence for general body text.
 - **Label** (500, 12px): counts, chips, filter labels, section headings in uppercase
   (`tracking-wide`).
-- **Caption** (500, 11px): the dense-metadata step — EAN lines, "sin precio", scan results, saved-
-  list captions — and the bottom-nav labels. It is reused across many dense surfaces, which is why
-  the nav labels live here now instead of on the old 10px "floor".
+- **Caption** (11px): the dense-metadata step — EAN lines, "sin precio", scan results, saved-
+  list captions — and the bottom-nav labels. Like `dense-row`, the weight comes from the surface and
+  not from the step: 400 for metadata, 500 for the nav labels, 600 for the active scan label. It is
+  reused across many dense surfaces, which is why the nav labels live here now instead of on the old
+  10px "floor".
 - **Micro** (500, 10px): the EAN chip on a product card. This is the step the nav labels used to
   share; after they moved to `caption` (11px) it has exactly one remaining user. If that chip ever
   moves, the step is dead and should be deleted rather than kept as an empty rung.
 - **Badge** (600, 9px): the count pill on the nav icon. Single-use, and the true floor of the
   scale.
+- **Category glyph** (30px, `text-3xl`): the emoji fallback inside a product image tile. It is in the
+  code and so it is in the scale, but it is a glyph box and not a text role — nothing should borrow
+  it for type.
 
 ### Named Rules
 
@@ -562,8 +567,10 @@ implementation already does. Each one is grounded in this file or in the code, n
 - **Don't** introduce a second accent color, or use `star-amber` for anything but favorites and
   warnings.
 - **Don't** convey information by color alone.
-- **Don't** use emojis as structural icons, or as an empty-state illustration — the one emoji in
-  the codebase is a fallback inside a product image, not chrome.
+- **Don't** use emojis as structural icons, or as an empty-state illustration. Emojis appear in this
+  codebase as content and never as iconography: a category-glyph map used as the product-image
+  fallback, the basket on the product page, and the alert marker in the list row. None of them
+  replaces a drawn icon.
 - **Don't** animate width, height or layout; motion is transform and opacity only, 150–300ms,
   `ease-out` entering.
 - **Don't** add layered or decorative shadows, glows, or gradient surfaces — the gradients that

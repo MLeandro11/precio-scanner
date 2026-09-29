@@ -123,7 +123,7 @@ because a surface needed it:
 | `empty-title` | 15px / 600 | Empty-state heading ("Sin resultados"); single-use, and the closest value on the scale to drift |
 | `title` | 14px / 600 | Product name (`leading-snug`, two lines max) |
 | `body` | 14px | Metadata (category, code), button labels |
-| `dense-row` | 13px / 400 | Compact label/value rows (the About block) and the toast action button |
+| `dense-row` | 13px, weight from the surface (400 rows, 600 toast action) | Compact label/value rows (the About block) and the toast action button |
 | `label` | 12px / 500 | Counts, labels, chips, uppercase section headings |
 | `caption` | 11px / 500 | Dense metadata (EAN lines, "sin precio", scan results) **and** bottom-nav labels |
 | `micro` | 10px / 500 | EAN chip on a product card; the nav labels moved to `caption` (11px) |
