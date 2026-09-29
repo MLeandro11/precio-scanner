@@ -3,6 +3,7 @@ import { BrowserMultiFormatReader, BarcodeFormat } from '@zxing/browser'
 import { DecodeHintType } from '@zxing/library'
 import { createScanGate } from '../lib/lupa/scan'
 import type { ScanGate } from '../lib/lupa/scan'
+import { suppressExpectedZxingMisses } from '../lib/zxingWarning'
 
 export type ScanStatus = 'unsupported' | 'requesting' | 'active' | 'denied' | 'error'
 
@@ -115,6 +116,7 @@ export function useBarcodeScanner(onDetect: (code: string) => void): BarcodeScan
     let cancelled = false
     let controls: { stop: () => void } | null = null
     let stream: MediaStream | null = null
+    let restoreZxingWarn: (() => void) | null = null
 
     async function start() {
       setStatus('requesting')
@@ -162,6 +164,14 @@ export function useBarcodeScanner(onDetect: (code: string) => void): BarcodeScan
         if (caps.torch === true) setTorchSupported(true)
 
         // 2) Hand the live stream+video to ZXing, which decodes frames from it.
+        //    @zxing/library@0.23.0's MultiFormatReader.decodeInternal logs every
+        //    ordinary decode miss as "non-ReaderException from reader:" because in
+        //    the JS port NotFoundException/FormatException/ChecksumException are
+        //    siblings of ReaderException, not subclasses. At four formats on a
+        //    180 ms cycle that is ~22 warnings/second while scanning. Filter that
+        //    one upstream message only here, where our scanner owns the decode
+        //    loop; it is restored in this effect's cleanup below.
+        restoreZxingWarn = suppressExpectedZxingMisses()
         controls = await reader.decodeFromStream(stream, video, (result) => {
           if (cancelled) return
           if (result) {
@@ -179,6 +189,14 @@ export function useBarcodeScanner(onDetect: (code: string) => void): BarcodeScan
         }
         setStatus('active')
       } catch (err) {
+        // The wrapper only exists while the decode loop does: a failed start
+        // restores console.warn too, so the error state never sits on a
+        // globally filtered console. (There is no reference counting: two
+        // simultaneous scanner instances would have one restore disable the
+        // filter for the other — unreachable today, `useBarcodeScanner` has a
+        // single use site, recorded here rather than fixed.)
+        restoreZxingWarn?.()
+        restoreZxingWarn = null
         stream?.getTracks().forEach((t) => t.stop())
         trackRef.current = null
         if (cancelled) return
@@ -209,6 +227,8 @@ export function useBarcodeScanner(onDetect: (code: string) => void): BarcodeScan
     start()
     return () => {
       cancelled = true
+      restoreZxingWarn?.()
+      restoreZxingWarn = null
       controls?.stop()
       stream?.getTracks().forEach((t) => t.stop())
       trackRef.current = null

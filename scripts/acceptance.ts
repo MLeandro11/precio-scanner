@@ -781,6 +781,59 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
   )
 
   /*
+   * SCAN-zxing-noise — the scanner must not flood the console with the upstream
+   * @zxing/library 0.23.0 miss warning. The fake camera delivers frames with no
+   * barcode, so every decode attempt is an ordinary miss; before the client-side
+   * filter existed each miss logged "MultiFormatReader: non-ReaderException from
+   * reader:" (4 formats on a 180 ms cycle -> ~22/s). This row FAILS against the
+   * unfiltered build and passes with the filter from src/lib/zxingWarning.ts. The
+   * wait keys on real state, never a fixed sleep: `data-scan-state="active"` proves
+   * the decode loop started, and the <video> advancing a full second of playback
+   * proves it kept receiving frames before the console is judged.
+   */
+  const zxingMisses: string[] = []
+  const onZxingConsole = (msg: { type(): string; text(): string }) => {
+    if (msg.type() !== 'warning') return
+    const text = msg.text()
+    if (text.includes('MultiFormatReader: non-ReaderException')) zxingMisses.push(text)
+  }
+  page.on('console', onZxingConsole)
+  await page.goto(`${baseUrl}escanear`, { waitUntil: 'domcontentloaded' })
+  let scanLoopLive = false
+  try {
+    await page.waitForFunction(
+      () =>
+        document.querySelector('[data-scan-state]')?.getAttribute('data-scan-state') === 'active',
+      undefined,
+      { timeout: 30000 },
+    )
+    const baseTime = await page.evaluate(
+      () => (document.querySelector('video') as HTMLVideoElement | null)?.currentTime ?? -1,
+    )
+    await page.waitForFunction(
+      (base: number) => {
+        const video = document.querySelector('video') as HTMLVideoElement | null
+        return !!video && video.videoWidth > 0 && video.currentTime >= base + 1
+      },
+      baseTime,
+      { timeout: 30000 },
+    )
+    scanLoopLive = true
+  } catch {
+    scanLoopLive = false
+  }
+  page.off('console', onZxingConsole)
+  record(
+    'SCAN-zxing-noise',
+    scanLoopLive && zxingMisses.length === 0,
+    scanLoopLive
+      ? `scan loop live (video advanced 1s past "active"); ` +
+        `"MultiFormatReader: non-ReaderException" console warnings: ${zxingMisses.length}`
+      : 'scan loop never reached a live decoding state with the fake camera',
+    zxingMisses.length ? `first warning: ${zxingMisses[0].slice(0, 120)}` : '',
+  )
+
+  /*
    * Touch targets (docs/design-system.md §7/§9: every interactive target >= 44×44).
    * These rows measure the real bounding boxes on /lista and /producto with the same
    * idiom SCAN-nav44 uses for the bottom nav: read getBoundingClientRect in the page,
