@@ -17,6 +17,11 @@
  *   - one run in flight: a new run supersedes the previous one; stale worker
  *     rejections ('superseded') are swallowed, real errors surface as
  *     state.error;
+ *   - retry: `retry()` re-runs the CURRENT query and filters immediately
+ *     (bypassing the debounce) and clears the error by re-running — a failed
+ *     run is recovered the same way it was produced: another run, with no
+ *     automatic loop or backoff (offline-first: a silent loop fights the
+ *     cache and burns battery);
  *   - paging: `loadMore` appends the next page; any new query/filter resets
  *     to page 0.
  *
@@ -55,6 +60,8 @@ export interface SearchSession {
   setSort: (sort: SortOrder) => void
   showFavorites: (ids: string[] | null) => void
   loadMore: () => void
+  /** Re-runs the current query+filters immediately, bypassing the debounce. */
+  retry: () => void
   dispose: () => void
 }
 
@@ -199,6 +206,13 @@ export function createSearchSession({
     },
     loadMore() {
       if (state.hasMore && !state.loading) run({ append: true })
+    },
+    retry() {
+      // Drop any pending debounced run: retry re-runs the *current* state, so
+      // a leftover older query in the timer must not land after it.
+      // (showFavorites already made that same deliberate-cancel choice.)
+      clearTimeout(timer ?? undefined)
+      run()
     },
     dispose() {
       clearTimeout(timer ?? undefined)

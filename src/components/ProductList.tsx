@@ -2,6 +2,7 @@ import { PackageSearch, SearchX } from 'lucide-react'
 import ProductCard from './ProductCard'
 import Button from './ui/Button'
 import SkeletonList from './ui/Skeleton'
+import { describeCatalogError } from '../lib/catalogError'
 import type { SearchState } from '../lib/searchSession'
 import type { SearchControls } from '../hooks/useSearch'
 import type { Producto } from '../lib/types'
@@ -22,14 +23,21 @@ export default function ProductList({
   const { results, total, loading, error, hasMore, query, categoria, priceMin, priceMax } = search
 
   if (error) {
+    // DESIGN.md: name the problem, offer one recovery action. The mapper picks
+    // the cause from the real error; the raw text is never echoed to the user.
+    const { title, hint } = describeCatalogError(error)
     return (
       <div data-search-state="error" data-search-query={query}>
-        <p
+        <div
           role="alert"
-          className="rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger"
+          className="rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-danger"
         >
-          Ocurrió un error al buscar. Reintentá.
-        </p>
+          <p className="text-sm font-semibold">{title}</p>
+          {hint ? <p className="mt-1 text-sm">{hint}</p> : null}
+          <Button size="md" className="mt-3" onClick={search.retry}>
+            Reintentar
+          </Button>
+        </div>
       </div>
     )
   }

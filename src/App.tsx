@@ -23,6 +23,7 @@ import SettingsPage from './pages/SettingsPage'
 import Brand from './components/Brand'
 import Button from './components/ui/Button'
 import SkeletonList from './components/ui/Skeleton'
+import { describeCatalogError } from './lib/catalogError'
 
 /**
  * Catalog boot context: the worker client owns the catalog; the main thread
@@ -56,12 +57,20 @@ function BootScreen() {
   )
 }
 
-function ErrorScreen() {
+function ErrorScreen({ error }: { error: unknown }) {
+  // A boot failure is a catalogLoader failure, so it gets the same cause +
+  // recovery copy as the search error state (DESIGN.md: name the problem and
+  // the recovery; the raw error text is never echoed).
+  const { title, hint } = describeCatalogError(error)
   return (
-    <div className="safe-top flex min-h-dvh items-center justify-center bg-surface px-4">
+    <div
+      className="safe-top flex min-h-dvh items-center justify-center bg-surface px-4"
+      data-boot-state="error"
+    >
       <div className="text-center">
         <Brand />
-        <p className="mt-3 text-sm text-danger">No se pudo cargar el catálogo.</p>
+        <p className="mt-3 text-sm font-semibold text-danger">{title}</p>
+        {hint ? <p className="mt-1 text-sm text-text-secondary">{hint}</p> : null}
         <Button variant="primary" className="mt-4" onClick={() => window.location.reload()}>
           Reintentar
         </Button>
@@ -128,6 +137,7 @@ function ScanLoading() {
 export default function App() {
   const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading')
   const [boot, setBoot] = useState<CatalogContextValue | null>(null)
+  const [bootError, setBootError] = useState<unknown>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -143,8 +153,13 @@ export default function App() {
         setBoot({ client, facets: data.facets })
         setPhase('ready')
       } catch (err) {
+        // Kept for the maintainer: the raw error (URLs, statuses) never reaches
+        // the user; ErrorScreen renders only the mapper's named cause.
         console.error('catalog boot failed', err)
-        if (!cancelled) setPhase('error')
+        if (!cancelled) {
+          setBootError(err)
+          setPhase('error')
+        }
       }
     }
 
@@ -154,8 +169,15 @@ export default function App() {
     }
   }, [])
 
+  /*
+   * Order rule: the failed-boot branch MUST be checked before the loading
+   * skeleton. On a boot failure `boot` stays null, so if `!boot` were
+   * evaluated first the app would render BootScreen forever — phase ===
+   * 'error' would be unreachable (the original defect). Do not reorder these
+   * two guards back to loading-first.
+   */
+  if (phase === 'error') return <ErrorScreen error={bootError} />
   if (phase === 'loading' || !boot) return <BootScreen />
-  if (phase === 'error') return <ErrorScreen />
 
   return (
     <CatalogContext.Provider value={boot}>

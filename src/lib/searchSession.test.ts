@@ -186,6 +186,63 @@ describe('searchSession', () => {
     expect(session.getState().error).toEqual(new Error('worker crashed'))
   })
 
+  it('retry() re-runs the current query immediately and clears the error on success', async () => {
+    vi.useFakeTimers()
+    const client = fakeClient() as AnyClient
+    let cocaCalls = 0
+    client.query = vi.fn(async (p: QueryParams) => {
+      // fail only the first run of the query itself (the browse runs with '')
+      cocaCalls += Number(p.query === 'coca')
+      if (p.query === 'coca' && cocaCalls === 1) throw new Error('worker crashed')
+      return {
+        results: [{ id: 'coca-1', nombre: 'Coca', marca: '', categoria: 'C', barcode: '', precio: 1 }],
+        total: 1,
+      }
+    })
+    const session = createSearchSession({ client })
+    session.setQuery('coca')
+    vi.advanceTimersByTime(150)
+    await vi.runAllTimersAsync()
+    const failed = session.getState()
+    expect(failed.error).toEqual(new Error('worker crashed'))
+    expect(failed.loading).toBe(false)
+    expect(client.query).toHaveBeenCalledTimes(2) // browse + debounced 'coca' run
+
+    session.retry()
+    await vi.runAllTimersAsync()
+    const recovered = session.getState()
+    expect(recovered.error).toBeNull()
+    expect(recovered.loading).toBe(false)
+    expect(recovered.results.map((p) => p.id)).toEqual(['coca-1'])
+    // retry bypasses the debounce: a third call already ran with the same query
+    expect(client.query).toHaveBeenCalledTimes(3)
+    expect(client.query.mock.calls[2]![0].query).toBe('coca')
+  })
+
+  it('retry() bypasses the debounce: runs the current query now and the pending timer never lands', async () => {
+    vi.useFakeTimers()
+    const { client, session } = setup()
+    await vi.waitFor(() => expect(client.calls).toHaveLength(1))
+
+    // Three outcomes pinned together:
+    //   1. retry runs the typed state NOW, before any timer advance — a no-op retry
+    //      (or one that re-schedules instead of running) fails the local assertion.
+    //   2. the cancelled debounce timer is dead — a retry that forgets clearTimeout
+    //      fails the post-timer assertion, because the pending run would land later.
+    //   3. exactly the current state runs — the immediate call is the typed query,
+    //      never the stale browse/run that was in flight before the retry.
+    session.setQuery('vieja')
+    session.retry()
+    expect(client.calls).toHaveLength(2) // immediate retry, no timer advance yet
+    expect(client.calls[1]!.query).toBe('vieja')
+    expect(session.getState().query).toBe('vieja')
+
+    await vi.runAllTimersAsync()
+    expect(client.calls).toHaveLength(2) // the pending timer never landed
+    expect(session.getState().query).toBe('vieja')
+    expect(session.getState().loading).toBe(false)
+  })
+
   it('loadMore appends the next page and clears hasMore at the end', async () => {
     const { session } = setup()
     await vi.waitFor(() => expect(session.getState().results).toHaveLength(50))

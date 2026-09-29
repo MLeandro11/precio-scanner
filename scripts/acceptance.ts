@@ -888,6 +888,68 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
     }`,
   )
 
+  /*
+   * The boot-failure screen (App's ErrorScreen), reached through the route a
+   * first visit on a dead connection really takes: a FRESH context has no
+   * service worker and an empty Cache API, so the aborted catalog fetches make
+   * loadCatalog throw `offline with no cached facets` — the honest
+   * "No se pudo descargar el catálogo." branch. The old code kept the app on
+   * BootScreen forever on this route; this row waits on the app's own
+   * `data-boot-state="error"` hook (the same convention as data-search-state /\n   * data-scan-state), so it can never pass against the eternal skeleton.
+   *
+   * Recovery: the screen's own Reintentar button reloads the page; with the
+   * catalog requests unblocked, the same URL boots to the search screen.
+   */
+  const bootErrBrowser = await chromium.launch({ ...baseLaunch })
+  const bootErrContext = await bootErrBrowser.newContext({ viewport: { width: 390, height: 844 } })
+  let bootBlocked = true
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await bootErrContext.route(/catalogo(-index|-facets)?\.json/, (route: any) => {
+    if (bootBlocked) void route.abort()
+    else void route.continue().catch(() => undefined)
+  })
+  const bootErrPage = await bootErrContext.newPage()
+  await bootErrPage.goto(`${baseUrl}buscar?q=yerba`, { waitUntil: 'domcontentloaded' })
+
+  const bootErrorShown = await waitForVisible(bootErrPage.locator('[data-boot-state="error"]'))
+  const bootAlertText = bootErrorShown
+    ? await bootErrPage.evaluate(() =>
+        (document.querySelector('[data-boot-state="error"]')?.textContent ?? '')
+          .replace(/\s+/g, ' ')
+          .trim(),
+      )
+    : ''
+  const bootRetry = bootErrPage.locator('[data-boot-state="error"] button:has-text("Reintentar")')
+  const bootRetryShown = await waitForVisible(bootRetry)
+  const bootRetryBox = bootRetryShown ? await bootRetry.boundingBox() : null
+
+  bootBlocked = false
+  if (bootRetryShown) await bootRetry.click()
+  const bootRecovered = await searchSettledOn(bootErrPage, 'yerba')
+  const bootResults = bootRecovered ? await bootErrPage.locator('ul li').allTextContents() : []
+  record(
+    'BOOT-err',
+    bootErrorShown &&
+      /No se pudo descargar el catálogo/.test(bootAlertText) &&
+      !/Ocurrió un error al buscar/.test(bootAlertText) &&
+      !/Cargando catálogo/.test(bootAlertText) &&
+      bootRetryShown &&
+      !!bootRetryBox &&
+      bootRetryBox.height >= 43.99 &&
+      bootRetryBox.width >= 43.99 &&
+      bootRecovered &&
+      bootResults.length > 0,
+    `fresh context with catalog downloads aborted -> ` +
+      `${bootErrorShown ? 'error screen' : 'error screen NOT reached'}, ` +
+      `alert "${bootAlertText.slice(0, 70)}", Reintentar ` +
+      `${bootRetryBox ? `${bootRetryBox.width.toFixed(0)}×${bootRetryBox.height.toFixed(0)}` : 'MISSING'} (min 44×44), ` +
+      `after unblocking + retry -> ${bootResults.length} result(s) for "yerba"`,
+    'the cause is named (the download-failure branch, not the generic fallback), and the ' +
+      'skeleton copy ("Cargando catálogo…") must be gone — a row that could pass on the ' +
+      'old eternal BootScreen would be vacuous',
+  )
+  await bootErrBrowser.close()
+
   // ---------------------------------------------------------------- Lista badge (bottom nav)
   // The Lista badge lives in AppLayout — the *layout* route, which stays mounted
   // across every child route — so it must follow a list mutated by a page hook.

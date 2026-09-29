@@ -13,6 +13,7 @@ export interface SearchControls {
   setSort: (s: SortOrder) => void
   showFavorites: (ids: string[] | null) => void
   loadMore: () => void
+  retry: () => void
 }
 
 export function useSearch(
@@ -40,5 +41,6 @@ export function useSearch(
     setSort: (s) => session.setSort(s),
     showFavorites: (ids) => session.showFavorites(ids),
     loadMore: () => session.loadMore(),
+    retry: () => session.retry(),
   }
 }
