@@ -495,6 +495,28 @@ exists:
 - Price history per EAN (model: `HistorialPrecio`) + price alerts (`ListaItem.alerta`),
   only once real multi-store/history data exists.
 
+### Carried forward from the design critique (2026-09-29)
+
+- **The UI draws a price alert the product cannot set or deliver.** `src/pages/ListPage.tsx:178`
+  renders `🔔 alerta de precio` whenever `item.alerta` is true, but **no component calls
+  `toggleAlerta`** and there is no delivery path: price history does not exist and `/alertas` is a
+  placeholder. The row shows an active state that cannot occur in practice, which is the same
+  failure the rest of the app avoids — never present absence as data. Recorded as a **Priority
+  Issue for the next critique**, with two honest options: make the flag settable (with copy that
+  says notifications are not delivered yet), or stop rendering the marker until a delivery path
+  exists. Left in place deliberately so it is not quietly fixed as a side effect of something else.
+- **Refactors declined on purpose**: extracting the duplicated state-card, bottom-dock and
+  product-row markup into shared components, and moving `formatPrice` out of `ProductCard`. Real
+  observations from the audit, but pure refactors with a wide blast radius and no user-visible
+  benefit.
+- **Advisories from the native review, carried forward without their text.** The review envelopes
+  report id, lens, location and severity but not the finding's prose, so these are recorded as
+  locations to revisit rather than as understood defects: `R3-boot-generic-copy`
+  (`src/App.tsx:64` — an unrecognised boot error rendering search-flavoured copy),
+  `R3-barcode-lazy-load` (`src/components/Barcode.tsx:24-28`),
+  `R3-resolve-no-failure-path` (`src/lib/workerClient.ts:115-118` — the new batched EAN resolve has
+  no failure path), and `R3-001`, `R3-002`, `R3-003` (`scripts/acceptance.ts:817`, `:820`, `:855`).
+
 ## Deviations from plan
 
 1. **"Each work unit = one commit" was not honored.** WU1–WU5 landed as a single baseline
