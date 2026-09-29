@@ -516,6 +516,12 @@ exists:
   `R3-barcode-lazy-load` (`src/components/Barcode.tsx:24-28`),
   `R3-resolve-no-failure-path` (`src/lib/workerClient.ts:115-118` — the new batched EAN resolve has
   no failure path), and `R3-001`, `R3-002`, `R3-003` (`scripts/acceptance.ts:817`, `:820`, `:855`).
+- **Two more, from the scanner change** (`b982173`): `R3-ZXING-WRAPPER-TEARDOWN`
+  (`src/hooks/useBarcodeScanner.ts:174`) — nothing asserts that the page-wide `console.warn`
+  wrapper is removed on teardown or on a failed `start()`, so a regression there would silently drop
+  **every warning in the app** and no existing check would turn red; that one is worth a test before
+  the next person touches the hook. And `R3-ZXING-FALLBACK-UNPROVED`
+  (`src/lib/zxingWarning.ts:126-132`).
 
 ## Deviations from plan
 
