@@ -4,6 +4,7 @@ import { Barcode as BarcodeIcon, Bookmark, Minus, Plus, Trash2 } from 'lucide-re
 import { toast } from 'sonner'
 import Brand from '../components/Brand'
 import Barcode from '../components/Barcode'
+import CopyEanButton, { CopyAllEansButton } from '../components/CopyEanButton'
 import { formatPrice } from '../components/ProductCard'
 import Button from '../components/ui/Button'
 import { useCatalog } from '../App'
@@ -171,7 +172,8 @@ export default function ListPage() {
 
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-text-primary">{name}</p>
-                    <p className="font-mono text-[11px] text-text-secondary">EAN {item.ean}</p>
+                    {/* The code is the copy control (D1); the row keeps its width. */}
+                    <CopyEanButton ean={item.ean} />
                     {item.alerta ? (
                       <p className="text-[11px] font-medium text-accent">🔔 alerta de precio</p>
                     ) : null}
@@ -253,6 +255,8 @@ export default function ListPage() {
               Total ${total.toLocaleString('es-AR')}
             </span>
           </div>
+          {/* Same `items` the rows render: one derivation of the list, not two. */}
+          <CopyAllEansButton eans={eans} className="mt-3" />
           <p className="mt-2 text-[11px] text-text-secondary">
             Comparación entre almacenes y avisos en futura versión (modelados).
           </p>

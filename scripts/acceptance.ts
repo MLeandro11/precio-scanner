@@ -839,6 +839,13 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
           viewButtons,
           vaciar: vaciar ? asTarget(vaciar) : null,
           quitar: quitar.map(asTarget),
+          // The copy controls (D1/D5). The `quitar` filter above is unaffected:
+          // it requires an aria-label starting with "Quitar " AND an svg child,
+          // so the "Copiar el EAN …" labels (which also carry an svg) miss it.
+          copiarEan: Array.from(
+            document.querySelectorAll('button[aria-label^="Copiar el EAN "]'),
+          ).map(asTarget),
+          copiarTodos: byAria('Copiar todos los EAN'),
           volver: byAria('Volver'),
           favorite: (() => {
             const el = document.querySelector(
@@ -913,6 +920,108 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
         ? listaTouch.viewButtons.map((t: { label: string; w: number; h: number }) => `${t.label} ${Math.round(t.w)}×${Math.round(t.h)}`).join(', ')
         : 'page never settled'
     }`,
+  )
+  record(
+    'TOUCH-lista-copiar',
+    !!listaTouch && listaTouch.copiarEan.length === 2 && listaTouch.copiarEan.every(touchOk),
+    `per-item EAN copy controls (${listaTouch?.copiarEan.length ?? 0}): ${
+      listaTouch
+        ? listaTouch.copiarEan.map((t: { label: string; w: number; h: number }) => `${t.label} ${Math.round(t.w)}×${Math.round(t.h)}`).join(', ')
+        : 'page never settled'
+    }`,
+  )
+  record(
+    'TOUCH-lista-copiar-todos',
+    touchOk(listaTouch?.copiarTodos),
+    `"Copiar todos los EAN" button: ${
+      listaTouch?.copiarTodos
+        ? `${listaTouch.copiarTodos.w.toFixed(0)}×${listaTouch.copiarTodos.h.toFixed(0)}`
+        : 'page never settled'
+    }`,
+  )
+
+  /*
+   * Functional clipboard row. The seeded list is still on screen, so this is the
+   * only place both surfaces of the capability are reachable without signing in
+   * (/guardadas renders its signed-out contract here, and the harness must not
+   * fake its way past that).
+   *
+   * Clicking is asserted through the toast each control emits — the app's own
+   * confirmation, so the wait is contract-driven and never a fixed sleep.
+   * Reading the clipboard back is best-effort evidence: Chromium can refuse
+   * `readText` even with the permission granted, and that refusal is reported as
+   * "not readable" rather than dressed up as a match nobody observed.
+   */
+  const clipboardGranted = await context
+    .grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(baseUrl).origin })
+    .then(() => true)
+    .catch(() => false)
+  const copyControl = (aria: string) => page.locator(`button[aria-label="${aria}"]`).first()
+  const copyToast = (title: string) =>
+    waitForVisible(
+      page.locator('[data-sonner-toast] [data-title]', { hasText: new RegExp(`^${title}$`) }),
+      15000,
+    )
+  /**
+   * The toaster is a fixed bottom-center overlay, and the bulk control lives at
+   * the bottom of the totals card: a toast still on screen can sit exactly on top
+   * of it and swallow the next click. Sonner removes a toast from the DOM when it
+   * expires, so wait on that removal — the app's own lifecycle, not a timer.
+   */
+  const waitForToastsGone = () =>
+    page
+      .waitForFunction(
+        () => document.querySelectorAll('[data-sonner-toast]').length === 0,
+        undefined,
+        { timeout: 15000 },
+      )
+      .catch(() => undefined)
+  const readClipboard = async (): Promise<{ readable: boolean; value: string }> => {
+    try {
+      const value = await page.evaluate(() => navigator.clipboard.readText())
+      return typeof value === 'string' && value.length > 0
+        ? { readable: true, value }
+        : { readable: false, value: '' }
+    } catch {
+      return { readable: false, value: '' }
+    }
+  }
+  const clipEvidence = (
+    label: string,
+    toastOk: boolean,
+    read: { readable: boolean; value: string },
+    expected: string,
+  ) =>
+    `${label}: ${toastOk ? 'toast shown' : 'toast NEVER appeared'}; ` +
+    (read.readable
+      ? `clipboard ${JSON.stringify(read.value)} ${
+          read.value === expected ? 'matches' : 'does NOT match'
+        } expected ${JSON.stringify(expected)}`
+      : 'clipboard content NOT readable (readText threw or returned empty), so no match was observed')
+
+  const firstRowEan = touchItems[0].ean
+  const expectedBulk = touchItems.map((i) => i.ean).join('\n')
+  await waitForToastsGone()
+  const rowToastShown = await copyControl(`Copiar el EAN ${firstRowEan}`)
+    .click()
+    .then(() => copyToast('EAN copiado'))
+    .catch(() => false)
+  const rowClipboard = rowToastShown ? await readClipboard() : { readable: false, value: '' }
+  await waitForToastsGone()
+  const bulkToastShown = await copyControl('Copiar todos los EAN')
+    .click()
+    .then(() => copyToast('EAN copiados'))
+    .catch(() => false)
+  const bulkClipboard = bulkToastShown ? await readClipboard() : { readable: false, value: '' }
+  record(
+    'CLIPBOARD-lista',
+    rowToastShown &&
+      (!rowClipboard.readable || rowClipboard.value === firstRowEan) &&
+      bulkToastShown &&
+      (!bulkClipboard.readable || bulkClipboard.value === expectedBulk),
+    `per-row copy — ${clipEvidence('one per-row control', rowToastShown, rowClipboard, firstRowEan)}; ` +
+      `bulk copy — ${clipEvidence('all EAN', bulkToastShown, bulkClipboard, expectedBulk)}; ` +
+      `clipboard permission ${clipboardGranted ? 'granted' : 'NOT granted'}`,
   )
 
   // The product detail controls on the same rule.

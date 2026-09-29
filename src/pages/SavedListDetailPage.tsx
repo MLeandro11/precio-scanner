@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import Brand from '../components/Brand'
+import CopyEanButton, { CopyAllEansButton } from '../components/CopyEanButton'
 import { formatPrice } from '../components/ProductCard'
 import Button from '../components/ui/Button'
 import { useCatalog } from '../App'
@@ -110,6 +111,14 @@ export default function SavedListDetailPage() {
               {formatSavedDate(state.list.creada) ? ` · ${formatSavedDate(state.list.creada)}` : ''}
             </p>
 
+            {/*
+             * Below the count line, not beside it: at 320px that line plus a
+             * 44px control does not fit, and the bulk action is worth more at
+             * the top of the list than a compact row. Fed by the same `eans`
+             * memo the rows resolve against — no second derivation.
+             */}
+            <CopyAllEansButton eans={eans} className="mt-3" />
+
             <ul className="mt-4 space-y-2" data-saved-list-items={items.length}>
               {items.map((item, idx) => {
                 const p = products[idx]
@@ -128,7 +137,9 @@ export default function SavedListDetailPage() {
                     <div className="flex items-center gap-3">
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold text-text-primary">{name}</p>
-                        <p className="font-mono text-[11px] text-text-secondary">EAN {item.ean}</p>
+                        {/* The code is the copy control (D1). Copying is not a mutation,
+                            so the page's read-only contract (FR-12.4) is untouched. */}
+                        <CopyEanButton ean={item.ean} />
                         {/* The snapshot's own quantity is shown as history, because bringing the
                             item over uses the ordinary add — one unit, like any other add. */}
                         <p className="text-[11px] text-text-secondary">

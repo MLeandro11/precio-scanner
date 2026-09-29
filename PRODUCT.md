@@ -68,7 +68,8 @@ and reordering ("serenisma" → "La Serenísima"); exact EAN/barcode lookup with
 positives; category and price filters; sort by relevance or price; recent searches; favorites;
 product detail by EAN; camera scanning with a manual EAN fallback; a barcode view of the list;
 "Mi lista" keyed by normalized EAN with quantities and totals; saved lists as opt-in Firestore
-snapshots behind a Google sign-in; PWA install; offline boot; dark mode.
+snapshots behind a Google sign-in; copying the EAN of every item in the working list or in a
+saved list, individually or all at once, one code per line; PWA install; offline boot; dark mode.
 
 **Not built, and not to be faked:**
 
