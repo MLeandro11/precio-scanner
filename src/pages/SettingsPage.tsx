@@ -36,13 +36,13 @@ export default function SettingsPage() {
   return (
     <main className="safe-top mx-auto w-full max-w-lg px-4 pb-8">
       <Brand />
-      <h2 className="mt-6 text-xs font-semibold uppercase tracking-wide text-text-muted">
+      <h2 className="mt-6 text-xs font-semibold uppercase tracking-wide text-text-secondary">
         Cuenta
       </h2>
 
       <div className="mt-2 rounded-xl border border-border bg-surface-raised p-4">
         {!configured ? (
-          <p className="text-xs text-text-muted">
+          <p className="text-xs text-text-secondary">
             Este build no tiene Firebase configurado. Definí las variables{' '}
             <code className="text-text-secondary">VITE_FIREBASE_*</code> para habilitar el login.
           </p>
@@ -98,7 +98,7 @@ export default function SettingsPage() {
         ) : null}
       </div>
 
-      <h2 className="mt-6 text-xs font-semibold uppercase tracking-wide text-text-muted">
+      <h2 className="mt-6 text-xs font-semibold uppercase tracking-wide text-text-secondary">
         Apariencia
       </h2>
 
@@ -106,17 +106,35 @@ export default function SettingsPage() {
         className="mt-2 flex rounded-xl border border-border bg-surface-raised p-1"
         role="radiogroup"
         aria-label="Tema de la aplicación"
+        /* Completed ARIA radio pattern: roving tabindex (only the checked
+           radio is tabbable) + Arrow/Home/End moves selection and focus, as
+           the ARIA contract requires. */
+        onKeyDown={(e) => {
+          const idx = OPTIONS.findIndex((o) => o.value === theme)
+          const move = (next: number) => {
+            e.preventDefault()
+            const option = OPTIONS[(next + OPTIONS.length) % OPTIONS.length]
+            setTheme(option.value)
+            document.getElementById(`tema-${option.value}`)?.focus()
+          }
+          if (e.key === 'ArrowRight' || e.key === 'ArrowDown') move(idx + 1)
+          else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') move(idx - 1)
+          else if (e.key === 'Home') move(0)
+          else if (e.key === 'End') move(OPTIONS.length - 1)
+        }}
       >
         {OPTIONS.map((o) => {
           const active = theme === o.value
           return (
             <button
               key={o.value}
+              id={`tema-${o.value}`}
               type="button"
               role="radio"
               aria-checked={active}
+              tabIndex={active ? 0 : -1}
               onClick={() => setTheme(o.value)}
-              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2.5 text-sm font-medium transition ${
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg min-h-11 px-2 text-sm font-medium transition ${
                 active
                   ? 'bg-surface-sunken text-accent-contrast shadow-sm'
                   : 'text-text-secondary hover:text-text-primary'
@@ -129,11 +147,11 @@ export default function SettingsPage() {
         })}
       </div>
 
-      <p className="mt-3 text-xs text-text-muted">
+      <p className="mt-3 text-xs text-text-secondary">
         "Sistema" usa el tema claro u oscuro de tu dispositivo.
       </p>
 
-      <h2 className="mt-6 text-xs font-semibold uppercase tracking-wide text-text-muted">
+      <h2 className="mt-6 text-xs font-semibold uppercase tracking-wide text-text-secondary">
         Acerca de
       </h2>
 
@@ -147,7 +165,7 @@ export default function SettingsPage() {
         <div className="mt-4 space-y-2">
           {ABOUT.map((row) => (
             <div key={row.label} className="flex items-center justify-between text-[13px]">
-              <span className="text-text-muted">{row.label}</span>
+              <span className="text-text-secondary">{row.label}</span>
               <span className="text-text-secondary">{row.value}</span>
             </div>
           ))}

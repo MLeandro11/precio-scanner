@@ -775,6 +775,10 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
           const el = document.querySelector(`button[aria-label="${a}"]`)
           return el ? asTarget(el) : null
         }
+        // The decrement's accessible name is value-dependent (at cantidad 1 it
+        // names the row removal), so the stepper is matched by prefix.
+        const restar = document.querySelector('button[aria-label^="Restar uno"]')
+        const byRestar = restar ? asTarget(restar) : null
         const viewButtons = Array.from(
           document.querySelectorAll('[role="group"] button'),
         ).map(asTarget)
@@ -782,14 +786,16 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
           (b.textContent ?? '').includes('Vaciar'),
         )
         const quitar = Array.from(document.querySelectorAll('button')).filter((b) =>
-          (b.getAttribute('aria-label') ?? '').startsWith('Quitar '),
+          // Only the row-remove controls: they carry the Minus SVG. The value-1
+          // stepper (“Quitar la última unidad de …”) is a text glyph, no icon.
+          (b.getAttribute('aria-label') ?? '').startsWith('Quitar ') && b.querySelector('svg'),
         )
         const historial = Array.from(document.querySelectorAll('a')).find((a) =>
           (a.textContent ?? '').includes('Historial'),
         )
         return {
           steppers: [
-            byAria('Restar uno'),
+            byRestar,
             byAria('Sumar uno'),
           ],
           viewButtons,
@@ -889,6 +895,296 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
   )
 
   /*
+   * Contrast gate (§9: visible text ≥ 4.5:1, or ≥ 3:1 for large text) over the
+   * main routes at the phone viewport, in BOTH themes. A regression in the text
+   * ramp or in any pairing fails the run instead of shipping unreadable grey.
+   *
+   * Exclusions, both justified:
+   *  - `.sr-only` subtrees: visually hidden, so contrast does not apply.
+   *  - anything inside the live camera feed host on /escanear: that text is
+   *    drawn over the video, where the background is whatever the camera sees.
+   *
+   * The colour math runs in linear sRGB and resolves the oklab()/oklch() forms
+   * Tailwind v4 emits (alpha modifiers compile to oklab), then walks ancestors
+   * compositing backgrounds until opaque — the effective background a pixel
+   * actually renders against, not just the first colored box.
+   */
+  const contrastRoutes = ['/', '/lista', '/perfil', '/buscar', '/producto/7793940219009']
+  /** Sets a theme by OS emulation (never localStorage: it must not persist). */
+  const useScheme = async (scheme: 'light' | 'dark') => {
+    await page.emulateMedia({ colorScheme: scheme })
+  }
+  const measureContrast = () =>
+    page.evaluate(() => {
+      const linearFromSRGB = (c: number) => {
+        const v = c / 255
+        return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+      }
+      const oklabToLinear = (L: number, a: number, b: number): [number, number, number] => {
+        const l_ = Math.pow(L + 0.3963377774 * a + 0.2158037573 * b, 3)
+        const m_ = Math.pow(L - 0.1055613458 * a - 0.0638541728 * b, 3)
+        const s_ = Math.pow(L - 0.0894841775 * a - 1.291485548 * b, 3)
+        return [
+          Math.max(0, 4.0767416621 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_),
+          Math.max(0, -1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_),
+          Math.max(0, -0.0041960863 * l_ - 0.7034186147 * m_ + 1.707614701 * s_),
+        ]
+      }
+      const oklchToLinear = (L: number, c: number, hDeg: number): [number, number, number] => {
+        const h = (hDeg * Math.PI) / 180
+        return oklabToLinear(L, Math.cos(h) * c, Math.sin(h) * c)
+      }
+      type Lin = { rgb: [number, number, number]; alpha: number }
+      const alphaOf = (t: string | undefined) =>
+        t === undefined ? 1 : t.endsWith('%') ? Number(t.slice(0, -1)) / 100 : Number(t)
+      const parseColor = (s: string): Lin | null => {
+        s = s.trim()
+        if (s.startsWith('oklch(')) {
+          const m = s.match(/oklch\(([^)]+)\)/)
+          if (!m) return null
+          const parts = m[1].split(/[\s/]+/).filter(Boolean)
+          if (parts.length < 3) return null
+          return { rgb: oklchToLinear(Number(parts[0]), Number(parts[1]), Number(parts[2])), alpha: alphaOf(parts[3]) }
+        }
+        if (s.startsWith('oklab(')) {
+          const m = s.match(/oklab\(([^)]+)\)/)
+          if (!m) return null
+          const parts = m[1].split(/[\s/]+/).filter(Boolean)
+          if (parts.length < 3) return null
+          return { rgb: oklabToLinear(Number(parts[0]), Number(parts[1]), Number(parts[2])), alpha: alphaOf(parts[3]) }
+        }
+        const m = s.match(/rgba?\(([^)]+)\)/)
+        if (!m) return null
+        const parts = m[1].split(/[\s,]+/).filter(Boolean).map(Number)
+        if (parts.length < 3) return null
+        return { rgb: [linearFromSRGB(parts[0]), linearFromSRGB(parts[1]), linearFromSRGB(parts[2])], alpha: parts[3] ?? 1 }
+      }
+      const luminance = (lin: [number, number, number]) => 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+      const compose = (layer: Lin | null, under: Lin): Lin => {
+        if (layer === null || layer.alpha >= 1) return layer ?? under
+        const a = layer.alpha
+        return {
+          rgb: [
+            layer.rgb[0] * a + under.rgb[0] * (1 - a),
+            layer.rgb[1] * a + under.rgb[1] * (1 - a),
+            layer.rgb[2] * a + under.rgb[2] * (1 - a),
+          ],
+          alpha: a + under.alpha * (1 - a),
+        }
+      }
+      const effectiveBg = (el: Element): Lin => {
+        let bg: Lin = { rgb: [0, 0, 0], alpha: 0 }
+        let node: Element | null = el
+        while (node && node !== document.documentElement) {
+          const c = parseColor(getComputedStyle(node).backgroundColor)
+          if (c) bg = compose(c, bg)
+          if (bg.alpha === 1) break
+          node = node.parentElement
+        }
+        return bg.alpha === 1 ? bg : { rgb: [1, 1, 1], alpha: 1 }
+      }
+      const visible = (el: Element) => {
+        const st = getComputedStyle(el)
+        if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) === 0) return false
+        const r = el.getBoundingClientRect()
+        return r.width > 0 && r.height > 0
+      }
+      const offenders: Array<{ text: string; ratio: number; need: number }> = []
+      let checked = 0
+      let worstPassing = 99
+      const video = document.querySelector('video')
+      const feedHost = video ? (video.parentElement as HTMLElement) : null
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT)
+      while (walker.nextNode()) {
+        const el = walker.currentNode as HTMLElement
+        if (!visible(el)) continue
+        if (el.classList.contains('sr-only') || el.closest('.sr-only')) continue
+        const ownText = Array.from(el.childNodes).some((n) => n.nodeType === 3 && (n.textContent ?? '').trim())
+        if (!ownText) continue
+        /* text drawn over the live camera feed: the overlay is a sibling of the <video> */
+        if (feedHost && feedHost.contains(el) && el !== video) continue
+        const st = getComputedStyle(el)
+        const fg = parseColor(st.color)
+        if (!fg) continue
+        const bg = effectiveBg(el)
+        const l1 = luminance(fg.rgb)
+        const l2 = luminance(bg.rgb)
+        const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1]
+        const ratio = (hi + 0.05) / (lo + 0.05)
+        const fs = parseFloat(st.fontSize)
+        const bold = Number(st.fontWeight) >= 700
+        const large = fs >= 24 || (fs >= 18.66 && bold)
+        const need = large ? 3 : 4.5
+        checked++
+        if (ratio < worstPassing) worstPassing = ratio
+        if (ratio < need)
+          offenders.push({ text: (el.textContent ?? '').trim().slice(0, 40), ratio: +ratio.toFixed(2), need })
+      }
+      return {
+        checked,
+        worstPassing: +worstPassing.toFixed(2),
+        offenders: offenders.slice(0, 5),
+      }
+    })
+  const contrastOk = (res: { checked: number; offenders: unknown[] }) =>
+    res.checked > 0 && res.offenders.length === 0
+  for (const scheme of ['light', 'dark'] as const) {
+    await useScheme(scheme)
+    const perRoute: string[] = []
+    let allOk = true
+    let minRatio = 99
+    let checkedTotal = 0
+    let failures: string[] = []
+    for (const route of contrastRoutes) {
+      await page.goto(`${baseUrl}${route.replace(/^\//, '')}`, { waitUntil: 'domcontentloaded' })
+      // The layout nav is the one element every route renders; wait for it, and
+      // on the search route additionally for the settled run (no fixed sleeps).
+      const navShown = await waitForVisible(
+        page.locator('nav[aria-label="Navegación principal"]'),
+        30000,
+      )
+      if (route === '/buscar') await waitForSearchReady()
+      if (route.startsWith('/producto')) {
+        await waitForVisible(page.locator('button[aria-label="Agregar a favoritos"], button[aria-label="Quitar de favoritos"]'), 30000)
+      }
+      const res = await measureContrast()
+      checkedTotal += res.checked
+      if (res.worstPassing < minRatio) minRatio = res.worstPassing
+      const ok = contrastOk(res)
+      allOk = allOk && ok
+      if (!ok)
+        failures.push(
+          `${route}: ${res.offenders
+            .map((o: { text: string; ratio: number; need: number }) => `«${o.text}» ${o.ratio}:1 (need ${o.need})`)
+            .join('; ')}`,
+        )
+      perRoute.push(`${route} ${res.worstPassing}`)
+    }
+    record(
+      `CONTRAST-${scheme}`,
+      allOk,
+      `${scheme} theme at 390×844 over [${contrastRoutes.join(', ')}] -> worst measured ratio ${minRatio} ` +
+        `across ${checkedTotal} visible text nodes; per-route worst passing: ${perRoute.join(', ')}`,
+      allOk ? '' : `FAILURES: ${failures.join(' || ')}`,
+    )
+  }
+  await page.emulateMedia({ colorScheme: null })
+
+  /*
+   * Touch-target rows for the surfaces the audit measured on /perfil and
+   * /buscar (same idiom and 43.99 rule as the TOUCH-lista rows above).
+   */
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`${baseUrl}perfil`, { waitUntil: 'domcontentloaded' })
+  const perfilNavReady = await waitForVisible(
+    page.locator('nav[aria-label="Navegación principal"]'),
+  )
+  type TouchBox = { label: string; w: number; h: number }
+  const temaRadios: TouchBox[] | null = perfilNavReady
+    ? await page.evaluate(() =>
+        Array.from(document.querySelectorAll('[role="radio"]')).map((el) => {
+          const r = el.getBoundingClientRect()
+          return {
+            label: (el.textContent || '').trim().slice(0, 14),
+            w: r.width,
+            h: r.height,
+          }
+        }),
+      )
+    : null
+  record(
+    'TOUCH-perfil-tema',
+    !!temaRadios && temaRadios.length === 3 && temaRadios.every((t) => t.w >= 43.99 && t.h >= 43.99),
+    `theme radiogroup buttons (${temaRadios?.length ?? 0}): ${
+      temaRadios
+        ? temaRadios.map((t) => `${t.label} ${t.w.toFixed(0)}×${t.h.toFixed(0)}`).join(', ')
+        : 'page never settled'
+    }`,
+  )
+
+  await page.goto(`${baseUrl}buscar`, { waitUntil: 'domcontentloaded' })
+  await waitForSearchReady()
+  const buscarAdd: Array<{ w: number; h: number }> = await page.evaluate(() =>
+    Array.from(
+      document.querySelectorAll('button[aria-label^="Agregar a la lista"], button[aria-label^="En tu lista"]'),
+    ).map((el) => {
+      const r = el.getBoundingClientRect()
+      return { w: r.width, h: r.height }
+    }),
+  )
+  record(
+    'TOUCH-buscar-add',
+    buscarAdd.length > 0 && buscarAdd.every((t) => t.w >= 43.99 && t.h >= 43.99),
+    `per-card add buttons (${buscarAdd.length} measured): ${buscarAdd
+      .slice(0, 3)
+      .map((t) => `${t.w.toFixed(0)}×${t.h.toFixed(0)}`)
+      .join(', ')}...`,
+  )
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`${baseUrl}buscar?pmin=1000&pmax=5000`, { waitUntil: 'domcontentloaded' })
+  await waitForSearchReady()
+  const filterChips: TouchBox[] = await page.evaluate(() =>
+    Array.from(
+      document.querySelectorAll('button[aria-label^="Quitar filtro"]'),
+    ).map((el) => {
+      const r = el.getBoundingClientRect()
+      return { label: (el.textContent ?? '').trim().slice(0, 12), w: r.width, h: r.height }
+    }),
+  )
+  const limpiarLoc = page.locator('button:text-is("Limpiar")')
+  const limpiarShown = await waitForVisible(limpiarLoc)
+  const limpiarBox = limpiarShown ? await limpiarLoc.first().boundingBox() : null
+  record(
+    'TOUCH-buscar-chips',
+    filterChips.length === 2 && filterChips.every((t) => t.w >= 43.99 && t.h >= 43.99) &&
+      !!limpiarBox && limpiarBox.width >= 43.99 && limpiarBox.height >= 43.99,
+    `active-filter chips (${filterChips.length}): ${filterChips
+      .map((t) => `${t.label} ${t.w.toFixed(0)}×${t.h.toFixed(0)}`)
+      .join(', ')}; "Limpiar" ${
+      limpiarBox ? `${limpiarBox.width.toFixed(0)}×${limpiarBox.height.toFixed(0)}` : 'not found'
+    }`,
+  )
+
+
+  // /guardadas is Firebase-coupled: an unauthenticated run lands on the page's
+  // signed-out contract, not on rendered lists. That contract's controls are real
+  // and measurable now; the signed-in per-list delete button is class-fixed at
+  // h-11 w-11 but cannot be rendered by the harness (no session to drive).
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`${baseUrl}guardadas`, { waitUntil: 'domcontentloaded' })
+  const guardadasStateShown = await waitForVisible(page.locator('[data-saved-lists-state]'), 30000)
+  const guardadasState = guardadasStateShown
+    ? await page.evaluate(() =>
+        document.querySelector('[data-saved-lists-state]')?.getAttribute('data-saved-lists-state') ??
+        null,
+      )
+    : null
+  const guardadasControls: TouchBox[] | null =
+    guardadasStateShown
+      ? await page.evaluate(() =>
+          Array.from(document.querySelectorAll('main button')).map((el) => {
+            const r = el.getBoundingClientRect()
+            return { label: (el.textContent ?? el.getAttribute('aria-label') ?? '').trim().slice(0, 22), w: r.width, h: r.height }
+          }),
+        )
+      : null
+  record(
+    'TOUCH-guardadas',
+    guardadasStateShown &&
+      guardadasState === 'signed-out' &&
+      !!guardadasControls &&
+      guardadasControls.length > 0 &&
+      guardadasControls.every((t) => t.w >= 43.99 && t.h >= 43.99),
+    `guardadas signed-out contract (data-saved-lists-state="${guardadasState}") -> ` +
+      `${guardadasControls?.length ?? 0} button(s) measured >= 44x44: ${guardadasControls
+        ?.map((t) => `${t.label} ${Math.round(t.w)}×${Math.round(t.h)}`)
+        .join(', ')}`,
+    'the signed-in per-list delete button is class-fixed at h-11 w-11 but needs a real Firebase '+
+    'session the harness cannot hold, so no runtime row can render it — the limitation is in the docs.',
+  )
+
+    /*
    * The boot-failure screen (App's ErrorScreen), reached through the route a
    * first visit on a dead connection really takes: a FRESH context has no
    * service worker and an empty Cache API, so the aborted catalog fetches make
@@ -1151,6 +1447,34 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
       `(${missingBody.length} bytes, root div ${shellPresent ? 'present' : 'MISSING'}); ` +
       `an existing file -> HTTP ${realFileRes.status}`,
     'Node-side: the service worker cannot answer for the host',
+  )
+
+  /*
+   * Barcode chunk hygiene (perf audit, offline-first constraint).
+   *
+   * JsBarcode left the entry chunk (dynamic import) but must stay PRECACHED:
+   * the list's "Códigos de barras" view is used at the register, offline. This
+   * row fails on the old code — the library was bundled INTO the entry chunk,
+   * so no JsBarcode precache entry existed and the entry contained the
+   * library's own format table ("CODE39" appears in jsbarcode's internals but
+   * never in app code; the app's own "CODE128" literal is in the entry by
+   * design and is NOT used here for that reason).
+   */
+  const swText = await (await fetch(`${baseUrl}sw.js`)).text()
+  const barcodePrecacheEntry = swText.match(/assets\/JsBarcode-[^"\\]+\.js/)
+  const entryScript = (missingBody ?? '').match(/assets\/index-[^"\\]+\.js/)
+  let barcodeOutOfEntry = false
+  if (entryScript) {
+    const entryText = await (await fetch(`${baseUrl}${entryScript[0]}`)).text()
+    barcodeOutOfEntry = !entryText.includes('CODE39')
+  }
+  record(
+    'PWA-barcode',
+    !!barcodePrecacheEntry && barcodeOutOfEntry,
+    `precache manifest lists ${barcodePrecacheEntry ? barcodePrecacheEntry[0] : 'NO JsBarcode chunk'}; ` +
+      `entry chunk ${entryScript ? entryScript[0] : '?'} ${barcodeOutOfEntry ? 'does not contain' : 'CONTAINS'} the barcode library`,
+    'offline constraint: the barcode chunk must be precached, not lazy-only; ' +
+      'perf constraint: the entry must not carry the library',
   )
 
   /*

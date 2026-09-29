@@ -18,10 +18,22 @@
   /* Borders */
   --border: #e2e8f0; /* slate-200 */
 
-  /* Text */
+  /* Skeleton shimmer sweep — a highlight over the --border track. White here:
+     the light theme's raised surface (#ffffff) already is the lightest token. */
+  --skeleton-highlight: #ffffff;
+
+  /* Text — the three levels must all clear 4.5:1 on both the page (#f8fafc) and
+     the raised surface (#ffffff); see docs/design-system.md §2. One step apart:
+     primary slate-900 (17.9:1 on white), secondary slate-700 (10.35:1), muted
+     slate-600 (7.58:1) — muted stays the lightest level but stays legible. */
   --text-primary: #0f172a; /* slate-900 */
-  --text-secondary: #64748b; /* slate-500 */
-  --text-muted: #94a3b8; /* slate-400 */
+  --text-secondary: #334155; /* slate-700 */
+  --text-muted: #475569; /* slate-600 */
+
+  /* Sheet/scan scrim — the thing that darkens, by role. It is near-black in both
+     themes so a scrim always dims, never brightens; declared in every theme scope
+     (the Two-Theme Rule) even though the value is theme-independent. */
+  --scrim: #0f172a;
 
   /* Brand & status */
   --accent: #15803d; /* price emphasis, primary actions — green-700, 5.02:1 on white (AA) */
@@ -43,9 +55,12 @@ html[data-theme="dark"] {
   --surface-raised: #262626; /* neutral-800 */
   --surface-sunken: #e5e5e5; /* neutral-200 */
   --border: #404040; /* neutral-700 */
+  /* Lighter than the neutral-700 track (dark raised #262626 would sweep DARKER). */
+  --skeleton-highlight: #525252; /* neutral-600 */
   --text-primary: #fafafa; /* neutral-50 */
-  --text-secondary: #a3a3a3; /* neutral-400 */
-  --text-muted: #737373; /* neutral-500 */
+  --text-secondary: #e5e5e5; /* neutral-200 — 12.0:1 on the raised card */
+  --text-muted: #a3a3a3; /* neutral-400 — 6.0:1 on the raised card */
+  --scrim: #0f172a; /* scrim dims in dark too */
   --accent: #4ade80; /* green-400 */
   --accent-contrast: #052e16; /* green-950 */
   --favorite: #fbbf24; /* amber-400 */
@@ -61,9 +76,11 @@ html[data-theme="dark"] {
     --surface-raised: #262626; /* neutral-800 */
     --surface-sunken: #e5e5e5; /* neutral-200 */
     --border: #404040; /* neutral-700 */
+    --skeleton-highlight: #525252; /* neutral-600 */
     --text-primary: #fafafa; /* neutral-50 */
-    --text-secondary: #a3a3a3; /* neutral-400 */
-    --text-muted: #737373; /* neutral-500 */
+    --text-secondary: #e5e5e5; /* neutral-200 */
+    --text-muted: #a3a3a3; /* neutral-400 */
+    --scrim: #0f172a;
     --accent: #4ade80; /* green-400 */
     --accent-contrast: #052e16; /* green-950 */
     --favorite: #fbbf24; /* amber-400 */
@@ -260,6 +277,7 @@ html [data-sonner-toaster][data-sonner-theme] [data-action]:focus-visible {
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
   --color-text-muted: var(--text-muted);
+  --color-scrim: var(--scrim);
   --color-accent: var(--accent);
   --color-accent-contrast: var(--accent-contrast);
   --color-favorite: var(--favorite);
@@ -319,13 +337,19 @@ html [data-sonner-toaster][data-sonner-theme] [data-action]:focus-visible {
 }
 
 @layer components {
-  /* §5 Loading results: skeleton rows (shimmer), not a text spinner. */
+  /* §5 Loading results: skeleton rows (shimmer), not a text spinner.
+   *
+   * The sweep is a HIGHLIGHT over the track, so it must be lighter than
+   * --border in both themes: in dark mode --surface-raised (neutral-800) is
+   * DARKER than --border (neutral-700), which read as a shadow instead.
+   * --skeleton-highlight pins a lighter value per theme; the fallback covers
+   * any scope that never declared it. */
   .skeleton {
     background-color: var(--border);
     background-image: linear-gradient(
       90deg,
       transparent 0%,
-      var(--surface-raised) 50%,
+      var(--skeleton-highlight, #ffffff) 50%,
       transparent 100%
     );
     background-repeat: no-repeat;

@@ -87,5 +87,29 @@ export interface WorkerResultsMessage {
   results: Producto[]
   total: number
 }
-export type WorkerInMessage = WorkerInitMessage | WorkerQueryMessage
-export type WorkerOutMessage = WorkerReadyMessage | WorkerResultsMessage
+/**
+ * Bulk exact resolution for list views: given EANs (and/or product ids for
+ * barcode-less items), answer each with its product, without running the
+ * search/fuzzy pipeline and without touching the search query generation.
+ * Unlike `query`, several resolve requests may be in flight — list resolution
+ * is not the interactive search stream.
+ */
+export interface WorkerResolveMessage {
+  type: 'resolve'
+  id: number
+  /** Exact barcodes (digits-only, ≥ 6 digits per the UI's EAN rule). */
+  eans?: string[]
+  /** Product ids (items keyed by catalog id — products without barcode). */
+  ids?: string[]
+}
+export interface WorkerResolvedMessage {
+  type: 'resolved'
+  id: number
+  /** Parallel to the request: ean → product, id → product. Unknown keys are absent. */
+  products: Record<string, Producto>
+}
+export type WorkerInMessage = WorkerInitMessage | WorkerQueryMessage | WorkerResolveMessage
+export type WorkerOutMessage =
+  | WorkerReadyMessage
+  | WorkerResultsMessage
+  | WorkerResolvedMessage

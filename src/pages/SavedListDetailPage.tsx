@@ -97,10 +97,15 @@ export default function SavedListDetailPage() {
           </p>
         ) : (
           <>
-            <h1 className="mt-6 text-lg font-extrabold text-text-primary">
+            {/*
+             * A <p>, not a second <h1>: Brand.tsx already renders the page's single
+             * <h1> (the sr-only "Lupa" mark) on every route, so the list name stays
+             * a styled paragraph and the document keeps one heading level.
+             */}
+            <p className="mt-6 text-lg font-extrabold text-text-primary">
               {state.list.nombre}
-            </h1>
-            <p className="mt-1 text-xs text-text-muted">
+            </p>
+            <p className="mt-1 text-xs text-text-secondary">
               {state.list.items.length} producto{state.list.items.length === 1 ? '' : 's'}
               {formatSavedDate(state.list.creada) ? ` · ${formatSavedDate(state.list.creada)}` : ''}
             </p>
@@ -123,10 +128,10 @@ export default function SavedListDetailPage() {
                     <div className="flex items-center gap-3">
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold text-text-primary">{name}</p>
-                        <p className="font-mono text-[11px] text-text-muted">EAN {item.ean}</p>
+                        <p className="font-mono text-[11px] text-text-secondary">EAN {item.ean}</p>
                         {/* The snapshot's own quantity is shown as history, because bringing the
                             item over uses the ordinary add — one unit, like any other add. */}
-                        <p className="text-[11px] text-text-muted">
+                        <p className="text-[11px] text-text-secondary">
                           Guardada con {item.cantidad} unidad{item.cantidad === 1 ? '' : 'es'}
                           {price != null ? ` · ${formatPrice(price)} c/u` : ''}
                         </p>
@@ -149,7 +154,7 @@ export default function SavedListDetailPage() {
               })}
             </ul>
 
-            <p className="mt-4 rounded-xl border border-border bg-surface-raised p-3 text-[11px] text-text-muted">
+            <p className="mt-4 rounded-xl border border-border bg-surface-raised p-3 text-[11px] text-text-secondary">
               Esta lista se abre en modo lectura: los productos entran a tu lista de trabajo de a
               uno, y nada de lo que ya tenías se pisa.
             </p>

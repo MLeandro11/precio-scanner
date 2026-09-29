@@ -294,7 +294,7 @@ export default function ScanPage() {
                   ) : (
                     <ProductImage
                       ean={detected.product?.barcode}
-                      alt={detected.product?.nombre ?? ''}
+                      alt=""
                       className="h-14 w-14 shrink-0 rounded-xl bg-surface object-cover"
                       fallback={
                         <span className="text-2xl" aria-hidden="true">
@@ -304,7 +304,7 @@ export default function ScanPage() {
                     />
                   )}
                   <div className="min-w-0 flex-1">
-                    <p className="font-mono text-[11px] text-text-muted">{detected.code}</p>
+                    <p className="font-mono text-[11px] text-text-secondary">{detected.code}</p>
                     {detected.loading ? (
                       <p className="mt-1 text-sm text-text-secondary">Buscando en el catálogo…</p>
                     ) : detected.product ? (
@@ -355,7 +355,7 @@ export default function ScanPage() {
                   <button
                     type="button"
                     onClick={() => setManualOpen(true)}
-                    className="mt-2 w-full rounded-sm py-1 text-center text-xs font-medium text-text-secondary"
+                    className="mt-2 min-h-11 w-full rounded-sm py-1 text-center text-xs font-medium text-text-secondary"
                   >
                     Escribí el EAN a mano
                   </button>

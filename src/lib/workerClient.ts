@@ -11,7 +11,13 @@
  *
  * The Worker is injectable (workerFactory) so tests run without a browser.
  */
-import type { Producto, QueryParams, QueryResult, WorkerOutMessage } from './types'
+import type {
+  Producto,
+  QueryParams,
+  QueryResult,
+  WorkerOutMessage,
+  WorkerResolvedMessage,
+} from './types'
 
 /** Minimo del Worker que workerClient usa (inyectable en tests). */
 export interface WorkerLike {
@@ -34,9 +40,9 @@ interface InitPayload {
   facets?: unknown
 }
 
-interface Pending {
+interface Pending<T = QueryResult> {
   id: number
-  resolve: (result: QueryResult) => void
+  resolve: (result: T) => void
   reject: (err: Error) => void
 }
 
@@ -51,11 +57,25 @@ export function createWorkerClient({
 
   let nextId = 0
   let pending: Pending | null = null
+  // Resolve requests have their own pool: they are list-view lookups, not the
+  // interactive search stream, so they do NOT supersede a pending search query
+  // and several may be in flight (one per list change; the hook only issues
+  // one burst per change, so in practice this stays a single entry).
+  const resolvePending = new Map<number, Pending<Record<string, Producto>>>()
 
   worker.addEventListener('message', (e: MessageEvent<WorkerOutMessage>) => {
     const msg = e.data
     if (msg.type === 'ready') {
       readyResolve?.()
+      return
+    }
+    if (msg.type === 'resolved') {
+      const p = resolvePending.get(msg.id)
+      if (p) {
+        resolvePending.delete(msg.id)
+        p.resolve((msg as WorkerResolvedMessage).products)
+      }
+      // unknown/old generation → silently discarded
       return
     }
     if (msg.type === 'results') {
@@ -83,6 +103,18 @@ export function createWorkerClient({
       return new Promise<QueryResult>((resolve, reject) => {
         pending = { id, resolve, reject }
         worker.postMessage({ type: 'query', id, ...params })
+      })
+    },
+    /**
+     * One round-trip for a whole list of EANs/ids (see useResolveEans).
+     * `ids` here is the catalog-id path (barcode-less items) — it is NOT the
+     * favorites-mode filter of `query`; the worker answers exact lookups.
+     */
+    resolveMany(params: { eans?: string[]; ids?: string[] }): Promise<Record<string, Producto>> {
+      const id = ++nextId
+      return new Promise<Record<string, Producto>>((resolve, reject) => {
+        resolvePending.set(id, { id, resolve, reject })
+        worker.postMessage({ type: 'resolve', id, ...params })
       })
     },
   }

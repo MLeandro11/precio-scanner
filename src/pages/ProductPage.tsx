@@ -130,7 +130,7 @@ export default function ProductPage() {
       <div className="mt-6 flex flex-col gap-4">
         <ProductImage
           ean={product.barcode}
-          alt={product.nombre}
+          alt=""
           className="h-40 w-full rounded-2xl bg-surface object-cover"
           fallback={
             <span className="text-6xl" aria-hidden="true">

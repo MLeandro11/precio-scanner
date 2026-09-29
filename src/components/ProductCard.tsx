@@ -66,33 +66,34 @@ export default function ProductCard({
 }) {
   return (
     <li
-      onClick={() => onOpen?.(product)}
-      role={onOpen ? 'button' : undefined}
-      tabIndex={onOpen ? 0 : undefined}
-      onKeyDown={
-        onOpen
-          ? (e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault()
-                onOpen(product)
-              }
-            }
-          : undefined
-      }
-      className="flex gap-3 rounded-2xl border border-border bg-surface-raised p-3 transition active:bg-surface"
+      className="relative flex gap-3 rounded-2xl border border-border bg-surface-raised p-3 transition active:bg-surface"
     >
+      {/*
+       * The card's single interactive entry point: the product name, stretched
+       * over the whole card with `after:absolute after:inset-0` so every tap
+       * opens the product while the add button (positioned, later in DOM) stays
+       * on top. No `role="button"` wrapper on the <li>: a clickable element that
+       * also contains a real <button> would nest interactive content (a11y).
+       */}
       {/* image tile — real Precios Claros photo by EAN, emoji as fallback */}
       <ProductImage
         ean={product.barcode}
-        alt={product.nombre}
+        alt=""
         className="h-14 w-14 shrink-0 rounded-xl bg-surface object-cover"
         fallback={<span className="text-3xl">{categoryEmoji(product.categoria)}</span>}
       />
 
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold leading-snug text-text-primary">
-          <HighlightedName nombre={product.nombre} ranges={product._matches?.nombre} />
-        </p>
+        <button
+          type="button"
+          onClick={() => onOpen?.(product)}
+          className="min-h-11 cursor-pointer text-left after:absolute after:inset-0"
+          aria-label={onOpen ? `Abrir ${product.nombre}` : undefined}
+        >
+          <span className="text-sm font-semibold leading-snug text-text-primary">
+            <HighlightedName nombre={product.nombre} ranges={product._matches?.nombre} />
+          </span>
+        </button>
 
         <p className="truncate text-[11px] text-text-secondary">
           {product.categoria || 'Sin categoría'}
@@ -120,7 +121,7 @@ export default function ProductCard({
               }
               aria-pressed={inList}
               title={inList ? 'En tu lista' : 'Agregar a la lista'}
-              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition ${
+              className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition ${
                 inList
                   ? 'border-accent bg-accent text-accent-contrast'
                   : 'border-accent text-accent hover:bg-accent/10'

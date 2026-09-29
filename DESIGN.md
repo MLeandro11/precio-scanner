@@ -9,8 +9,8 @@ colors:
   ink-slab: "#0f172a"
   shelf-edge: "#e2e8f0"
   label-ink: "#0f172a"
-  label-muted: "#64748b"
-  label-faint: "#94a3b8"
+  label-muted: "#334155"
+  label-faint: "#475569"
   star-amber: "#b45309"
   stop-red: "#dc2626"
   marker-yellow: "#fef08a"
@@ -221,10 +221,11 @@ the only place the two themes do not share a hue story.
 | `--surface` | `aisle-light` | Page background | `#f8fafc` | `#171717` |
 | `--surface-raised` | `shelf` | Cards, inputs, chips, sheet, nav | `#ffffff` | `#262626` |
 | `--surface-sunken` | `ink-slab` | Inverted surface: selected chip, sheet backdrop | `#0f172a` | `#e5e5e5` |
+| `--scrim` | — | The thing that darkens: sheet backdrop, overlays | `#0f172a` | `#0f172a` |
 | `--border` | `shelf-edge` | Every card, input and divider edge | `#e2e8f0` | `#404040` |
 | `--text-primary` | `label-ink` | Names, headings, prices | `#0f172a` | `#fafafa` |
-| `--text-secondary` | `label-muted` | Metadata, counts, captions | `#64748b` | `#a3a3a3` |
-| `--text-muted` | `label-faint` | Placeholders, hints, inactive nav | `#94a3b8` | `#737373` |
+| `--text-secondary` | `label-muted` | Metadata, counts, captions, section headings, nav labels | `#334155` (slate-700) | `#e5e5e5` (neutral-200) |
+| `--text-muted` | `label-faint` | Placeholders, hints, inactive nav | `#475569` (slate-600) | `#a3a3a3` (neutral-400) |
 
 ### Semantic
 
@@ -237,7 +238,8 @@ Status colors that keep their identity in both themes.
 | `--highlight` | `marker-yellow` | `<mark>` background for search matches | `#fef08a` | `#78350f` |
 
 Tokens reach components through Tailwind's `@theme inline` color namespace (`bg-surface`,
-`text-text-primary`, `border-border`, …), so alpha modifiers like `bg-accent/10` stay token-based.
+`text-text-primary`, `border-border`, `bg-scrim`, …), so alpha modifiers like `bg-accent/10` stay
+token-based.
 
 Dark mode is complete and deliberate: every one of the 12 tokens is overridden, the switch is the
 `data-theme` attribute on `<html>` (never a `dark:` variant — no `dark:` utility exists in the
@@ -258,6 +260,12 @@ resolve to the same color. Never unify them.
 
 **The Two-Theme Rule.** A new color is not finished until it has both a light and a dark value in
 the same token. A single-theme color is a bug that only shows up at night in a store.
+
+**The Legibility Floor.** All three text levels — primary, secondary and muted — clear **4.5:1**
+against both `--surface` and `--surface-raised` in both themes (secondary 10.35:1 / muted 7.58:1 on
+white light; 12.0:1 / 6.0:1 on the raised card dark). A placeholder may be the *faintest* color in
+the palette, never an illegible one. Content a user must read (codes, price labels, section
+headings, nav labels, categories) rides on `--text-secondary`, never on `--text-muted`.
 
 ## Typography
 
@@ -416,7 +424,7 @@ without checking every card that relies on it.
 
 A fixed, floating pill: `shelf` background, `rounded-3xl`, 1px edge, Floating shadow, five slots
 — Inicio · Alertas · [Escanear] · Lista · Perfil. Each tab is pinned to a **44×44px** minimum with
-a 10px label; inactive tabs are `label-faint`, the active tab is `price-green`. The centre scan
+a 10px label; inactive tabs are `label-muted` (--text-secondary), the active tab is `price-green`. The centre scan
 slot is the one accent-filled, `shadow-md` tile in the chrome, and it is the only raised
 affordance there. The list count badge is an accent pill, `aria-hidden`, paired with an `sr-only`
 sentence — the number is never announced twice.
@@ -429,8 +437,11 @@ fits. New destinations are reached from a page, not from the nav.
 The bottom sheet owns the filter surface and any secondary flow: full-width, `max-w-lg`,
 `rounded-t-2xl`, 1px top border, `shelf` background, Floating shadow, `safe-bottom` padding.
 It animates in (fade 200ms + rise 240ms, `ease-out`) and is a real dialog: `role="dialog"`,
-`aria-modal`, `aria-labelledby`/`aria-describedby`, focus moved into the panel, Escape and backdrop
-close, body scroll locked. Maximum height `70dvh` with an internal scroll.
+`aria-modal`, `aria-labelledby`/`aria-describedby`, focus moved into the panel and trapped there
+while it is open (Tab cycles the panel's controls; the rest of the page is inert), focus returned
+to the control that opened it on close, Escape and backdrop close, body scroll locked. The backdrop
+uses the `--scrim` token (`bg-scrim/40`) — a scrim darkens, in both themes. Maximum height `70dvh`
+with an internal scroll.
 
 ### Toasts
 
@@ -444,21 +455,51 @@ dialog — destructive actions are reversible, not prevented.
 ### Product card (signature component)
 
 The densest and most repeated surface in the app: `rounded-2xl`, `shelf`, 1px edge, 12px padding,
-`flex gap-3`. A 56px image tile (`rounded-xl`) on the left; then the name (Title, `leading-snug`,
-two lines max), the category in 11px `label-muted`, and an EAN chip in `font-mono` 10px on a 10%
-`price-green` fill with a 40% edge; the price sits right in Price type with `tabular-nums`; the
-add button is a 36px `rounded-xl` control that fills with `price-green` once the item is in the
-list, carrying `aria-pressed` and a label. The whole card is a `role="button"` with `tabIndex` and
-Enter/Space handling when it is clickable.
+`flex gap-3`. A 56px image tile (`rounded-xl`, decorative: `alt=""`, the name is adjacent text) on
+the left; then the name (Title, `leading-snug`, two lines max — it is the card's stretched
+activation control: a real `<button>` whose pseudo-element covers the whole card, so the card is
+one tap target and keyboard-activatable without nesting interactive content), the category in 11px
+`label-muted`, and an EAN chip in `font-mono` 10px on a 10% `price-green` fill with a 40% edge; the
+price sits right in Price type with `tabular-nums`; the add button is a 44px `rounded-xl` control
+that fills with `price-green` once the item is in the list, carrying `aria-pressed` and a label.
 
-The add button is the one interactive control below 44px. It is a deliberate exception inside a
-card that is itself a 44px+ target with its own handler; do not copy it elsewhere.
+Every interactive control in the card is at least 44×44px; the add button was the last
+interactive control in the system under 44px until the same pass raised the `/guardadas` per-list
+delete button from 36px, so the product-card exception is retired. Keeping it honest: the
+harness's `TOUCH-*` acceptance rows gate this rule on the routes it can render — `/lista`,
+`/producto`, `/buscar` (plus chips), `/perfil` (theme, chips) and `/guardadas` **in its
+signed-out contract** (the page the unauthenticated browser actually sees). The signed-in
+delete button's 44px size is enforced by the same `h-11 w-11` class used everywhere else,
+but no `TOUCH-*` row exercises it: signing in is not something an automated browser run can
+assert. The gate is on measured rendered controls; the class is on the rest.
+
+### Camera & scan shell (deliberate exceptions)
+
+The immersive scanner is one coherent exception to the token world, not a place where tokens
+forgot to land: what sits ON the camera feed is not part of the palette system, because the
+video it overlays is itself an unthemeable raw image. There the code deliberately uses raw
+values so the overlay tracks the feed, not the theme:
+
+- the scan shell behind the feed (`bg-slate-950`) and the cutout mask around the scan window
+  (`rgba(2,6,23,0.6)` shadow);
+- the translucent pills and buttons on the feed (`bg-black/40`, `bg-black/50`, `bg-black/60`)
+  with `text-white`;
+- the scan window and corner brackets (`border-white/40`, `border-white`);
+- the scanner's loading state (`ScanLoading`: `bg-slate-900`, `text-white/70`), which matches
+  the dark shell so a slow scan-chunk fetch never flashes the page white before the camera
+  view appears.
+
+Everything ELSE on the scan page — the no-camera compact layout, the detection card, the dock
+— is ordinary UI on ordinary surfaces and uses tokens like everywhere else. A raw value outside
+the barcode and the camera surface listed above is a defect, not a choice.
 
 ### Barcode (deliberate exception)
 
 The rendered barcode is always **pure black on pure white** (`#000000` / `#ffffff`), regardless of
-theme, because a scanner needs that contrast and the token palette would break it. It is the only
-place in the app where a raw color value is correct.
+theme, because a scanner needs that contrast and the token palette would break it. Together with
+the camera surface above, these are the deliberate raw values in the app — and the barcode's
+white box is required by the hardware, while the camera values are required by the feed; neither
+is an invitation to use raw values anywhere else.
 
 ## Do's and Don'ts
 

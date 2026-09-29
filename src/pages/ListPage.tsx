@@ -26,11 +26,22 @@ export default function ListPage() {
   const eans = useMemo(() => items.map((i) => i.ean), [items])
   const products = useResolveEans(client, eans)
 
-  const pricesKnown = items.reduce((acc, item, idx) => acc + (products[idx] ? 1 : 0), 0)
-  const total = items.reduce((acc, item, idx) => {
-    const p = products[idx]
-    return acc + (p ? p.precio * item.cantidad : 0)
-  }, 0)
+  // One pass instead of two reduces, and recomputed only when the list or the
+  // resolve burst actually changes — not on every unrelated render of the page.
+  const { pricesKnown, total } = useMemo(
+    () => {
+      let known = 0
+      let sum = 0
+      items.forEach((item, idx) => {
+        const p = products[idx]
+        if (!p) return
+        known += 1
+        sum += p.precio * item.cantidad
+      })
+      return { pricesKnown: known, total: sum }
+    },
+    [items, products],
+  )
 
 
   /*
@@ -97,7 +108,7 @@ export default function ListPage() {
           onClick={() => setView('lista')}
           aria-pressed={view === 'lista'}
           className={`flex items-center justify-center gap-1.5 rounded-lg min-h-11 text-xs font-semibold transition ${
-            view === 'lista' ? 'bg-surface-raised shadow-sm text-text-primary' : 'text-text-muted'
+            view === 'lista' ? 'bg-surface-raised shadow-sm text-text-primary' : 'text-text-secondary'
           }`}
         >
           Lista
@@ -107,7 +118,7 @@ export default function ListPage() {
           onClick={() => setView('codigos')}
           aria-pressed={view === 'codigos'}
           className={`flex items-center justify-center gap-1.5 rounded-lg min-h-11 text-xs font-semibold transition ${
-            view === 'codigos' ? 'bg-surface-raised shadow-sm text-accent' : 'text-text-muted'
+            view === 'codigos' ? 'bg-surface-raised shadow-sm text-accent' : 'text-text-secondary'
           }`}
         >
           <BarcodeIcon size={14} strokeWidth={1.8} aria-hidden="true" /> Códigos de barras
@@ -153,14 +164,14 @@ export default function ListPage() {
                       })
                     }}
                     aria-label={`Quitar ${name} de la lista`}
-                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border text-text-muted transition hover:text-danger"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border text-text-secondary transition hover:text-danger"
                   >
                     <Minus size={16} aria-hidden="true" />
                   </button>
 
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-text-primary">{name}</p>
-                    <p className="font-mono text-[11px] text-text-muted">EAN {item.ean}</p>
+                    <p className="font-mono text-[11px] text-text-secondary">EAN {item.ean}</p>
                     {item.alerta ? (
                       <p className="text-[11px] font-medium text-accent">🔔 alerta de precio</p>
                     ) : null}
@@ -172,7 +183,7 @@ export default function ListPage() {
                         {formatPrice(price * item.cantidad)}
                       </span>
                     ) : (
-                      <span className="text-[11px] text-text-muted">sin precio</span>
+                      <span className="text-[11px] text-text-secondary">sin precio</span>
                     )}
                     <div className="flex items-center gap-2 rounded-full border border-border px-1">
                       <button
@@ -191,12 +202,21 @@ export default function ListPage() {
                           }
                           setCantidad(item.ean, item.cantidad - 1)
                         }}
-                        aria-label="Restar uno"
+                        aria-label={
+                          item.cantidad === 1
+                            ? `Quitar la última unidad de ${name} de la lista`
+                            : `Restar uno de ${name}`
+                        }
                         className="flex h-11 w-11 items-center justify-center text-text-secondary"
                       >
                         −
                       </button>
-                      <span className="tnum w-4 text-center text-xs font-semibold text-text-primary">
+                      {/*
+                       * Fixed 24px box (not a bare w-4): 1 digit keeps the row compact,
+                       * 2–4 digits (tabular-nums) stay inside it, so crossing 9 or 99
+                       * never reflows the − / + controls around the count.
+                       */}
+                      <span className="tnum w-6 text-center text-xs font-semibold text-text-primary">
                         {item.cantidad}
                       </span>
                       <button
@@ -233,7 +253,7 @@ export default function ListPage() {
               Total ${total.toLocaleString('es-AR')}
             </span>
           </div>
-          <p className="mt-2 text-[11px] text-text-muted">
+          <p className="mt-2 text-[11px] text-text-secondary">
             Comparación entre almacenes y avisos en futura versión (modelados).
           </p>
         </div>

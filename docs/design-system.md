@@ -67,10 +67,11 @@ mapping change — not a component refactor.
 | `surface` | `aisle-light` | Page background | `#f8fafc` (slate-50) | `#171717` (neutral-900) |
 | `surface-raised` | `shelf` | Cards, inputs, chips | `#ffffff` | `#262626` (neutral-800) |
 | `surface-sunken` | `ink-slab` | Selected chip (pressed category) | `#0f172a` (slate-900) | `#e5e5e5` (neutral-200) |
+| `scrim` | — | The thing that darkens (sheet backdrop, overlays); same value in both themes by role | `#0f172a` | `#0f172a` |
 | `border` | `shelf-edge` | Card / input borders | `#e2e8f0` (slate-200) | `#404040` (neutral-700) |
 | `text-primary` | `label-ink` | Product names, headings | `#0f172a` (slate-900) | `#fafafa` (neutral-50) |
-| `text-secondary` | `label-muted` | Metadata, counts | `#64748b` (slate-500) | `#a3a3a3` (neutral-400) |
-| `text-muted` | `label-faint` | Placeholders, hints | `#94a3b8` (slate-400) | `#737373` (neutral-500) |
+| `text-secondary` | `label-muted` | Metadata, counts, captions, section headings, nav labels | `#334155` (slate-700) | `#e5e5e5` (neutral-200) |
+| `text-muted` | `label-faint` | Placeholders, hints | `#475569` (slate-600) | `#a3a3a3` (neutral-400) |
 | `accent` | `price-green` | Price emphasis, primary actions | `#15803d` (green-700) | `#4ade80` (green-400) |
 | `accent-contrast` | `price-ink` | Text/icon on accent | `#ffffff` | `#052e16` (green-950) |
 | `favorite` | `star-amber` | Favorite star (kept distinct from accent) | `#b45309` (amber-700) | `#fbbf24` (amber-400) |
@@ -83,9 +84,22 @@ families. An earlier version of this table listed the dark column in slate value
 `src/index.css`. The four semantic colors are identical in both themes.
 
 **Rules:**
-- Body text on surface must be ≥ **4.5:1**; secondary ≥ **3:1**.
+- All three text levels clear **4.5:1** against both surfaces, in both themes (the old ramp let
+  `text-muted` sit at 2.56:1 light / 3.19:1 dark. The `CONTRAST-*` rows in `scripts/acceptance.ts`
+  gate this by measuring rendered text on the routes the run covers — they pin the token values
+  indirectly (reverting the hexes without re-treating the classes breaks the next render that
+  uses `text-muted`) but they are not a standalone check of the raw hex values: with no visible
+  `text-muted` in today's markup, swapping the two tokens alone would not trip them). Readable content (codes, price labels, section headings, nav
+  labels, categories) rides on `text-secondary`; `text-muted` is for placeholders and hints only.
 - Do not convey state with color alone — always pair with icon/text (e.g. `aria-pressed`, label).
 - The `favorite` amber stays separate from `accent` green so price ≠ favorite at a glance.
+- **Deliberate raw-value exceptions** (see DESIGN.md): the rendered barcode is pure black on pure
+  white in both themes, and the camera/scan surface (`ScanPage`'s immersive shell, its `black/40–60`
+  pills, its white scan window, and `ScanLoading`) sits on the live video feed, which is not part
+  of the token world. Everything else on those screens uses these tokens; a raw value anywhere
+  outside those two surfaces is a defect. The skeleton shimmer uses the `--skeleton-highlight`
+  token (white in light, neutral-600 in dark) so the sweep stays a highlight over `--border` in
+  both themes.
 
 ---
 
@@ -296,8 +310,13 @@ Sober, purposeful.
 
 ## 9. Accessibility checklist (gate for every change)
 
-- [ ] Body/secondary contrast ≥ 4.5:1 / 3:1.
-- [ ] Every icon button has `aria-label` and a ≥44px hit target.
+- [ ] Visible text ≥ 4.5:1 (3:1 for large text) — gated by the `CONTRAST-light`/`CONTRAST-dark`
+  acceptance rows; content never rides on `text-muted`.
+- [ ] Every icon button has `aria-label` and a ≥44px hit target (gated by the `TOUCH-*` rows over
+  `/lista`, `/producto`, `/buscar` (chips + per-card add) and `/perfil` theme, plus the signed-out
+  `TOUCH-guardadas` row. `/guardadas`'s signed-in delete button is fixed at `h-11 w-11` but its
+  render needs a Firebase session, which the harness cannot assert — honest about not being
+  runtime-gated).
 - [ ] Visible `:focus-visible` ring on all interactive elements.
 - [ ] No information conveyed by color alone.
 - [ ] `aria-pressed` on toggles (favorite, category), `aria-live="polite"` on counts.

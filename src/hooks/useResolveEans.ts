@@ -4,9 +4,16 @@ import type { WorkerClient } from '../lib/workerClient'
 import type { Producto } from '../lib/types'
 
 /**
- * Resolves a list of EANs to their products via the catalog worker's exact
- * barcode path. Returns a parallel array (undefined when the ean is unknown).
- * Only the unique eans are queried; the worker owns the catalog.
+ * Resolves a list of EANs to their products. Returns a parallel array
+ * (undefined when the ean is unknown). Only the unique eans are resolved; the
+ * worker owns the catalog.
+ *
+ * ONE round-trip per list change: the whole burst goes through the worker's
+ * `resolve` message (exact barcode/id lookup — no fuzzy search, no shared
+ * generation with the interactive search stream). Before the protocol gained
+ * `resolve`, this hook issued one `client.query` per EAN; on the same worker
+ * a 30-item list meant 30 round-trips (and the single in-flight query slot
+ * made them effectively serial).
  */
 export function useResolveEans(
   client: WorkerClient,
@@ -18,30 +25,18 @@ export function useResolveEans(
   useEffect(() => {
     let alive = true
     setResolved({})
-    Promise.all(
-      unique.map(async (ean) => {
-        const digits = ean.replace(/\D/g, '')
-        let product: Producto | undefined
-        if (digits.length >= 6) {
-          const r = await client.query({ query: digits, limit: 30 })
-          product = r.results.find(
-            (p) => normalizeEan(p.barcode).replace(/\D/g, '') === digits,
-          )
-        } else {
-          // item keyed by catalog id (products without barcode)
-          const byId = await client.query({ query: '', ids: [ean], limit: 1 })
-          product = byId.results[0]
-        }
-        return [ean, product] as const
-      }),
-    )
-      .then((pairs) => {
+    const eansByDigits: string[] = []
+    const catalogIds: string[] = []
+    for (const ean of unique) {
+      // item keyed by catalog id (products without barcode) vs a real EAN
+      if (ean.replace(/\D/g, '').length >= 6) eansByDigits.push(ean)
+      else catalogIds.push(ean)
+    }
+    client
+      .resolveMany({ eans: eansByDigits, ids: catalogIds })
+      .then((products) => {
         if (!alive) return
-        const obj: Record<string, Producto> = {}
-        for (const [ean, product] of pairs) {
-          if (product) obj[ean] = product
-        }
-        setResolved(obj)
+        setResolved(products)
       })
       .catch(() => {
         // worker failure on resolve: leave unresolved (list still renders names)

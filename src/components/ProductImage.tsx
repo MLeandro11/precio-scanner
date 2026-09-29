@@ -8,6 +8,10 @@ import { productImageSrc } from '../lib/images'
  * the CDN fails to load a code, it renders the provided `fallback` (a category
  * emoji). The `className` styles the box in both states (the fallback gets
  * centered; the image uses object-cover).
+ *
+ * The thumbnail always sits next to the product name, which is rendered as
+ * adjacent text — so the image is decorative by contract: call sites pass
+ * `alt=""` and the screen reader announces the name once.
  */
 export default function ProductImage({
   ean,
@@ -29,8 +33,7 @@ export default function ProductImage({
     return (
       <div
         className={`flex items-center justify-center ${className}`}
-        role="img"
-        aria-label={alt}
+        aria-hidden="true"
       >
         {fallback}
       </div>

@@ -66,13 +66,13 @@ export default function SavedListsPage() {
         </Link>
       </div>
 
-      <h2 className="mt-6 text-xs font-semibold uppercase tracking-wide text-text-muted">
+      <h2 className="mt-6 text-xs font-semibold uppercase tracking-wide text-text-secondary">
         Guardar la lista actual
       </h2>
 
       <div className="mt-2 rounded-xl border border-border bg-surface-raised p-4" data-save-list>
         {!signedIn ? (
-          <p className="text-xs text-text-muted">
+          <p className="text-xs text-text-secondary">
             Necesitás una sesión para guardar listas. Tu lista de trabajo no se toca: sigue en
             este dispositivo.
           </p>
@@ -104,7 +104,7 @@ export default function SavedListsPage() {
         )}
       </div>
 
-      <h2 className="mt-6 text-xs font-semibold uppercase tracking-wide text-text-muted">
+      <h2 className="mt-6 text-xs font-semibold uppercase tracking-wide text-text-secondary">
         Mis listas
       </h2>
 
@@ -154,7 +154,7 @@ export default function SavedListsPage() {
                     <p className="truncate text-sm font-semibold text-text-primary">
                       {list.nombre}
                     </p>
-                    <p className="text-[11px] text-text-muted">
+                    <p className="text-[11px] text-text-secondary">
                       {list.items.length} producto{list.items.length === 1 ? '' : 's'}
                       {formatSavedDate(list.creada) ? ` · ${formatSavedDate(list.creada)}` : ''}
                     </p>
@@ -163,7 +163,7 @@ export default function SavedListsPage() {
                     type="button"
                     onClick={() => onRemove(list)}
                     aria-label={`Borrar ${list.nombre}`}
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border text-text-muted transition hover:text-danger"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border text-text-muted transition hover:text-danger"
                   >
                     <Trash2 size={15} aria-hidden="true" />
                   </button>

@@ -4,7 +4,9 @@ export type ThemePreference = 'system' | 'light' | 'dark'
 
 const STORAGE_KEY = 'lupa:theme'
 const THEME_COLOR_LIGHT = '#15803d'
-const THEME_COLOR_DARK = '#0f172a'
+/* Same value the boot script in index.html writes pre-paint (#171717 = dark
+   --surface): two writers, one colour, so the browser chrome never jumps. */
+const THEME_COLOR_DARK = '#171717'
 
 function readStored(): ThemePreference {
   try {
@@ -45,6 +47,14 @@ export function useTheme(): [ThemePreference, (t: ThemePreference) => void] {
 
   useEffect(() => {
     applyTheme(theme)
+    /* On "Sistema" the meta must follow the OS while the app stays open: the
+       CSS flips with prefers-color-scheme on its own, but the theme-color
+       meta would go stale without this subscription. */
+    if (theme !== 'system') return
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = () => applyTheme('system')
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
   }, [theme])
 
   const setTheme = useCallback((t: ThemePreference) => {

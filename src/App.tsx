@@ -44,7 +44,9 @@ export function useCatalog(): CatalogContextValue {
 
 function BootScreen() {
   return (
-    <div className="min-h-dvh bg-surface">
+    // Own <main>: this screen renders before AppLayout mounts, so nothing else
+    // provides the landmark.
+    <main className="min-h-dvh bg-surface">
       <div className="safe-top mx-auto w-full max-w-lg px-4">
         <Brand />
         <div className="pb-3 pt-3" role="status" aria-live="polite">
@@ -53,7 +55,7 @@ function BootScreen() {
         </div>
         <SkeletonList />
       </div>
-    </div>
+    </main>
   )
 }
 
@@ -63,7 +65,8 @@ function ErrorScreen({ error }: { error: unknown }) {
   // the recovery; the raw error text is never echoed).
   const { title, hint } = describeCatalogError(error)
   return (
-    <div
+    // Own <main>: same reason as BootScreen — AppLayout is not on screen here.
+    <main
       className="safe-top flex min-h-dvh items-center justify-center bg-surface px-4"
       data-boot-state="error"
     >
@@ -75,7 +78,7 @@ function ErrorScreen({ error }: { error: unknown }) {
           Reintentar
         </Button>
       </div>
-    </div>
+    </main>
   )
 }
 
@@ -118,13 +121,15 @@ function AppRoutes() {
 /** Light loader shown while the webcam/scan chunk streams in. */
 function ScanLoading() {
   return (
-    <div
+    // Own <main>: while a lazy chunk streams in, this fallback replaces the whole
+    // <Routes> tree — AppLayout (and its <main>) are not rendered yet.
+    <main
       className="flex min-h-dvh items-center justify-center bg-slate-900"
       role="status"
       aria-live="polite"
     >
       <span className="text-xs text-white/70">Cargando escáner…</span>
-    </div>
+    </main>
   )
 }
 

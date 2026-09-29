@@ -1,5 +1,31 @@
-import { useEffect, useRef } from 'react'
-import JsBarcode from 'jsbarcode'
+import { useEffect, useRef, useState } from 'react'
+
+/**
+ * Module-level single-flight loader: every barcode row shares one dynamic
+ * import, so the list's "Códigos de barras" view fetches the JsBarcode chunk
+ * exactly once per session. The chunk is NOT in the entry bundle (a secondary
+ * view most sessions never open) and it IS in the service-worker precache
+ * (vite-plugin-pwa precaches every emitted JavaScript chunk except the
+ * deliberately excluded firebase/firestore/data chunks), so the view still
+ * works offline at the register.
+ */
+/** The slice of JsBarcode's option surface this component uses. */
+interface JsBarcodeOptions {
+  height?: number
+  fontSize?: number
+  displayValue?: boolean
+  margin?: number
+  background?: string
+  lineColor?: string
+  format?: string
+}
+type JsBarcodeFn = (el: SVGElement, value: string, options?: JsBarcodeOptions) => void
+
+let barcodeLibPromise: Promise<JsBarcodeFn> | null = null
+function loadBarcodeLib(): Promise<JsBarcodeFn> {
+  barcodeLibPromise ??= import('jsbarcode').then((m) => m.default)
+  return barcodeLibPromise
+}
 
 /**
  * Renders a REAL, standards-encoded barcode from a value using JsBarcode.
@@ -29,13 +55,26 @@ export default function Barcode({
   height?: number
 }) {
   const ref = useRef<SVGSVGElement | null>(null)
+  // Set once the library chunk has loaded; keeps the effect's decoder loop
+  // re-running at that moment without re-triggering the import.
+  const [JsBarcode, setJsBarcode] = useState<JsBarcodeFn | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    loadBarcodeLib().then((lib) => {
+      if (alive) setJsBarcode(() => lib)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   useEffect(() => {
     const el = ref.current
-    if (!el) return
+    if (!el || !JsBarcode) return
     // bar plus human-readable digits fits under the desired box height.
     const barHeight = Math.max(22, height - 16)
-    const base: JsBarcode.Options = {
+    const base: JsBarcodeOptions = {
       height: barHeight,
       fontSize: 11,
       displayValue: true,
@@ -54,7 +93,7 @@ export default function Barcode({
         // invalid for this format (e.g. bad checksum) — try the next
       }
     }
-  }, [value, height])
+  }, [value, height, JsBarcode])
 
   return (
     // White wrapper is essential: JsBarcode's SVG output does not draw a

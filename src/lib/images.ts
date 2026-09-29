@@ -5,6 +5,13 @@
  * keyed by the product EAN:
  *   https://imagenes.preciosclaros.gob.ar/productos/{ean}.jpg
  *
+ * The CDN serves exactly ONE variant per EAN (verified 2026-02, EAN
+ * 7790710000102): every query string (?size=, ?width=, ?w=, ?quality=, …)
+ * returns a byte-identical 47 kB file, and alternate paths (_mediana, _thumb,
+ * /thumbs/, /small/) answer 403. There is no size/variant parameter to use —
+ * thumbnails download the full image and it is object-cover'd into a fixed box;
+ * re-probe only if the CDN ever grows a real resize API.
+ *
  * A code only maps to an image when it looks like a real EAN (>= 6 digits);
  * barcode-less products and bogus/too-short codes have no image and the UI falls
  * back to a category emoji.

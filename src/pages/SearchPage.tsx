@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, SlidersHorizontal } from 'lucide-react'
-import { useNavigate, useSearchParams, useNavigationType } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { createSearchSession } from '../lib/searchSession'
 import type { WorkerClient } from '../lib/workerClient'
@@ -167,7 +167,7 @@ export default function SearchPage({
                   type="button"
                   onClick={f.clear}
                   aria-label={`Quitar filtro ${f.label}`}
-                  className="inline-flex min-h-8 items-center gap-1 rounded-full bg-accent/10 px-3 text-xs font-medium text-accent transition hover:bg-accent/15"
+                  className="inline-flex min-h-11 items-center gap-1 rounded-full bg-accent/10 px-3 text-xs font-medium text-accent transition hover:bg-accent/15"
                 >
                   {f.label} <span aria-hidden="true">✕</span>
                 </button>
@@ -175,7 +175,7 @@ export default function SearchPage({
               <button
                 type="button"
                 onClick={() => search.setFilters({ categoria: '', priceMin: null, priceMax: null })}
-                className="min-h-8 rounded-full px-2 text-xs text-text-secondary underline-offset-2 hover:underline"
+                className="min-h-11 rounded-full px-2 text-xs text-text-secondary underline-offset-2 hover:underline"
               >
                 Limpiar
               </button>
