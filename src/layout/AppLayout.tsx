@@ -5,7 +5,7 @@ import { useList } from '../hooks/useList'
 // min-h-11/min-w-11 pin every tab to the 44×44 minimum touch target (§7) while the
 // icon, label, colours and spacing stay exactly as designed.
 const TAB_CLASS =
-  'flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-xl px-1.5 py-1 text-[10px] font-medium transition'
+  'flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-xl px-1.5 py-1 text-[11px] font-medium transition'
 const ACTIVE = 'bg-surface-sunken/5 text-accent'
 // Nav labels are content a user must read: they live on --text-secondary, not on
 // the placeholder-level --text-muted (§2 contrast rule, all levels ≥ 4.5:1).
@@ -93,7 +93,7 @@ export default function AppLayout() {
             <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-accent text-accent-contrast shadow-md">
               <ScanBarcode size={22} strokeWidth={1.7} aria-hidden="true" />
             </span>
-            <span className="text-[10px] font-semibold text-accent">Escanear</span>
+            <span className="text-[11px] font-semibold text-accent">Escanear</span>
           </NavLink>
           <Tab
             to="/lista"

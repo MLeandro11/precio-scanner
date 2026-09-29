@@ -170,7 +170,7 @@ export default function HomePage() {
           <span>
             <span className="block text-sm font-semibold text-text-primary">Alertas de precio</span>
             <span className="block text-xs text-text-secondary">
-              Te avisamos cuando un producto baje de precio
+              Cuando tengamos historial de precios, te avisamos
             </span>
           </span>
         </button>

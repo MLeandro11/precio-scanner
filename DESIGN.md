@@ -28,6 +28,10 @@ typography:
     fontSize: "16px"
     fontWeight: 400
     lineHeight: 1.5
+  empty-title:
+    fontSize: "15px"
+    fontWeight: 600
+    lineHeight: 1.4
   title:
     fontSize: "14px"
     fontWeight: 600
@@ -36,13 +40,25 @@ typography:
     fontSize: "14px"
     fontWeight: 400
     lineHeight: 1.5
+  dense-row:
+    fontSize: "13px"
+    fontWeight: 400
+    lineHeight: 1.4
   label:
     fontSize: "12px"
+    fontWeight: 500
+    lineHeight: 1.4
+  caption:
+    fontSize: "11px"
     fontWeight: 500
     lineHeight: 1.4
   micro:
     fontSize: "10px"
     fontWeight: 500
+    lineHeight: 1
+  badge:
+    fontSize: "9px"
+    fontWeight: 600
     lineHeight: 1
 rounded:
   sm: "6px"
@@ -133,7 +149,7 @@ components:
   nav-tab:
     textColor: "{colors.label-faint}"
     rounded: "{rounded.xl}"
-    typography: "{typography.micro}"
+    typography: "{typography.caption}"
     size: "44px"
   nav-tab-active:
     textColor: "{colors.price-green}"
@@ -280,19 +296,35 @@ several steps are arbitrary values rather than Tailwind defaults.
 
 ### Hierarchy
 
+The list below is the whole scale, in descending order. Each entry is a **role**: a value earns
+its place by having a named job, not by sitting on a ratio. Some are reused across surfaces; some
+exist for a single dense surface. The prose says which is which.
+
 - **Price hero** (700, 24px): the price on the product page. One per screen, and the largest type
   in the app.
 - **Price** (700, 18px): the price on a product card and in the list, and the size shared by page
   and section headings.
 - **Field** (400, 16px): text inputs and the sheet title. 16px is deliberate — anything smaller
   makes iOS zoom the page on focus.
+- **Empty title** (600, 15px): the one-line heading of an empty result state ("Sin resultados").
+  Single-use. It is the closest value on this scale to drift — an empty-state heading could ride
+  the 18px heading step — so treat it as that surface's role and do not add a second 15px surface
+  without a reason.
 - **Title** (600, 14px, 1.375): product names, with `leading-snug` and up to two lines
   (`line-clamp-2`).
 - **Body** (400, 14px): metadata, descriptions, button labels.
+- **Dense row** (400, 13px): compact label/value rows (the About block) and the sonner toast action
+  button. Reused across those two surfaces; not a licence for general body text.
 - **Label** (500, 12px): counts, chips, filter labels, section headings in uppercase
   (`tracking-wide`).
-- **Micro** (500, 10px): bottom-nav labels and the EAN chip on a card. 11px exists for dense list
-  metadata and 9px for the nav count badge; they are the floor, not a new step.
+- **Caption** (500, 11px): the dense-metadata step — EAN lines, "sin precio", scan results, saved-
+  list captions — and the bottom-nav labels. It is reused across many dense surfaces, which is why
+  the nav labels live here now instead of on the old 10px "floor".
+- **Micro** (500, 10px): the EAN chip on a product card. This is the step the nav labels used to
+  share; after they moved to `caption` (11px) it has exactly one remaining user. If that chip ever
+  moves, the step is dead and should be deleted rather than kept as an empty rung.
+- **Badge** (600, 9px): the count pill on the nav icon. Single-use, and the true floor of the
+  scale.
 
 ### Named Rules
 
@@ -300,9 +332,9 @@ several steps are arbitrary values rather than Tailwind defaults.
 (`.tnum`), so a column of `$ 1.290` and `$ 12.345` does not wiggle while scrolling and a digit
 change never shifts layout. Numbers are formatted `es-AR`.
 
-**The No Fourth Size Rule.** Reach for one of the steps above before inventing an arbitrary value.
-The arbitrary sizes that exist (`9px`–`15px`) were each added for one dense surface; they are not
-a licence for a new one per screen.
+**The No Fourth Size Rule.** Reach for one of the roles above before inventing a value. A single-use
+role (9px, 10px, 15px) is not a licence for a new size per screen; a reused role (11px, 13px) is
+not a general-purpose body step either.
 
 ## Layout
 
@@ -424,7 +456,7 @@ without checking every card that relies on it.
 
 A fixed, floating pill: `shelf` background, `rounded-3xl`, 1px edge, Floating shadow, five slots
 — Inicio · Alertas · [Escanear] · Lista · Perfil. Each tab is pinned to a **44×44px** minimum with
-a 10px label; inactive tabs are `label-muted` (--text-secondary), the active tab is `price-green`. The centre scan
+an 11px label (`caption`); inactive tabs are `label-muted` (--text-secondary), the active tab is `price-green`. The centre scan
 slot is the one accent-filled, `shadow-md` tile in the chrome, and it is the only raised
 affordance there. The list count badge is an accent pill, `aria-hidden`, paired with an `sr-only`
 sentence — the number is never announced twice.

@@ -681,6 +681,44 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
     }`,
   )
 
+  /*
+   * The nav labels are content a user must read, so their step is part of the
+   * contract: the same idiom as SCAN-nav44, applied to type. Read the computed
+   * font-size of each label span (not the icon wrapper, not the aria-hidden count
+   * badge) and require >= 11px. The old 10px labels fail this row; the badge keeps
+   * its own 9px step and is filtered out by data-list-badge.
+   */
+  const navLabelSizes: Array<{ label: string; size: number }> | null =
+    await noCamPage.evaluate(() => {
+      const nav = document.querySelector('nav[aria-label="Navegación principal"]')
+      if (!nav) return null
+      return Array.from(nav.querySelectorAll('a')).map((a) => {
+        const labelSpan = Array.from(a.querySelectorAll('span')).find(
+          (s) =>
+            !s.classList.contains('sr-only') &&
+            !s.hasAttribute('data-list-badge') &&
+            s.children.length === 0 &&
+            (s.textContent ?? '').trim() !== '',
+        )
+        return {
+          label: (labelSpan?.textContent ?? a.textContent ?? '')
+            .trim()
+            .replace(/\s+/g, ' ')
+            .slice(0, 14),
+          size: labelSpan ? parseFloat(getComputedStyle(labelSpan).fontSize) : 0,
+        }
+      })
+    })
+  record(
+    'SCAN-navfs',
+    !!navLabelSizes &&
+      navLabelSizes.length === 5 &&
+      navLabelSizes.every((l) => l.size >= 10.99),
+    `bottom-nav label font sizes: ${
+      navLabelSizes ? navLabelSizes.map((l) => `${l.label} ${l.size}px`).join(', ') : 'nav not found'
+    }`,
+  )
+
   await noCamBrowser.close()
 
   // With the fake camera the live path is reachable. The scan window must render, the

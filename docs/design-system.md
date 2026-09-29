@@ -120,13 +120,23 @@ because a surface needed it:
 | `price-hero` | 24px / 700 | Price on the product page |
 | `price` | 18px / 700 | **Price** in cards and lists — always `tabular-nums`; the size is shared by page and section headings |
 | `field` | 16px / 400 | Inputs and the sheet title (smaller makes iOS zoom the page on focus) |
+| `empty-title` | 15px / 600 | Empty-state heading ("Sin resultados"); single-use, and the closest value on the scale to drift |
 | `title` | 14px / 600 | Product name (`leading-snug`, two lines max) |
 | `body` | 14px | Metadata (category, code), button labels |
+| `dense-row` | 13px / 400 | Compact label/value rows (the About block) and the toast action button |
 | `label` | 12px / 500 | Counts, labels, chips, uppercase section headings |
-| `micro` | 10px / 500 | Bottom-nav labels, EAN chip. 11px and 9px are the floor, for dense list metadata and the nav badge |
+| `caption` | 11px / 500 | Dense metadata (EAN lines, "sin precio", scan results) **and** bottom-nav labels |
+| `micro` | 10px / 500 | EAN chip on a product card; the nav labels moved to `caption` (11px) |
+| `badge` | 9px / 600 | Count badge on the nav icon; the floor of the scale |
+
+Each row is a **role**, not a rung on a ratio: a value earns a step by having a named job. The
+dense roles (`badge` 9px, `micro` 10px, `empty-title` 15px) are used by a single surface each and
+are not a licence for a new value per screen. `caption` (11px) is reused across many dense surfaces
+— that is why the bottom-nav labels took it when they left the old 10px "floor".
 
 An earlier version of this table listed `display 20px/700` and `title 15px/600`, neither of which
-exists in the code; corrected against the utilities actually used in `src/`.
+was used in the code; corrected against the utilities actually used in `src/`. (The 15px size later
+appeared as `empty-title`, a one-off empty-state heading, not a title step.)
 
 **Rule:** prices render with `tabular-nums` so rows of `$ 1.290` vs `$ 12.345` don't wiggle
 while scrolling. Never rigger layout shift when a price changes width.
