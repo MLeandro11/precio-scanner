@@ -1,0 +1,9 @@
+{
+  "status": 200,
+  "producto": {
+    "msg": "Producto inexistente.",
+    "id": "0000000000000"
+  },
+  "total": 0,
+  "sucursales": []
+}
