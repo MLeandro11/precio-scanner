@@ -541,10 +541,21 @@ exists:
   `R3-resolve-no-failure-path` (`src/lib/workerClient.ts:115-118` — the new batched EAN resolve has
   no failure path), and `R3-001`, `R3-002`, `R3-003` (`scripts/acceptance.ts:817`, `:820`, `:855`).
 - **Two more, from the scanner change** (`b982173`): `R3-ZXING-WRAPPER-TEARDOWN`
-  (`src/hooks/useBarcodeScanner.ts:174`) — nothing asserts that the page-wide `console.warn`
-  wrapper is removed on teardown or on a failed `start()`, so a regression there would silently drop
-  **every warning in the app** and no existing check would turn red; that one is worth a test before
-  the next person touches the hook. And `R3-ZXING-FALLBACK-UNPROVED`
+  (`src/hooks/useBarcodeScanner.ts:174`, restore at `:198` in the `start()` catch and `:230` in the
+  effect cleanup) — nothing asserted that the page-wide `console.warn` wrapper is removed on
+  teardown or on a failed `start()`, so a regression there would silently drop **every warning in
+  the app** and no existing check would turn red. **CLOSED (2026-10-01):**
+  `src/hooks/useBarcodeScanner.test.ts` mounts the hook in jsdom (the project's only DOM test, and
+  the only new devDependency, `jsdom`) and asserts the filter is live while scanning, that an exact
+  upstream-shape probe is swallowed while a different message is forwarded, and that
+  `console.warn` is back to the original on unmount, on a denied camera, on a decode failure, and
+  after `retry()`. Guard value proven by mutation, independently reproduced: deleting the catch
+  restore reddens the decode-failure test, deleting the cleanup restore reddens the unmount and
+  retry tests; neither survives. **Stated plainly so it is not misread:** the denied-camera case
+  rejects before the wrapper is ever installed, so it only covers `status === 'denied'` — the
+  catch restore is necessarily exercised by failures *after* install, i.e. by the decode-failure
+  test alone. No production code changed: the hook was already correct. Bundle byte-identical to a
+  pre-change build (jsdom never reaches `dist/`). And `R3-ZXING-FALLBACK-UNPROVED`
   (`src/lib/zxingWarning.ts:126-132`).
 - **One more, from the 7.7 search change (found by its independent verification, pre-existing and
   out of scope): `R3-HIGHLIGHT-OFF-BY-ONE`** (`src/components/HighlightedName.tsx:26`). Fuse's

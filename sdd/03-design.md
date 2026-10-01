@@ -430,6 +430,13 @@ rules are live" are different claims, and only the first one is automatic.
 - Normalization + index scripts tested with fixture raw catalogs (valid, truncated,
   corrupt): exit codes, output shape, id stability.
 - `npm test` → 11 files, 97 tests; `npm run typecheck` clean.
+- **The one DOM test (and why only one).** Every unit test runs in Node. The single exception is
+  `src/hooks/useBarcodeScanner.test.ts`, which declares `// @vitest-environment jsdom` (jsdom is a
+  devDependency) and mounts the hook with `react-dom/client` + `act`: the page-wide `console.warn`
+  wrapper the scanner installs can only be observed by running the effect and its cleanup, and a
+  regression there would silently drop **every** warning in the app. Both restore paths (the effect
+  cleanup and the `start()` catch) are pinned, and removing either one turns the file red. The
+  environment stays scoped to that file so the other suites keep running in Node.
 - **Saved lists (FR-12).** The pure mapper is unit-tested in plain Node (AC-14), the draft
   transitions are tested at the state level, and the acceptance harness covers the **logged-out**
   contract only — it has no credentials and must not have any. AC-15 (cross-account privacy) is
