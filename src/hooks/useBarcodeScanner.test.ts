@@ -18,8 +18,9 @@ import type { BarcodeScanner } from './useBarcodeScanner'
  * (does the probe reach the original spy). `src/lib/zxingWarning.test.ts`
  * already covers the module; this file covers the hook that owns its lifecycle.
  *
- * This is the only test file that declares `@vitest-environment jsdom`; the rest
- * keep running under Node.
+ * `@vitest-environment jsdom` is declared per file, so this hook test and
+ * `src/components/HighlightedName.test.tsx` (the only other DOM test) are the
+ * exceptions; every other suite keeps running under Node.
  */
 const MISS_PREFIX = 'MultiFormatReader: non-ReaderException from reader:'
 

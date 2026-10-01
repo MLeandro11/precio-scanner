@@ -1,6 +1,11 @@
 /**
- * Renders `nombre` with Fuse match ranges ([start, end] char indices)
- * highlighted with <mark>.
+ * Renders `nombre` with Fuse match ranges highlighted with <mark>.
+ *
+ * `ranges` are `[start, end]` character indices and they are INCLUSIVE: the character at `end`
+ * is part of the match, exactly as Fuse reports it. They are expected to arrive sorted and
+ * disjoint, because `mergeRanges` in `src/lib/searchEngine.ts` guarantees that upstream —
+ * overlapping or touching ranges are already merged before they reach this component, so no
+ * merging happens here (duplicating that guarantee would only create a second source of truth).
  */
 export type HighlightRange = [number, number]
 
@@ -23,10 +28,10 @@ export default function HighlightedName({
     }
     parts.push(
       <mark key={`m${start}`} className="rounded-sm bg-highlight text-text-primary">
-        {nombre.slice(start, end)}
+        {nombre.slice(start, end + 1)}
       </mark>,
     )
-    cursor = Math.max(cursor, end)
+    cursor = Math.max(cursor, end + 1)
   }
   if (cursor < nombre.length) {
     parts.push(<span key={`t${cursor}`}>{nombre.slice(cursor)}</span>)
