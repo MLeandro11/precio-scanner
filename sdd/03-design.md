@@ -145,7 +145,9 @@ State: local React state + hooks (`useSearch`, `useFavorites`, `useRecents`, `us
    reports once through `onQueryCommit` so the caller persists it as a recent search; the
    initial browse, filters, sort and paging are not reported and a failing storage write
    never breaks a run.
-3. Highlight via Fuse match positions on `nombre`/`categoria`.
+3. Highlight via Fuse match positions on `nombre`/`categoria`. Ranges arriving from several
+   terms are merged on our side (`mergeRanges`) before rendering, because `HighlightedName`
+   sorts ranges but does not merge them: a duplicated range would render its text twice.
 4. Filters/sort ride the same worker message and are applied over the match set.
 5. Barcode-like queries (≥6 digits, no letters) short-circuit fuzzy search:
    `searchEngine` builds a `Map<barcode, Product[]>`; an exact hit returns with priority;
@@ -153,6 +155,22 @@ State: local React state + hooks (`useSearch`, `useFavorites`, `useRecents`, `us
 6. Favorites mode: `showFavorites(ids)` clears pending debounce, sets `ids` and runs
    immediately; the worker restricts the match set and `total` stays honest. Typing leaves
    the mode; filters/sort are kept.
+
+**Multi-word queries (task 7.7).** A query is split on whitespace and each token becomes one
+literal term; `useExtendedSearch` supplies the AND between terms, so `coca 2,5` means
+"coca AND 2,5" instead of one 9-character fuzzy pattern. User input is never read as a query
+language: every token is wrapped in double quotes, which always resolves to Fuse's fuzzy matcher
+(the token text is then a literal pattern), and `|` — the only operator that survives inside the
+quotes — is escaped as `\|`. Control characters are token separators, because Fuse's parser
+rewrites NUL to `|` internally (`parseQuery` does `.replace(/\u0000/g, '|')`), which would turn a
+control character into an OR. An AND that matches nothing stays empty: no silent fallback to OR.
+A single-token query is therefore identical to the pre-7.7 raw pattern, which
+`src/lib/searchEngine.test.ts` pins by equivalence against a raw engine. The barcode short-circuit
+still runs on the raw query, before tokenizing, so `779 3940 219009` stays one exact hit (FR-2.8b).
+Evidence: 11,110 exhaustive metacharacter strings and the catalog's own metacharacter tokens show
+zero divergence from the raw engine, with a negative control proving the check detects the
+unescaped failure modes (`!coca` → 20,294 products, `=coca` → 0). Cost *drops* with word count,
+because extended search short-circuits on the first failing term: 8 tokens 121 ms vs 2,270 ms.
 
 **Scanner** (`lib/lupa/scan.ts` + `hooks/useBarcodeScanner.ts`): uses a **single pure-JS
 decoder — ZXing `BrowserMultiFormatReader`** — so camera scanning works on **any device
@@ -387,7 +405,8 @@ rules are live" are different claims, and only the first one is automatic.
 | Catalog becomes stale | Accepted for Phase 1; daily updater is Phase 2 |
 | Raw data has no brand field | `marca` kept as `''`; no brand filter/index in Phase 1 |
 | Zero-price noise | Excluded at normalize time with reported counts. `enTienda` is **not** an exclusion criterion (FR-1.3) |
-| Fuse threshold too loose/strict | Fixed at **0.35** (`searchEngine.ts`). **Tuned** in WU7.1 by `scripts/tune-threshold.ts` against the real catalog: 6 queries × thresholds 0.25–0.40. Rank and precision@10 are **flat across the whole range** (`serenisma`/`cocacola` 10/10, `quilmes 1890` 6/10, `zero 1,5` and `yogurt griego` 1/10, `coca 2,5` 0/10), so the threshold does **not** decide ordering — it only sets tail volume. `0.35→0.40` multiplies total matches **×7.84** (106→831), so 0.35 is the tightest value below the flood cliff. The run's real finding is a defect no threshold can reach: `engine.fuse.search(q)` passes the raw string as **one** fuzzy pattern, so `coca 2,5` is not "coca AND 2,5" and the correct catalog entries never surface. Tracked as 7.7 |
+| Fuse threshold too loose/strict | Fixed at **0.35** (`searchEngine.ts`). **Tuned** in WU7.1 by `scripts/tune-threshold.ts` against the real catalog: 6 queries × thresholds 0.25–0.40. Rank and precision@10 are **flat across the whole range** (`serenisma`/`cocacola` 10/10, `quilmes 1890` 6/10, `zero 1,5` and `yogurt griego` 1/10, `coca 2,5` 0/10), so the threshold does **not** decide ordering — it only sets tail volume. `0.35→0.40` multiplies total matches **×7.84** (106→831), so 0.35 is the tightest value below the flood cliff. The run's real finding is a defect no threshold can reach: `engine.fuse.search(q)` passes the raw string as **one** fuzzy pattern, so `coca 2,5` is not "coca AND 2,5" and the correct catalog entries never surface. **Resolved in 7.7** (multi-word = all the words, see the search pipeline): `coca 2,5` went MISS/0-of-10 → **#4**, `zero 1,5` 1/10 → **8/10**, `yogurt griego` 1/10 → **10/10**, `quilmes 1890` total 50 → **6**; `serenisma`/`cocacola` stay 10/10 |
+| Extended search would turn user input into a query language | Adopted only with per-token neutralization (each token quoted ⇒ literal fuzzy matcher; `|` escaped as `\|`; control characters are separators). The hazard is real and measured: unescaped, `!coca` returns all 20,294 products and `"a"` 20,331, while `=coca` collapses to 0. `scripts/tune-threshold.ts` proves the shipped path is literal **on the real catalog** by comparing it against a raw engine for the operator probes plus every metacharacter token the catalog itself contains; any mismatch fails the verdict, and it catches both directions where a maximum-total ceiling would only catch the explosion |
 | GH Pages base-path mistakes | `base` set on day one; router `basename` follows `BASE_URL`; deploy verified live |
 | Scanner is Chromium-only | Replaced with a single pure-JS decoder (ZXing) that works on any device with `getUserMedia`; manual EAN entry remains as the always-available fallback (FR-9.2) |
 | Persisted EANs drift from catalog | `useResolveEans` resolves lazily through the worker; barcode-less products fall back to id |

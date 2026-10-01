@@ -276,7 +276,7 @@ AC-6 (deploy) verified via a real push.
       own ids and the server answers `404 text/plain`; restored, the harness is green (20/20,
       twice). A port collision on 4173 (`vite preview` also defaults there) fails loudly with
       `EADDRINUSE` instead of silently testing the wrong server.
-- [ ] 7.7 *(added — revealed by 7.1)* **Make a multi-word query mean "all the words".**
+- [x] 7.7 *(added — revealed by 7.1)* **Make a multi-word query mean "all the words".**
       `engine.fuse.search(q)` hands the raw string to Fuse as a **single** fuzzy pattern, so
       the query is not "coca AND 2,5". Measured against the real catalog: `coca 2,5` never
       reaches the top 50, even though `COCA COLA X 2.5` and `coca cola zero x 2.5` both
@@ -293,6 +293,30 @@ AC-6 (deploy) verified via a real push.
       surfaces olive oil first.
       Not verifiable by unit tests alone — the evidence lives in the catalog, so extend
       `scripts/tuning-queries.ts` and re-run `scripts/tune-threshold.ts`.
+      **Done (2026-10-01).** Adopted `useExtendedSearch: true` **with the escaping the note above
+      demanded**: `tokenizeQuery` / `escapeExtendedToken` / `buildQueryPattern` in
+      `src/lib/searchEngine.ts` wrap every token in double quotes (a quoted token always resolves
+      to the fuzzy matcher, i.e. the token text is a literal pattern) and escape `|` as `\|`, the
+      only escape Fuse supports. Control characters are token separators, because Fuse's parser
+      rewrites NUL to `|` internally — measured, that was the one character that escaped the
+      quotes. Strict AND, no fallback to OR: `coca zzzzz` returns 0 at every threshold.
+      — Evidence, on the real catalog: `coca 2,5` **MISS / 0-of-10 → #4**, `zero 1,5` 1/10 →
+      **8/10**, `yogurt griego` 1/10 → **10/10**, `quilmes 1890` total 50 → **6**; `serenisma` and
+      `cocacola` stay 10/10. Cost **drops** with word count (extended search short-circuits on the
+      first failing term): 8 tokens 121 ms vs 2,270 ms, 4 tokens 106 ms vs 650 ms.
+      The escaping is proven, not assumed: 11,110 generated strings (length 1..4 over
+      `a b " \ | ! = $ ^ '`) plus the catalog's own metacharacter tokens (61 names) and 232 token
+      pairs show **zero divergence** from a raw reference engine on ids and scores, with a
+      negative control proving the check detects the unescaped modes (`!coca` → 20,294,
+      `=coca` → 0). `scripts/tune-threshold.ts` runs that equivalence **live** for the operator
+      probes plus every metacharacter token the catalog contains, and fails its verdict on any
+      mismatch. The por-token score-fusion alternative was measured too and discarded: identical
+      ranks but 1.5–2× slower and with a ranking function of our own instead of Fuse's.
+      — Verified: `npm run typecheck` clean · `npm test` **18 files / 214 tests** · `npm run build`
+      ok · `npm run acceptance` **53/53 (52 PASS + 1 INFO `FR-2.8d`, 0 FAIL)**, no pre-existing row
+      regressed, new row `SEARCH-multi-word` PASS. The committed `catalogo-index.json` stays valid
+      (`useExtendedSearch` changes parsing, never indexing). PR-2.8b (`779 3940 219009`) and
+      FR-2.8d (`EAN 7793940219009` → 0) unchanged. Feature record: `odd/tasks/multi-word-search.md`.
 
 ## Work Unit 8 — Lupa (rebrand + feature set, `c34d0e7`)
 
@@ -522,6 +546,15 @@ exists:
   **every warning in the app** and no existing check would turn red; that one is worth a test before
   the next person touches the hook. And `R3-ZXING-FALLBACK-UNPROVED`
   (`src/lib/zxingWarning.ts:126-132`).
+- **One more, from the 7.7 search change (found by its independent verification, pre-existing and
+  out of scope): `R3-HIGHLIGHT-OFF-BY-ONE`** (`src/components/HighlightedName.tsx:26`). Fuse's
+  match ranges are **inclusive** `[start, end]`, but the component renders
+  `nombre.slice(start, end)` (exclusive), so **the last character of every highlighted run is not
+  marked** — on the real catalog `COCA COLA 1.75` with range `[0,3]` marks `COC`. The character is
+  not lost: `cursor` advances to `end` and the next plain span re-emits it, so the defect is purely
+  visual. Pre-existing (the file is untouched since `86c6846`) and untouched by 7.7's diff:
+  `mergeRanges` keeps ranges inclusive and does not worsen it. Worth a one-line fix (`end + 1` plus
+  an assertion on the marked substring) the next time that component is opened.
 
 ## Deviations from plan
 
