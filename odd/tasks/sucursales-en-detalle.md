@@ -1,6 +1,7 @@
 # Feature: precio por sucursal en el detalle del producto (`sucursales-en-detalle`)
 
-**Status:** in progress · **Started:** 2026-10-01
+**Status:** slice 1 (núcleo puro) **hecho, verificado y commiteado** en `45e85b2` · **slice 2 pendiente**
+**Started:** 2026-10-01
 **Branch:** `main` (convención del repo: se commitea sobre `main`, no se crea feature branch)
 **Origen:** spike de solo lectura sobre la API de Precios Claros/SEPA, autorizado por el usuario
 (2026-10-01). Llena el cartel que ya existe en `src/pages/ProductPage.tsx:152`
@@ -210,6 +211,36 @@ nombre (`deltaVsMasBarato`) no dice que es global. Un test afirma que la clave y
 
 Si algún día hace falta un número de ahorro, se recalcula **re-anclado a un radio o a una ciudad** y
 se nombra por esa semántica (`deltaVsMasBaratoDeLaCiudad` o similar). No se reusa este.
+
+## Próximo slice (2): montar la sección en `/producto/:ean`
+
+El núcleo ya está listo para consumirse: `createPreciosClarosClient`, `mapSucursales`,
+`deriveEstado`. Lo que falta es la pantalla. Alcance acordado:
+
+1. Un CTA **"Ver precios cerca mío"** en la tarjeta de precio de `src/pages/ProductPage.tsx`.
+2. La ubicación se pide **al toque**, no al cargar, y el texto dice para qué se usa y que **no se
+guarda** (la app nunca persiste lat/lng; el `fetch` las manda y se descartan).
+3. La tabla: sucursal, distancia y precio, **ordenada por precio**. **Sin delta.**
+4. Sin red, sin ubicación o sin datos: la pantalla queda como está hoy. Nada se rompe ni se
+reemplaza el precio local.
+5. Los tres estados del núcleo tienen que ser visibles y distintos en la UI: `con-precios`,
+`sin-precio`, `sin-datos`. El último es el más frecuente (~40% del catálogo) y debe verse como un
+estado normal, no como un error.
+
+**Decisión de alcance de v1**: si el usuario niega la ubicación, una línea honesta ("activá la
+ubicación para ver precios por sucursal") y nada más. El **selector de localidades de todo el país
+va en su propio slice**: necesita `scripts/generate-localidades.ts` + `public/data/localidades.json`
+(83 llamadas al API, tope real de 30 por página) y normalización de los nombres, que vienen sucios
+(`9 De Julio` / `9 de julio`, `ACASSUSO` / `Acassuso`).
+
+**Allowed edit surfaces del slice 2**: `src/pages/ProductPage.tsx`, `src/hooks/useUbicacion.ts`
+(nuevo), `src/components/***` (componente nuevo de la tabla). Nada más: no tocar el worker, el
+`catalogLoader` ni el catálogo local.
+
+**Riesgo abierto heredado del spike**: si el resultado de la comparación es siempre "el almacén
+está mejor", la feature pierde sentido. Medido en Río Gallegos: el almacén ganaba 8 de 10 ítems y
+la canasta completa salía +33,9% en La Anónima. La decisión sobre si la feature se banca es del
+usuario y sigue pendiente.
 
 ## Notas de ejecución
 
