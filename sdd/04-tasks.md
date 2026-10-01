@@ -559,13 +559,23 @@ exists:
   (`src/lib/zxingWarning.ts:126-132`).
 - **One more, from the 7.7 search change (found by its independent verification, pre-existing and
   out of scope): `R3-HIGHLIGHT-OFF-BY-ONE`** (`src/components/HighlightedName.tsx:26`). Fuse's
-  match ranges are **inclusive** `[start, end]`, but the component renders
-  `nombre.slice(start, end)` (exclusive), so **the last character of every highlighted run is not
-  marked** — on the real catalog `COCA COLA 1.75` with range `[0,3]` marks `COC`. The character is
-  not lost: `cursor` advances to `end` and the next plain span re-emits it, so the defect is purely
-  visual. Pre-existing (the file is untouched since `86c6846`) and untouched by 7.7's diff:
-  `mergeRanges` keeps ranges inclusive and does not worsen it. Worth a one-line fix (`end + 1` plus
-  an assertion on the marked substring) the next time that component is opened.
+  match ranges are **inclusive** `[start, end]`, but the component rendered
+  `nombre.slice(start, end)` (exclusive), so **the last character of every highlighted run was not
+  marked** — on the real catalog `COCA COLA 1.75` with range `[0,3]` marked `COC`. The character was
+  not lost: `cursor` advanced to `end` and the next plain span re-emitted it, so the defect was
+  purely visual. **CLOSED (2026-10-01):** the mark is now `nombre.slice(start, end + 1)` **and** the
+  cursor advances to `end + 1` — the pair is required, since the slice alone duplicates characters
+  on adjacent ranges (measured: `COCA COLA 1.755`, `YERBA PLAYADITOO 1KG`).
+  `src/components/HighlightedName.test.tsx` (the second DOM test) pins it: 12 tests, **10 of which
+  fail against the previous component** and **8 against the half-fix**, so both halves are guarded.
+  Proven end-to-end in a real browser over the built app: `<mark>` text went from
+  `PLAYADIT`/`SERENISIM`/`YERB` to `PLAYADITO`/`SERENISIMA`/`YERBA`. Suite: 20 files / 231 tests,
+  acceptance 53/53, no row regressed.
+  **Residual, recorded not fixed:** the component trusts sorted, disjoint, non-negative ranges and
+  does not clamp `start` against `cursor`; overlapping, duplicated or negative ranges would duplicate
+  or drop text (measured, pre-existing, unchanged in kind by this fix). Unreachable today because
+  `mergeRanges` (`src/lib/searchEngine.ts`) guarantees the shape upstream — the docblock now states
+  that contract instead of leaving it implicit.
 
 ## Deviations from plan
 
