@@ -23,6 +23,14 @@ export const FUSE_OPTIONS = {
   includeMatches: true,
   threshold: 0.35,
   ignoreLocation: true,
+  // `useExtendedSearch` gives the space separator its AND meaning: `coca 2,5` becomes
+  // two terms that must both match, instead of one 9-character fuzzy pattern. Measured
+  // on the real 20,331-product catalog, the raw single pattern never surfaced the
+  // expected product for `coca 2,5` inside the top 50 and gave 1/10 precision for
+  // `zero 1,5`. It changes how a pattern is parsed, never how the index is built, so the
+  // committed index in `public/data/catalogo-index.json` stays valid. User tokens are
+  // neutralized by `buildQueryPattern` so input is never read as a query language.
+  useExtendedSearch: true,
   keys: [
     { name: 'nombre', weight: 3 },
     { name: 'categoria', weight: 1 },
@@ -32,6 +40,68 @@ export const FUSE_OPTIONS = {
 export const DEFAULT_LIMIT = 50
 
 const BARCODE_MIN_DIGITS = 6
+
+/**
+ * Splits a raw query into search tokens. Whitespace separates tokens, and so do control
+ * characters (U+0000-U+001F, U+007F): Fuse's extended-search parser rewrites NUL to `|`
+ * internally (`parseQuery` does `.replace(/\u0000/g, '|')`), so a control character would
+ * escape quoting and become an OR operator. Measured: escaped "\0" matches a product
+ * containing `|` instead of the NUL it was asked for.
+ */
+export function tokenizeQuery(raw: string): string[] {
+  return String(raw)
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+}
+
+/**
+ * Wraps one user token so Fuse's extended-search parser reads it as a literal fuzzy
+ * pattern instead of a query-language term. A double-quoted token always resolves to the
+ * fuzzy matcher, whose pattern is the inner text handed to Bitap, i.e. literal. `|` is the
+ * only operator that survives inside the quotes and is escaped with `\|`, the only escape
+ * Fuse supports.
+ *
+ * This is not a guess. Measured without it: `!coca` returns all 20,294 products, `"a"`
+ * returns 20,331, `coca|zero` returns 2,478, `=coca` returns 0. With it, 11,110 generated
+ * strings (length 1..4 over `a b " \ | ! = $ ^ '`) were compared against the pre-7.7 raw
+ * engine on ids AND scores to 9 decimals: zero divergences. The same comparison over the
+ * metacharacter tokens of the real catalog: zero divergences.
+ */
+export function escapeExtendedToken(token: string): string {
+  return `"${token.replace(/\|/g, '\\|')}"`
+}
+
+/**
+ * Builds the Fuse pattern for a raw query: one neutralized literal term per token,
+ * AND-ed by extended search's space separator. Empty query, or a query of nothing but
+ * control characters, yields '' (and therefore no matches: never a browse-all).
+ */
+export function buildQueryPattern(raw: string): string {
+  return tokenizeQuery(raw).map(escapeExtendedToken).join(' ')
+}
+
+/**
+ * Merges overlapping or touching index ranges into a sorted, disjoint list. Fuse runs its
+ * own `mergeIndices` inside a single match, but with multi-token queries several ranges
+ * reach us already concatenated, and `src/components/HighlightedName.tsx` sorts ranges
+ * without merging them: a duplicated range is emitted twice, rendering its text twice.
+ * The guarantee has to live on our side.
+ */
+export function mergeRanges(ranges: Array<[number, number]>): Array<[number, number]> {
+  if (ranges.length <= 1) return ranges.map(([start, end]) => [start, end])
+  const sorted = [...ranges].sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  const merged: Array<[number, number]> = [[sorted[0][0], sorted[0][1]]]
+  for (let i = 1; i < sorted.length; i += 1) {
+    const last = merged[merged.length - 1]
+    const curr = sorted[i]
+    // touching (start === last end + 1) is merged too: splitting it would render the
+    // same run of characters as two adjacent pieces for no reason
+    if (curr[0] <= last[1] + 1) last[1] = Math.max(last[1], curr[1])
+    else merged.push([curr[0], curr[1]])
+  }
+  return merged
+}
 
 /** Extra-match positions attached to results when available (highlighting). */
 type MatchPositions = Record<string, Array<[number, number]>>
@@ -114,7 +184,7 @@ function matchPositions(fuseMatch: { matches?: readonly FuseResultMatch[] }): Ma
   const byKey: MatchPositions = {}
   for (const m of fuseMatch.matches) {
     if (m.key && Array.isArray(m.indices)) {
-      ;(byKey[m.key] ??= []).push(...m.indices)
+      byKey[m.key] = mergeRanges([...(byKey[m.key] ?? []), ...m.indices])
     }
   }
   return Object.keys(byKey).length ? byKey : undefined
@@ -165,9 +235,17 @@ export function runQuery(engine: Engine, params: QueryParams = {}): QueryResult 
   let scores: Map<string, number> | null = null
 
   if (q) {
-    const fuseMatches = engine.fuse.search(q)
-    scores = new Map(fuseMatches.map((m) => [m.item.id, m.score ?? 1]))
-    matches = fuseMatches.map((m) => ({ ...m.item, _matches: matchPositions(m) }))
+    // Multi-word means AND: every token becomes one neutralized literal term, joined by
+    // the space separator. A query made only of control characters tokenizes to nothing
+    // and must be empty, never the browse-all listing.
+    const pattern = buildQueryPattern(q)
+    if (pattern) {
+      const fuseMatches = engine.fuse.search(pattern)
+      scores = new Map(fuseMatches.map((m) => [m.item.id, m.score ?? 1]))
+      matches = fuseMatches.map((m) => ({ ...m.item, _matches: matchPositions(m) }))
+    } else {
+      matches = []
+    }
   } else {
     matches = engine.products.slice()
   }

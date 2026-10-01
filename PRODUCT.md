@@ -64,8 +64,10 @@ invented differentiator.
 ## Capabilities and Constraints
 
 Working today (status table at `README.md:28-36`): fuzzy name search that survives typos, accents
-and reordering ("serenisma" → "La Serenísima"); exact EAN/barcode lookup with no fuzzy false
-positives; category and price filters; sort by relevance or price; recent searches; favorites;
+and reordering ("serenisma" → "La Serenísima"), where every word of a multi-word query must match —
+`coca 2,5` finds the 2.5L Coca — while typo tolerance and accent folding stay unchanged; exact
+EAN/barcode lookup with no fuzzy false positives; category and price filters; sort by relevance or
+price; recent searches; favorites;
 product detail by EAN; camera scanning with a manual EAN fallback; a barcode view of the list;
 "Mi lista" keyed by normalized EAN with quantities and totals; saved lists as opt-in Firestore
 snapshots behind a Google sign-in; copying the EAN of every item in the working list or in a

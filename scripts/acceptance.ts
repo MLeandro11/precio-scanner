@@ -342,6 +342,17 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
     `first: ${cocacola[0]?.replace(/\s+/g, ' ').slice(0, 70)}`,
   )
 
+  // Task 7.7: a multi-word query means ALL the words. Before the fix the raw query went to
+  // Fuse as one fuzzy pattern and `coca 2,5` did not reach the top 50 at all (0/10 here).
+  const multiword = (await search('coca 2,5')).slice(0, 10)
+  const multiwordHits = multiword.filter((t) => /coca.*2[.,]5/i.test(t)).length
+  record(
+    'SEARCH-multi-word',
+    multiwordHits >= 1,
+    `"coca 2,5" -> ${multiwordHits}/10 in the top 10 match /coca.*2[.,]5/i`,
+    `first: ${multiword[0]?.replace(/\s+/g, ' ').slice(0, 70)}`,
+  )
+
   // Search state is URL-driven: opening a product and going back must restore
   // the same results (regression guard for the back-navigation restore).
   const navBefore = await search('serenisma')

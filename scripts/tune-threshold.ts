@@ -6,6 +6,12 @@
  * exact object and rebuilds the engine once per candidate `threshold`, so the sweep
  * measures what the app ships rather than a copy that can drift from it.
  *
+ * Since 7.7 the shipped engine uses Fuse's extended search, so EVERY query below is
+ * searched through the shipped path: `buildQueryPattern(q.query)` neutralizes each user
+ * token into a literal term and joins them with the space separator (AND). A SAFETY block
+ * then proves, at the production threshold, that adversarial single tokens still resolve
+ * to exactly what the pre-7.7 raw parser returns.
+ *
  * For every query in `scripts/tuning-queries.ts` it reports the rank of the first result
  * whose name matches the query's expectation, plus the total match count. A higher
  * threshold is looser: better recall, more noise. The useful answer is the TIGHTEST
@@ -22,11 +28,14 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import Fuse from 'fuse.js'
-import { FUSE_OPTIONS, DEFAULT_LIMIT } from '../src/lib/searchEngine.ts'
-import { ALL_QUERIES } from './tuning-queries.ts'
+import { FUSE_OPTIONS, DEFAULT_LIMIT, buildQueryPattern } from '../src/lib/searchEngine.ts'
+import { ALL_QUERIES, OPERATOR_PROBES } from './tuning-queries.ts'
 import type { Catalog, Producto } from '../src/lib/types.ts'
 
 const DEFAULT_SWEEP = [0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
+
+/** Fuse's extended-search metacharacters: a token carrying one of these is adversarial. */
+const META_RE = /['$!=^|"\\]/
 
 interface Args {
   top: number
@@ -62,6 +71,67 @@ function engineAt(products: Producto[], index: unknown, threshold: number): Fuse
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     Fuse.parseIndex<Producto>(serialized as any),
   )
+}
+
+/**
+ * The pre-7.7 reference engine: same products, same serialized index and same options,
+ * only `useExtendedSearch` back to false. A single user token must behave identically
+ * here and in the shipped engine — that equivalence is the whole safety proof.
+ */
+function rawEngineAt(products: Producto[], index: unknown, threshold: number): Fuse<Producto> {
+  const serialized = (index as { fuseIndex?: unknown } | null)?.fuseIndex ?? index
+  return new Fuse<Producto>(
+    products,
+    { ...FUSE_OPTIONS, threshold, useExtendedSearch: false },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    Fuse.parseIndex<Producto>(serialized as any),
+  )
+}
+
+/**
+ * The catalog's own adversarial tokens: every distinct whitespace token of every `nombre`
+ * that carries one of Fuse's extended-search metacharacters. Pure and derived from the
+ * shipped data, so the safety set cannot drift away from the catalog.
+ */
+export function catalogMetacharTokens(products: Producto[]): string[] {
+  const tokens = new Set<string>()
+  for (const product of products) {
+    const nombre = String(product.nombre ?? '')
+    if (!META_RE.test(nombre)) continue
+    for (const token of nombre.split(/\s+/)) {
+      if (token && META_RE.test(token)) tokens.add(token)
+    }
+  }
+  return [...tokens]
+}
+
+interface SafetyRow {
+  token: string
+  escapedTotal: number
+  rawTotal: number
+  ok: boolean
+}
+
+/**
+ * The 7.7 safety proof at the production threshold: every adversarial single token must
+ * return exactly what the pre-7.7 raw (non-extended) engine returns. Equivalence is the
+ * evidence, not a maximum-total ceiling: a ceiling catches the exploding direction
+ * (`!coca` -> all 20,294 products) and stays blind to the collapsing one (`=coca` -> 0),
+ * and both are the same bug — input read as a query language.
+ */
+function runSafetyBlock(
+  products: Producto[],
+  index: unknown,
+): { ok: boolean; rows: SafetyRow[] } {
+  const shipped = engineAt(products, index, FUSE_OPTIONS.threshold)
+  const raw = rawEngineAt(products, index, FUSE_OPTIONS.threshold)
+  const tokens = [...OPERATOR_PROBES, ...catalogMetacharTokens(products)]
+  const rows = tokens.map((token) => {
+    const escapedTotal = shipped.search(buildQueryPattern(token)).length
+    const rawTotal = raw.search(token).length
+    return { token, escapedTotal, rawTotal, ok: escapedTotal === rawTotal }
+  })
+  return { ok: rows.every((row) => row.ok), rows }
 }
 
 /**
@@ -114,13 +184,14 @@ function main(): void {
     const counts: number[] = []
     const window: number[] = []
     for (const q of ALL_QUERIES) {
-      const raw = fuse.search(q.query, { limit: args.limit })
+      const pattern = buildQueryPattern(q.query)
+      const raw = fuse.search(pattern, { limit: args.limit })
       const items = raw.map((r) => r.item)
       column.push(rankOf(items, q.expect))
       const topN = items.slice(0, args.top)
       window.push(topN.filter((p) => q.expect.test(p.nombre)).length)
       // total matches, independent of the fetch limit
-      counts.push(fuse.search(q.query).length)
+      counts.push(fuse.search(pattern).length)
     }
     ranks.push(column)
     totals.push(counts)
@@ -153,6 +224,33 @@ function main(): void {
   console.log()
   console.log(pad('matches (total)', labelWidth) + args.sweep.map((_, ti) => pad(String(totals[ti].reduce((a, b) => a + b, 0)), 9)).join(''))
 
+  // SAFETY: prove the shipped extended path reads adversarial single tokens literally.
+  const safety = runSafetyBlock(catalog.products, index)
+  const catalogProbes = safety.rows.length - OPERATOR_PROBES.length
+  console.log()
+  console.log(
+    'SAFETY — operator and catalog metacharacter tokens are LITERAL at the production threshold',
+  )
+  console.log('  This is a proof of literal behaviour: the escaped (shipped) path must return the')
+  console.log('  same match count as the raw pre-7.7 engine, for every probe. Both failure')
+  console.log('  directions matter — `!coca` explodes to all products while `=coca` collapses to')
+  console.log('  0 — so a max-total ceiling would only catch the exploding one.')
+  const safetyLabelWidth = Math.max(labelWidth, ...safety.rows.map((r) => r.token.length + 2))
+  console.log(pad('token', safetyLabelWidth) + pad('escaped', 10) + pad('raw', 10) + 'ok')
+  console.log('-'.repeat(safetyLabelWidth + 22))
+  for (const row of safety.rows) {
+    console.log(
+      pad(`"${row.token}"`, safetyLabelWidth) +
+        pad(String(row.escapedTotal), 10) +
+        pad(String(row.rawTotal), 10) +
+        (row.ok ? 'ok' : 'MISMATCH'),
+    )
+  }
+  console.log(
+    `${safety.rows.length} probes (${OPERATOR_PROBES.length} operator + ${catalogProbes} from the catalog) — ` +
+      (safety.ok ? 'every probe literal' : 'MISMATCH: input is being read as a query language'),
+  )
+
   // The tightest threshold that still satisfies every expectation inside the window.
   const passing = args.sweep.filter((_, ti) =>
     ranks[ti].every((rank) => rank !== null && rank <= args.top),
@@ -163,7 +261,17 @@ function main(): void {
   console.log()
   const production = FUSE_OPTIONS.threshold
 
-  if (passing.length === 0) {
+  if (!safety.ok) {
+    // A passing threshold here would be a lie: the rank/precision tables above measure a
+    // parser that reads user input as a query language.
+    const bad = safety.rows.filter((row) => !row.ok)
+    console.log('VERDICT: META-SAFETY FAILED — no threshold verdict is reported.')
+    console.log(
+      `  ${bad.length} probe(s) differ from the raw engine, e.g. "${bad[0].token}": ` +
+        `escaped ${bad[0].escapedTotal} vs raw ${bad[0].rawTotal}.`,
+    )
+    console.log('  Fix the escaping before trusting any rank or precision number above.')
+  } else if (passing.length === 0) {
     console.log('VERDICT: no candidate threshold satisfies every expectation.')
     console.log('  Either the expectation is unreachable in this catalog, or the options')
     console.log('  themselves (keys/weights/ignoreLocation) need revisiting, not just the')

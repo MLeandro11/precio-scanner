@@ -70,3 +70,22 @@ export const PERSONAL_QUERIES: TuningQuery[] = [
 ]
 
 export const ALL_QUERIES: TuningQuery[] = [...SPEC_QUERIES, ...PERSONAL_QUERIES]
+
+/**
+ * Single-token queries that must stay LITERAL. Fuse's extended search reserves
+ * ' = ^ ! $ | ", and a bare token starting with one of them changes the whole query:
+ * measured on the real catalog, `!coca` returned all 20,294 products and `"a"` returned
+ * 20,331. The harness proves these are literal by equivalence with the raw engine, not by
+ * a magic ceiling.
+ */
+export const OPERATOR_PROBES: string[] = [
+  '!coca',
+  '=coca',
+  "'coca",
+  '^coca',
+  'coca$',
+  'coca|zero',
+  '"a"',
+  'a"b',
+  '\\',
+]
