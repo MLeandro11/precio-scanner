@@ -14,6 +14,7 @@
     "test": "vitest run",
     "normalize": "node scripts/normalize-catalog.ts",
     "generate-index": "node scripts/generate-index.ts",
+    "refresh": "node scripts/refresh-catalog.ts",
     "acceptance": "node scripts/acceptance.ts",
     "typecheck": "tsc --noEmit"
   },
