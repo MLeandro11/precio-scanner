@@ -15,7 +15,7 @@
  */
 import type { ProductoResponse } from './schema'
 
-export const PRECIOS_CLAROS_BASE_URL = 'https://d3e6htiiul5ek.cloudfront.net'
+export const PRECIOS_CLAROS_BASE_URL = 'https://d3e6htiiul5ek9.cloudfront.net'
 export const PRODUCTO_PATH = '/prod/producto'
 /** Documented API cap. */
 export const MAX_LIMIT_PERMITIDO = 50

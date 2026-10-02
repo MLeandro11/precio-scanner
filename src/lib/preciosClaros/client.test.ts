@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   PreciosClarosError,
+  PRECIOS_CLAROS_BASE_URL,
   buildProductoUrl,
   createPreciosClarosClient,
   MAX_LIMIT_PERMITIDO,
@@ -32,6 +33,26 @@ async function captureError(promise: Promise<unknown>): Promise<PreciosClarosErr
 function params(url: string): URLSearchParams {
   return new URL(url).searchParams
 }
+
+describe('API host', () => {
+  /**
+   * The literal is the point. The first version of this module shipped
+   * `d3e6htiiul5ek` — one character short of the distribution host recorded in
+   * the spike doc — and every other test in this file still passed, because
+   * they parse the query with `new URL` and never look at the host. Asserting
+   * the constant against itself would not have caught it either: only a host
+   * written out by hand is evidence that the host is right.
+   */
+  it('targets the distribution host verified against the live API', () => {
+    expect(PRECIOS_CLAROS_BASE_URL).toBe('https://d3e6htiiul5ek9.cloudfront.net')
+
+    const url = buildProductoUrl({
+      idProducto: '7790895000430',
+      selector: { lat: -51.62, lng: -69.24 },
+    })
+    expect(url.startsWith('https://d3e6htiiul5ek9.cloudfront.net/prod/producto?')).toBe(true)
+  })
+})
 
 describe('buildProductoUrl', () => {
   it('builds a lat/lng query with id_producto, limit and offset', () => {

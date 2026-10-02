@@ -209,6 +209,39 @@ No verificable y por lo tanto abierto: autenticidad byte a byte de las fixtures 
 referencia) y comportamiento de red real (WAF, timeout real) — solo se ejercitó el `fetch`
 injectable.
 
+### Defecto encontrado en uso real (2026-10-02): faltaba un carácter en el host
+
+**Síntoma**: al tocar "Ver precios cerca mío", la UI mostraba siempre *"No pudimos traer los precios
+ahora."*
+
+**Causa raíz**: `PRECIOS_CLAROS_BASE_URL` decía `https://d3e6htiiul5ek.cloudfront.net`; el host
+verificado en el spike es `https://d3e6htiiul5ek9.cloudfront.net`. **Un dígito perdido**: ese nombre
+no existe, así que el `fetch` moría en DNS y se traducía a un error `network` — que la UI reporta
+correctamente. **El endpoint se usaba bien**; el hostname estaba mal escrito.
+
+**Por qué 39 tests no lo vieron**: todos inyectan `fetchImpl`, y el único test que mira la URL la
+parsea con `new URL(url).searchParams`, o sea que afirma los **parámetros** y nunca el **host**. Un
+test que compara la constante consigo misma tampoco lo habría cazado. Es exactamente el hueco que
+este doc declaraba abierto: *comportamiento de red real, solo se ejercitó el `fetch` inyectable*.
+
+**Medición real, no inferida**:
+- DNS: `d3e6htiiul5ek` no tiene registro A, ni en el resolver de WSL, ni en Cloudflare DoH, ni en
+  Google DoH (mientras el apex `cloudfront.net` sí devuelve sus NS: la ruta DNS está sana). Con el
+  `9`, cuatro IPs.
+- Desde Windows (el entorno del navegador): con el `9`, **HTTP 200, 42.666 bytes**, `status: 200`,
+  `total: 597`, 50 sucursales.
+- **CORS, el riesgo abierto de verdad**: `access-control-allow-origin: *` en el GET con `Origin`, y
+  el preflight `OPTIONS` responde 200 con `access-control-allow-methods: GET,OPTIONS`. El navegador
+  puede llamar a la API directo: no hace falta proxy.
+
+**Fix**: el host corregido, más un test con el literal escrito a mano (`client.test.ts`,
+`describe('API host')`). Probado por mutación: al re-introducir el typo ese test falla; con el fix,
+10/10 en `client.test.ts` y **320 tests / 27 archivos / 0 fallos** en total.
+
+**Lección**: afirmar la forma de la query no dice nada sobre la dirección a la que se llama. Un test
+de URL que parsea los parámetros y nunca el host es un test que no puede fallar por el motivo que
+importa.
+
 **Decisión "sin delta" aplicada en el núcleo (2026-10-01), después de la verificación**: se eliminó
 el campo `deltaVsMasBarato` de `SucursalPrecio` — no solo se ocultó en la UI. Re-corrida tras el
 cambio: **24 archivos / 270 tests / 0 fallos**, `npm run typecheck` limpio, y un test afirma
