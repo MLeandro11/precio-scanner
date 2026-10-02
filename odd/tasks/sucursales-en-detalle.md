@@ -367,6 +367,28 @@ cambio silencioso.
 **Estado**: `npm run typecheck` limpio, **344 tests / 28 archivos / 0 fallos** (baseline antes del
 slice 3: 320/27).
 
+**Verificado en PRODUCCIÓN (2026-10-02), en navegador real, con datos reales de la API**. El gate
+E2E del repo (`npm run acceptance`, 53/53 PASS) **no alcanza esta sección**: no concede geolocalización
+y la sección solo aparece después de un tap. Así que se probó a mano contra
+`https://mleandro11.github.io/precio-scanner`, concediendo `geolocation` en Río Gallegos
+(-51.6226, -69.2181) y tocando el CTA:
+
+- **EAN 7790070621856** (Ravioles La Salteña, se vende en la ciudad) → live region
+  *"Encontramos 10 sucursales en Rio Gallegos y 40 más baratas en otras ciudades. Se muestran 8 de Rio
+  Gallegos y 8 de otras ciudades."*; subtítulo `En Rio Gallegos` con la primera fila **La Anónima, Av.
+  Roca 973, $4.950 a 0,22 km** y las 10 de la ciudad ordenadas por distancia al empatar el precio
+  (0,22 → 2,18 km); `Más baratas en otras ciudades` con **Río Grande, $4.700 a 259,56 km**; y los dos
+  topes por grupo (*"Mostrando las 8 más baratas de 10"* / *"…de 40"*).
+- **EAN 7790895000430** (Coca Cola 1,5L, **no** se vende en la ciudad) → live region *"No hay
+  sucursales cerca tuyo. Las 50 más baratas están lejos. Se muestran 8."*; subtítulo `Las más baratas`
+  con una sola lista y 8 filas (*"Mostrando las 8 más baratas de 50"*); la más cercana es **Rada Tilly
+  a 645,35 km** y aparece **sexta** porque es $440 más cara que Viedma a 1.293 km — el orden por precio
+  dentro del grupo "otras ciudades", que es lo que ese subtítulo promete. **La app no declara
+  ninguna ciudad**, que era el objetivo del umbral.
+
+Queda así cerrado el hueco que la verificación había declarado: el camino tap → geolocalización →
+lista renderizada **sí** está probado, y en el artefacto publicado, no solo local.
+
 **Riesgo residual declarado**: el tope del grupo cercano y la rama de ambos grupos cortados no están
 pinnados por test; y una sucursal con `distanciaDescripcion` pero `distanciaNumero` nulo se anuncia
 como "sin distancia" aunque la fila muestre el texto. Ninguno de los dos contradice los defectos
