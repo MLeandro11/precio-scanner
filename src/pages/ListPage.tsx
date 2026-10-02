@@ -17,7 +17,8 @@ type ListView = 'lista' | 'codigos'
  * Mi lista de compras. Cada ítem está identificado por su EAN; hoy hay una sola
  * tienda, así que "mejor precio" es el precio del catálogo. Un selector muestra
  * la imagen literal del código de barras de cada producto (para escanear en el
- * almacén). Los avisos y la comparación multi-almacén quedan modelados.
+ * almacén). Los avisos quedan modelados; los precios por sucursal viven en el
+ * detalle del producto.
  */
 export default function ListPage() {
   const [view, setView] = useState<ListView>('lista')
@@ -258,7 +259,7 @@ export default function ListPage() {
           {/* Same `items` the rows render: one derivation of the list, not two. */}
           <CopyAllEansButton eans={eans} className="mt-3" />
           <p className="mt-2 text-[11px] text-text-secondary">
-            Comparación entre almacenes y avisos en futura versión (modelados).
+            Los precios por sucursal se ven en el detalle de cada producto.
           </p>
         </div>
       ) : null}

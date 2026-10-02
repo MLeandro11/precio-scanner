@@ -1,6 +1,7 @@
 # Feature: precio por sucursal en el detalle del producto (`sucursales-en-detalle`)
 
-**Status:** slice 1 (núcleo puro) **hecho, verificado y commiteado** en `45e85b2` · **slice 2 pendiente**
+**Status:** slice 1 (núcleo puro) **hecho, verificado y commiteado** en `45e85b2` · slice 2 **en curso**
+(tracking local en el repo, sin OpenDesign por decisión del usuario 2026-10-02)
 **Started:** 2026-10-01
 **Branch:** `main` (convención del repo: se commitea sobre `main`, no se crea feature branch)
 **Origen:** spike de solo lectura sobre la API de Precios Claros/SEPA, autorizado por el usuario
@@ -117,22 +118,52 @@ Nada más. **Este slice no toca la UI**: ni `ProductPage.tsx`, ni `App.tsx`, ni 
 
 ## Tasks
 
-- [ ] **T1** — `src/lib/preciosClaros/client.ts`: fetch tipado e inyectable. Arma la query
+- [x] **T1** — `src/lib/preciosClaros/client.ts`: fetch tipado e inyectable. Arma la query
       (`id_producto` + `lat`/`lng` o `array_sucursales`, `limit`, `offset`), timeout con
       `AbortSignal.timeout`, **sin retry**, y traduce `status !== 200` del body a un error tipado.
-      Nunca devuelve datos si `status !== 200`.
-- [ ] **T2** — `src/lib/preciosClaros/schema.ts`: tipos de la respuesta + validación defensiva
+      Nunca devuelve datos si `status !== 200`. → commit `45e85b2`
+- [x] **T2** — `src/lib/preciosClaros/schema.ts`: tipos de la respuesta + validación defensiva
       (`precioLista` solo se acepta si es número finito; `message` y `producto.msg` contemplados).
-- [ ] **T3** — `src/lib/preciosClaros/map.ts`: DTO → `SucursalPrecio[]`. Compone la clave
-      `comercioId-banderaId-id`, descarta sucursales sin precio, ordena por precio ascendente y
-      calcula `deltaVsMasBarato`. Función **pura**, sin red ni React.
-- [ ] **T4** — `src/lib/preciosClaros/estado.ts`: deriva los tres estados de la sección anterior.
-      Puro y testeable.
-- [ ] **T5** — Tests colocados (`*.test.ts`, vitest en Node) con las fixtures reales de
+      → commit `45e85b2`
+- [x] **T3** — `src/lib/preciosClaros/map.ts`: DTO → `SucursalPrecio[]`. Compone la clave
+      `comercioId-banderaId-id`, descarta sucursales sin precio y ordena por precio ascendente.
+      Función **pura**, sin red ni React. (El `deltaVsMasBarato` que decía este task se **eliminó**
+      después por la decisión "sin delta".) → commit `45e85b2`
+- [x] **T4** — `src/lib/preciosClaros/estado.ts`: deriva los tres estados de la sección anterior.
+      Puro y testeable. → commit `45e85b2`
+- [x] **T5** — Tests colocados (`*.test.ts`, vitest en Node) con las fixtures reales de
       `fixtures/`: orden por precio y no por distancia, clave compuesta, los tres estados, `0`/`NaN`
       nunca aceptados como precio, `status !== 200` con HTTP 200 → error, y la fixture mixta de
-      `array_sucursales` (una sucursal con precio + una con `message`).
-- [ ] **T6** — Verificación: `npm run typecheck` y `npm test` en verde, sin regresiones.
+      `array_sucursales` (una sucursal con precio + una con `message`). → commit `45e85b2`
+- [x] **T6** — Verificación: `npm run typecheck` y `npm test` en verde, sin regresiones.
+      → 270 tests / 0 fallos, verificado de forma independiente. → commit `45e85b2`
+
+### Slice 2 — montar la sección (tareas)
+
+- [ ] **S1** — `src/hooks/useUbicacion.ts` (nuevo): permiso de geolocalización bajo demanda.
+      Union de estado calcado del precedente de `useBarcodeScanner` (`ScanStatus`):
+      `'unsupported' | 'idle' | 'requesting' | 'ready' | 'denied' | 'error'`. `request()` dispara
+      `getCurrentPosition` **una vez, sin retry**. Las coordenadas viven **solo en memoria**:
+      nunca `localStorage`, nunca `sessionStorage`. Distingue denegación (código 1) de error (2/3)
+      y de `unsupported` (sin `navigator.geolocation`).
+- [ ] **S2** — `src/hooks/useSucursalesCerca.ts` (nuevo): dado `{ ean, coords }`, llama
+      `createPreciosClarosClient().fetchProducto(...)`, pasa por `mapSucursales` y `deriveEstado`.
+      Estados `idle | loading | ready | error`, con guarda `alive` para descartar la respuesta si
+      el componente se desmontó (convención del repo: `useResolveEans`). **Sin retry.**
+      El cliente `fetch` es inyectable para los tests.
+- [ ] **S3** — `src/components/SucursalesSection.tsx` (nuevo): CTA + los tres estados + los caminos
+      de fallo. Solo tokens del design system, sin prefijos responsive, sin scroll horizontal,
+      todo control interactivo ≥44px, y el contenido legible en `text-secondary`.
+- [ ] **S4** — Montar en `src/pages/ProductPage.tsx`: reemplazar el hint que hoy dice que la
+      comparación "llega cuando haya datos de más de una tienda" (queda falso) y renderizar la
+      sección **solo si el producto tiene un EAN usable** (≥6 dígitos); los productos sin código de
+      barras no muestran CTA.
+- [ ] **S5** — Tests: `useUbicacion` con `navigator.geolocation` mockeado y por archivo
+      `// @vitest-environment jsdom` (no hay config de vitest: el entorno se opta por archivo);
+      `useSucursalesCerca` con `fetchImpl` inyectado; y la sección con los tres estados, denegación,
+      error y producto sin EAN.
+- [ ] **S6** — Verificación: `npm run typecheck` y `npm test` en verde contra el baseline de
+      **270 tests**, sin regresiones.
 
 ## Criterios de aceptación (testeables)
 
@@ -234,8 +265,8 @@ va en su propio slice**: necesita `scripts/generate-localidades.ts` + `public/da
 (`9 De Julio` / `9 de julio`, `ACASSUSO` / `Acassuso`).
 
 **Allowed edit surfaces del slice 2**: `src/pages/ProductPage.tsx`, `src/hooks/useUbicacion.ts`
-(nuevo), `src/components/***` (componente nuevo de la tabla). Nada más: no tocar el worker, el
-`catalogLoader` ni el catálogo local.
+(nuevo), `src/hooks/useSucursalesCerca.ts` (nuevo), `src/components/SucursalesSection.tsx` (nuevo) y
+sus `*.test.ts(x)`. Nada más: no tocar el worker, el `catalogLoader` ni el catálogo local.
 
 **Riesgo abierto heredado del spike**: si el resultado de la comparación es siempre "el almacén
 está mejor", la feature pierde sentido. Medido en Río Gallegos: el almacén ganaba 8 de 10 ítems y

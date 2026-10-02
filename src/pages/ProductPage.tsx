@@ -4,6 +4,7 @@ import { ArrowLeft, Check, History, Plus, Star } from 'lucide-react'
 import { toast } from 'sonner'
 import Brand from '../components/Brand'
 import ProductImage from '../components/ProductImage'
+import SucursalesSection from '../components/SucursalesSection'
 import { formatPrice } from '../components/ProductCard'
 import Button from '../components/ui/Button'
 import { useCatalog } from '../App'
@@ -30,7 +31,9 @@ async function resolveParam(client: WorkerClient, param: string): Promise<Produc
 /**
  * Detalle de producto (ruta /producto/:ean). Resuelve el producto por EAN o id
  * desde el catálogo (hoy una sola tienda), muestra su código y permite
- * agregarlo a la lista. La comparación multi-almacén está modelada, sin datos.
+ * agregarlo a la lista. Si el producto tiene un EAN usable, monta además
+ * `SucursalesSection`, que pide la ubicación al toque y compara el mismo código
+ * contra las sucursales cercanas.
  */
 export default function ProductPage() {
   const { ean } = useParams<{ ean: string }>()
@@ -84,6 +87,10 @@ export default function ProductPage() {
 
   const inList = isInList(product.barcode || product.id)
   const item = items.find((i) => i.ean === normalizeEan(product.barcode || product.id))
+  // Per-branch prices need a real EAN; a product keyed only by catalog id has no
+  // barcode to look up, so it renders no section and no CTA.
+  const eanDigits = normalizeEan(product.barcode).replace(/\D/g, '')
+  const hasUsableEan = eanDigits.length >= 6
 
   return (
     <main className="safe-top mx-auto w-full max-w-lg px-4 pb-6">
@@ -150,17 +157,15 @@ export default function ProductPage() {
           ) : null}
         </div>
 
-        {/* price — single store today; multi-store comparison lands with data */}
+        {/* catálogo local — los precios por sucursal viven en SucursalesSection */}
         <div className="rounded-2xl border border-border bg-surface-raised p-4">
           <p className="text-xs text-text-secondary">Precio hoy</p>
           <p className="tnum mt-1 text-2xl font-extrabold text-text-primary">
             {formatPrice(product.precio)}
           </p>
-          <p className="mt-2 text-xs text-text-secondary">
-            Comparación entre almacenes y historial están modelados; llegan cuando
-            haya datos de más de una tienda.
-          </p>
         </div>
+
+        {hasUsableEan ? <SucursalesSection ean={eanDigits} /> : null}
       </div>
 
       {/* Add to list */}
