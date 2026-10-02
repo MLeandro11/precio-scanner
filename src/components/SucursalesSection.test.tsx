@@ -370,13 +370,18 @@ describe('SucursalesSection ready states', () => {
     expect(rows()[0]).toContain('Río Gallegos')
     expect(rows()[0]).toContain('2,5 km')
     expect(rows()[0]).toContain('$ 1.234')
+    // A product carried by exactly one branch in the city: the announcement must
+    // agree in number instead of saying "1 sucursales".
+    expect(liveText()).toBe('Encontramos 1 sucursal en Río Gallegos.')
     // The distance is spec-important content, so it rides on `text-secondary`;
-    // the address stays a hint on `text-muted`.
-    const distancia = Array.from(container.querySelectorAll('p')).find((p) =>
+    // the address stays a hint on `text-muted`. Scope to the row: the live
+    // region also carries the locality now, so an unscoped `p` lookup would
+    // match the announcement instead of the row.
+    const distancia = Array.from(container.querySelectorAll('li p')).find((p) =>
       (p.textContent ?? '').includes('2,5 km'),
     )
     expect(distancia?.className).toContain('text-text-secondary')
-    const direccion = Array.from(container.querySelectorAll('p')).find((p) =>
+    const direccion = Array.from(container.querySelectorAll('li p')).find((p) =>
       (p.textContent ?? '').includes('Río Gallegos'),
     )
     expect(direccion?.className).toContain('text-text-muted')
@@ -457,6 +462,228 @@ describe('SucursalesSection ready states', () => {
   })
 })
 
+describe('SucursalesSection — agrupación por cercanía', () => {
+  /** Two near (Río Gallegos) and two far branches, cheapest-first overall. */
+  function nearAndFar(): BranchInput[] {
+    return [
+      { id: 'f1', banderaDescripcion: 'Lejos A', localidad: 'Rio Grande', distanciaNumero: 300, precio: 100 },
+      { id: 'f2', banderaDescripcion: 'Lejos B', localidad: 'Rada Tilly', distanciaNumero: 700, precio: 200 },
+      { id: 'c1', banderaDescripcion: 'Cerca A', localidad: 'Rio Gallegos', distanciaNumero: 1, precio: 500 },
+      { id: 'c2', banderaDescripcion: 'Cerca B', localidad: 'Rio Gallegos', distanciaNumero: 2, precio: 600 },
+    ]
+  }
+
+  it('con grupo cercano: muestra los dos subtítulos, el cercano primero, en orden de DOM', async () => {
+    succeed()
+    const { client, fetchProducto } = injectedClient()
+    fetchProducto.mockResolvedValue(responseFrom(nearAndFar()))
+
+    await renderSection(client)
+    await click(button('Ver precios cerca mío'))
+
+    const headings = Array.from(container.querySelectorAll('h3')).map((h) => h.textContent)
+    expect(headings).toEqual(['En Rio Gallegos', 'Más baratas en otras ciudades'])
+
+    // The far rows are cheaper, but the near group is rendered first: the section
+    // is about closeness, and a price-first DOM order was the measured defect.
+    const rendered = rows()
+    expect(rendered).toHaveLength(4)
+    expect(rendered[0]).toContain('Cerca A')
+    expect(rendered[1]).toContain('Cerca B')
+    expect(rendered[2]).toContain('Lejos A')
+    expect(rendered[3]).toContain('Lejos B')
+
+    // The sub-headings read on `text-secondary`, never the faint `text-muted`,
+    // and the section heading stays the only h2.
+    for (const heading of Array.from(container.querySelectorAll('h3'))) {
+      expect(heading.className).toContain('text-text-secondary')
+      expect(heading.className).not.toContain('text-text-muted')
+    }
+    expect(container.querySelectorAll('h2')).toHaveLength(1)
+  })
+
+  it('sin grupo cercano: línea honesta y una sola lista, sin reclamar ciudad', async () => {
+    succeed()
+    const { client, fetchProducto } = injectedClient()
+    fetchProducto.mockResolvedValue(
+      responseFrom([
+        { id: 'f1', banderaDescripcion: 'Lejos A', localidad: 'Rio Grande', distanciaNumero: 300, precio: 100 },
+        { id: 'f2', banderaDescripcion: 'Lejos B', localidad: 'Rada Tilly', distanciaNumero: 700, precio: 200 },
+      ]),
+    )
+
+    await renderSection(client)
+    await click(button('Ver precios cerca mío'))
+
+    expect(text()).toContain('No hay sucursales cerca tuyo.')
+    expect(text()).toContain('Las más baratas')
+    expect(text()).not.toContain('En Rio Grande')
+    expect(container.querySelectorAll('ul')).toHaveLength(1)
+    expect(container.querySelectorAll('h3')).toHaveLength(1)
+    expect(rows()).toHaveLength(2)
+  })
+
+  it('el tope de 8 aplica por grupo: el cercano se corta con su resumen, el lejano no', async () => {
+    const cerca: BranchInput[] = Array.from({ length: 10 }, (_, i) => ({
+      id: `c${i + 1}`,
+      banderaDescripcion: `Cerca ${i + 1}`,
+      localidad: 'Rio Gallegos',
+      distanciaNumero: i + 1,
+      precio: 500 + i,
+    }))
+    const lejos: BranchInput[] = [
+      { id: 'f1', banderaDescripcion: 'Lejos 1', localidad: 'Rio Grande', distanciaNumero: 300, precio: 100 },
+      { id: 'f2', banderaDescripcion: 'Lejos 2', localidad: 'Rada Tilly', distanciaNumero: 700, precio: 200 },
+      { id: 'f3', banderaDescripcion: 'Lejos 3', localidad: 'Ushuaia', distanciaNumero: 900, precio: 300 },
+    ]
+    succeed()
+    const { client, fetchProducto } = injectedClient()
+    fetchProducto.mockResolvedValue(responseFrom([...cerca, ...lejos]))
+
+    await renderSection(client)
+    await click(button('Ver precios cerca mío'))
+
+    // 8 near (capped) + 3 far (uncapped, so no second summary).
+    expect(rows()).toHaveLength(11)
+    expect(text()).toContain('Mostrando las 8 más baratas de 10.')
+    expect(text().match(/Mostrando las/g)).toHaveLength(1)
+    expect(text()).toContain('Cerca 8')
+    expect(text()).not.toContain('Cerca 9')
+    expect(text()).toContain('Lejos 3')
+  })
+
+  it('el tope de 8 también resume un grupo lejano grande, de forma independiente', async () => {
+    const cerca: BranchInput[] = [
+      { id: 'c1', banderaDescripcion: 'Cerca 1', localidad: 'Rio Gallegos', distanciaNumero: 1, precio: 900 },
+      { id: 'c2', banderaDescripcion: 'Cerca 2', localidad: 'Rio Gallegos', distanciaNumero: 2, precio: 901 },
+    ]
+    const lejos: BranchInput[] = Array.from({ length: 10 }, (_, i) => ({
+      id: `f${i + 1}`,
+      banderaDescripcion: `Lejos ${i + 1}`,
+      localidad: 'Rio Grande',
+      distanciaNumero: 300 + i,
+      precio: 100 + i,
+    }))
+    succeed()
+    const { client, fetchProducto } = injectedClient()
+    fetchProducto.mockResolvedValue(responseFrom([...cerca, ...lejos]))
+
+    await renderSection(client)
+    await click(button('Ver precios cerca mío'))
+
+    // Both groups show their own cap independently: 2 near rows (no summary) +
+    // 8 far rows (with summary), never a single shared budget.
+    expect(rows()).toHaveLength(10)
+    expect(text().match(/Mostrando las/g)).toHaveLength(1)
+    expect(text()).toContain('Mostrando las 8 más baratas de 10.')
+    expect(text()).toContain('Cerca 2')
+    expect(text()).toContain('Lejos 8')
+    expect(text()).not.toContain('Lejos 9')
+  })
+
+  it('anuncio: nombra los dos grupos cuando hay grupo cercano', async () => {
+    succeed()
+    const { client, fetchProducto } = injectedClient()
+    fetchProducto.mockResolvedValue(responseFrom(nearAndFar()))
+
+    await renderSection(client)
+    await click(button('Ver precios cerca mío'))
+
+    expect(liveRegions()).toHaveLength(1)
+    expect(liveText()).toBe(
+      'Encontramos 2 sucursales en Rio Gallegos y 2 más baratas en otras ciudades.',
+    )
+  })
+
+  it('anuncio: omite la cláusula lejana cuando no hay otras ciudades', async () => {
+    succeed()
+    const { client, fetchProducto } = injectedClient()
+    fetchProducto.mockResolvedValue(
+      responseFrom([
+        { id: 'c1', banderaDescripcion: 'Cerca A', localidad: 'Rio Gallegos', distanciaNumero: 1, precio: 500 },
+        { id: 'c2', banderaDescripcion: 'Cerca B', localidad: 'Rio Gallegos', distanciaNumero: 2, precio: 600 },
+      ]),
+    )
+
+    await renderSection(client)
+    await click(button('Ver precios cerca mío'))
+
+    expect(liveText()).toBe('Encontramos 2 sucursales en Rio Gallegos.')
+  })
+
+  it('anuncio: sin grupo cercano cuenta cuántas quedan lejos', async () => {
+    succeed()
+    const { client, fetchProducto } = injectedClient()
+    fetchProducto.mockResolvedValue(
+      responseFrom([
+        { id: 'f1', banderaDescripcion: 'Lejos A', localidad: 'Rio Grande', distanciaNumero: 300, precio: 100 },
+        { id: 'f2', banderaDescripcion: 'Lejos B', localidad: 'Rada Tilly', distanciaNumero: 700, precio: 200 },
+      ]),
+    )
+
+    await renderSection(client)
+    await click(button('Ver precios cerca mío'))
+
+    expect(liveRegions()).toHaveLength(1)
+    expect(liveText()).toBe('No hay sucursales cerca tuyo. Las 2 más baratas están lejos.')
+  })
+
+  it('anuncio: una sola sucursal lejana concuerda en singular', async () => {
+    succeed()
+    const { client, fetchProducto } = injectedClient()
+    fetchProducto.mockResolvedValue(
+      responseFrom([
+        { id: 'f1', banderaDescripcion: 'Lejos A', localidad: 'Rio Grande', distanciaNumero: 300, precio: 100 },
+      ]),
+    )
+
+    await renderSection(client)
+    await click(button('Ver precios cerca mío'))
+
+    expect(rows()).toHaveLength(1)
+    expect(liveRegions()).toHaveLength(1)
+    expect(liveText()).toContain('1 más barata')
+    expect(liveText()).not.toContain('1 más baratas')
+  })
+
+  it('anuncio: un grupo cortado reporta el total y cuántas se muestran', async () => {
+    // 10 far branches with real distances: the farness claim is valid, the group
+    // is capped at 8, and the announcement must carry BOTH numbers.
+    const branches: BranchInput[] = Array.from({ length: 10 }, (_, i) => ({
+      id: String(i + 1),
+      banderaDescripcion: `Lejos ${i + 1}`,
+      localidad: 'Rio Grande',
+      distanciaNumero: 300 + i,
+      precio: (i + 1) * 100,
+    }))
+    succeed()
+    const { client, fetchProducto } = injectedClient()
+    fetchProducto.mockResolvedValue(responseFrom(branches))
+
+    await renderSection(client)
+    await click(button('Ver precios cerca mío'))
+
+    expect(rows()).toHaveLength(8)
+    expect(liveRegions()).toHaveLength(1)
+    expect(liveText()).toBe(
+      'No hay sucursales cerca tuyo. Las 10 más baratas están lejos. Se muestran 8.',
+    )
+  })
+
+  it('anuncio: no menciona tope cuando ningún grupo está cortado', async () => {
+    succeed()
+    const { client, fetchProducto } = injectedClient()
+    fetchProducto.mockResolvedValue(responseFrom(nearAndFar()))
+
+    await renderSection(client)
+    await click(button('Ver precios cerca mío'))
+
+    expect(liveRegions()).toHaveLength(1)
+    expect(liveText()).not.toContain('Se muestran')
+    expect(liveText()).not.toContain('Mostrando')
+  })
+})
+
 /**
  * The result must be announced, not just the in-flight step. The loading line
  * lives outside these states, so a live region that only wraps it would either
@@ -497,9 +724,10 @@ describe('SucursalesSection live announcements', () => {
     expect(liveText()).toBe('Buscando precios…')
   })
 
-  it('con-precios: announces the count of rows actually rendered, not the loading text', async () => {
-    // 10 branches, capped at 8: announcing the raw total would name two rows
-    // the user cannot see.
+  it('con-precios: sin datos de distancia no afirma lejanía y reporta total y visibles', async () => {
+    // 10 branches, all with no locality and no distance: there is no near group
+    // AND no distance at all, so the announcement reports the total (10) and the
+    // capped count (8) but must never claim the branches are far.
     const branches: BranchInput[] = Array.from({ length: 10 }, (_, i) => ({
       id: String(i + 1),
       banderaDescripcion: `Banner ${i + 1}`,
@@ -514,7 +742,9 @@ describe('SucursalesSection live announcements', () => {
 
     expect(rows()).toHaveLength(8)
     expect(liveRegions()).toHaveLength(1)
-    expect(liveText()).toBe('Encontramos 8 sucursales con precio.')
+    expect(liveText()).not.toContain('lejos')
+    expect(liveText()).toContain('10')
+    expect(liveText()).toContain('8')
     expect(liveText()).not.toContain('Buscando precios…')
   })
 

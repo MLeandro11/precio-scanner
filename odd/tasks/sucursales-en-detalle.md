@@ -306,6 +306,72 @@ está mejor", la feature pierde sentido. Medido en Río Gallegos: el almacén ga
 la canasta completa salía +33,9% en La Anónima. La decisión sobre si la feature se banca es del
 usuario y sigue pendiente.
 
+## Slice 3 — agrupar por cercanía (decidido 2026-10-02)
+
+**El defecto, medido** (no una opinión de diseño): la lista se ordena por precio, así que con el
+fixture de Río Gallegos **las 10 sucursales de la ciudad del usuario aparecen en las posiciones 14 a
+23**, y las 13 primeras están a más de 260 km (Río Grande, $250 más baratas). El usuario está parado
+a **0,62 km** de un almacén y lo primero que ve es otra provincia. El título "sucursales cercanas"
+prometía cercanía y la lista entregaba un ranking nacional de precio. Es la misma trampa que motivó
+borrar el delta —mezclar "más barato" con "cerca tuyo"— pero sobreviviendo en el **orden** en vez
+de en el número.
+
+**Medición de partida**: en `lat-lng-rio-gallegos.json` la más cercana está a **0,62 km** (localidad
+`Rio Gallegos`); en `lat-lng-lejos-644km.json` la más cercana está a **644,83 km** (localidad
+`Rada Tilly`). Las 50 sucursales de ambos fixtures traen `distanciaNumero` y `localidad` completos.
+
+**Decisión del usuario**: **tu ciudad primero, después el resto.**
+
+**Cómo se infiere "tu ciudad" sin reverse geocoding**: la API no dice dónde está el usuario. Se usa
+la **localidad de la sucursal más cercana**, y solo si esa sucursal está dentro de un umbral. Si la
+más cercana está más lejos que el umbral, **no se declara ninguna ciudad** (decirle "Rada Tilly" a
+alguien en Río Gallegos sería una mentira nueva). El umbral es una constante explícita y reversible:
+**50 km**. Justificación basada en la evidencia y no en el gusto: entre "está en tu ciudad" (≤5,35 km,
+el ancho real de las 10 de Río Gallegos) y "no está en tu ciudad" (≥260 km) hay una brecha de dos
+órdenes de magnitud, así que cualquier valor entre ~6 y ~260 km da el mismo resultado con estos
+datos.
+
+- [x] **S7** — `src/lib/preciosClaros/cercania.ts` (nuevo): `agruparPorCercania(sucursales, umbralKm)`
+      → `{ localidad, cerca, lejos }`. Puro, sin red ni React. Preserva el orden recibido (no
+      re-ordena): el orden por precio con empate por cercanía ya lo hizo `mapSucursales`. Reglas: sin
+      sucursales → todo vacío; sin distancias → sin grupo cercano; la más cercana fuera del umbral o
+      sin localidad → sin grupo cercano; la comparación de localidad se normaliza (trim, minúsculas,
+      espacios colapsados) solo para agrupar, y se muestra el valor original de la API.
+- [x] **S8** — `src/components/SucursalesSection.tsx`: en `con-precios`, dos subtítulos
+      (`En {localidad}` y `Más baratas en otras ciudades`) con un tope de 8 filas **por grupo** y su
+      propia línea de resumen. Si no hay grupo cercano, una línea honesta (`No hay sucursales cerca
+      tuyo.`) y una sola lista. El anuncio del live region tiene que describir los dos grupos.
+- [x] **S9** — Tests: `cercania.test.ts` (Node, con los fixtures reales vía `mapSucursales`) para las
+      reglas y los dos casos medidos — Río Gallegos debe dar `cerca` = las 10 de `Rio Gallegos`, y
+      Coca Cola debe dar `localidad: null` con `cerca: []` — más los límites del umbral, la
+      normalización de localidad y el orden preservado; y en `SucursalesSection.test.tsx` los dos
+      subtítulos, el grupo cercano primero y el degradado sin grupo cercano.
+- [x] **S10** — Verificación independiente y commit.
+
+**Verificación (2026-10-02), y lo que encontró**. Corrida independiente sobre el candidato, con
+re-derivación de los fixtures desde el código real (no desde el doc): `cerca[0]` es la sucursal a
+**0,6246 km** y las 10 de `Rio Gallegos` son ahora las primeras filas (antes, posiciones 14–23 detrás
+de 13 sucursales a ≥260 km); Coca Cola da `localidad: null` con `cerca: []`. Las 8 reglas del núcleo
+PASS, y el tope por grupo, el orden de DOM y el único live region también. **Encontró tres defectos
+reales en el anuncio del lector de pantalla**, todos corregidos y pinneados por mutación:
+(1) concordancia en singular (`"Encontramos 1 sucursales"`, `"Las 1 más baratas"`);
+(2) afirmaba `"están lejos"` cuando la API **no informó ninguna distancia** — una afirmación que los
+datos no sostienen; (3) anunciaba el tamaño del grupo ignorando el tope.
+
+**Re-decisión explícita sobre (3)**: la regla anterior de este mismo archivo era *"no nombres filas
+que el usuario no puede ver"*. En vez de elegir un bando, el anuncio ahora dice **las dos cosas**
+cuando un grupo se corta (`Las 10 más baratas están lejos. Se muestran 8.`) y no menciona ningún tope
+cuando no hay corte. Queda registrado acá porque **revierte** una decisión ya verificada: no fue un
+cambio silencioso.
+
+**Estado**: `npm run typecheck` limpio, **344 tests / 28 archivos / 0 fallos** (baseline antes del
+slice 3: 320/27).
+
+**Riesgo residual declarado**: el tope del grupo cercano y la rama de ambos grupos cortados no están
+pinnados por test; y una sucursal con `distanciaDescripcion` pero `distanciaNumero` nulo se anuncia
+como "sin distancia" aunque la fila muestre el texto. Ninguno de los dos contradice los defectos
+corregidos.
+
 ## Notas de ejecución
 
 - Los spikes que originaron esto corrieron con datos reales y están en memoria Engram

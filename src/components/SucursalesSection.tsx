@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { useUbicacion } from '../hooks/useUbicacion'
 import { useSucursalesCerca } from '../hooks/useSucursalesCerca'
 import type { PreciosClarosClient } from '../lib/preciosClaros/client'
+import { agruparPorCercania } from '../lib/preciosClaros/cercania'
 import type { SucursalPrecio } from '../lib/preciosClaros/map'
 import { formatPrice } from './ProductCard'
 import Button from './ui/Button'
@@ -13,7 +14,7 @@ interface SucursalesSectionProps {
   client?: PreciosClarosClient
 }
 
-/** The table never lists more than this many branches; the rest is summarized. */
+/** Each group lists at most this many branches; the rest is summarized per group. */
 const MAX_ROWS = 8
 
 /**
@@ -33,14 +34,53 @@ const COPY = {
   sinPrecio: 'No hay precio informado para este producto.',
   sinDatos: 'Nadie informa este código.',
   reintentar: 'Reintentar',
-  /** Visible-only summary shown when the list is capped. */
+  /** Visible-only summary shown when a group is capped. */
   resumenCortado: (visibles: number, total: number) =>
     `Mostrando las ${visibles} más baratas de ${total}.`,
+  /** Sub-headings for the two groups (h3, secondary to the section title). */
+  enLocalidad: (localidad: string) => `En ${localidad}`,
+  otrasCiudades: 'Más baratas en otras ciudades',
+  lasMasBaratas: 'Las más baratas',
+  /** Honest line when nothing is close enough to call "your city". */
+  sinCerca: 'No hay sucursales cerca tuyo.',
   /**
-   * Announcement-only: a short count of the branches the user can actually see
-   * (the capped list length), never the raw total behind the summary line.
+   * Announcement-only: describes the result in one or two grammatical
+   * sentences. Counts are the group totals, never silently fewer rows; when a
+   * group is capped the announcement also states how many rows are actually
+   * shown, because it must not name rows the user cannot see. When the API
+   * supplied no distance for any branch, the count is reported without claiming
+   * the branches are far.
    */
-  conPrecios: (n: number) => `Encontramos ${n} sucursales con precio.`,
+  conPreciosCerca: (
+    cerca: number,
+    localidad: string,
+    lejos: number,
+    mostradosCerca: number,
+    mostradosLejos: number,
+  ) => {
+    const totalCerca = cerca === 1 ? '1 sucursal' : `${cerca} sucursales`
+    const totalLejos = lejos === 1 ? '1 más barata' : `${lejos} más baratas`
+    const conteo =
+      lejos > 0
+        ? `Encontramos ${totalCerca} en ${localidad} y ${totalLejos} en otras ciudades.`
+        : `Encontramos ${totalCerca} en ${localidad}.`
+    const cortes: string[] = []
+    if (cerca > mostradosCerca) cortes.push(`${mostradosCerca} de ${localidad}`)
+    if (lejos > mostradosLejos) cortes.push(`${mostradosLejos} de otras ciudades`)
+    return cortes.length > 0 ? `${conteo} Se muestran ${cortes.join(' y ')}.` : conteo
+  },
+  conPreciosSinCerca: (lejos: number, mostrados: number, hayDistancia: boolean) => {
+    const totalLejos = lejos === 1 ? '1 más barata' : `${lejos} más baratas`
+    let conteo: string
+    if (!hayDistancia) {
+      conteo = `No hay sucursales cerca tuyo. Hay ${totalLejos}, pero no sabemos a qué distancia.`
+    } else if (lejos === 1) {
+      conteo = `No hay sucursales cerca tuyo. Solo hay ${totalLejos}, y está lejos.`
+    } else {
+      conteo = `No hay sucursales cerca tuyo. Las ${totalLejos} están lejos.`
+    }
+    return lejos > mostrados ? `${conteo} Se muestran ${mostrados}.` : conteo
+  },
 } as const
 
 /** Distance for display: the API's own text, or a km fallback from the number. */
@@ -85,6 +125,28 @@ function SucursalRow({ sucursal }: { sucursal: SucursalPrecio }) {
 }
 
 /**
+ * One group rendered as its own capped `<ul>`. `MAX_ROWS` applies per group, not
+ * globally: each group that overflows carries its own visible summary line.
+ */
+function GrupoLista({ sucursales }: { sucursales: SucursalPrecio[] }) {
+  const visibles = sucursales.slice(0, MAX_ROWS)
+  return (
+    <>
+      <ul className="mt-2">
+        {visibles.map((sucursal) => (
+          <SucursalRow key={sucursal.clave} sucursal={sucursal} />
+        ))}
+      </ul>
+      {sucursales.length > MAX_ROWS ? (
+        <p className="mt-2 text-xs text-text-muted">
+          {COPY.resumenCortado(MAX_ROWS, sucursales.length)}
+        </p>
+      ) : null}
+    </>
+  )
+}
+
+/**
  * SucursalesSection — the two-step "precios por sucursal" flow inside the
  * product-detail price card.
  *
@@ -95,10 +157,12 @@ function SucursalRow({ sucursal }: { sucursal: SucursalPrecio }) {
  * single trigger; clearing the coords on the next attempt is what re-runs the
  * gated fetch after a failure.
  *
- * Ordering and distance are the entire message: the list arrives price-ascending
- * from `mapSucursales` and is rendered as-is. There is deliberately no "más
- * barato" badge, no delta and no saving figure — the project removed the delta
- * concept because mixing "cheapest" with "nearest" measured as misleading.
+ * Ordering and distance are the entire message: within each group the branches
+ * keep the price-ascending order from `mapSucursales`, and the user's own city
+ * is shown first (the section is titled "cercanas", so a national price ranking
+ * was the measured defect). There is deliberately no "más barato" badge, no
+ * delta and no saving figure — the project removed the delta concept because
+ * mixing "cheapest" with "nearest" measured as misleading.
  */
 export default function SucursalesSection({ ean, client }: SucursalesSectionProps) {
   const ubicacion = useUbicacion()
@@ -170,22 +234,54 @@ export default function SucursalesSection({ ean, client }: SucursalesSectionProp
     anuncio = COPY.sinDatos
     contenido = <p className="mt-2 text-sm text-text-secondary">{COPY.sinDatos}</p>
   } else if (sucursalesCerca.estado === 'con-precios') {
-    const visibles = sucursalesCerca.sucursales.slice(0, MAX_ROWS)
-    anuncio = COPY.conPrecios(visibles.length)
-    contenido = (
-      <>
-        <ul className="mt-2">
-          {visibles.map((sucursal) => (
-            <SucursalRow key={sucursal.clave} sucursal={sucursal} />
-          ))}
-        </ul>
-        {sucursalesCerca.sucursales.length > MAX_ROWS ? (
-          <p className="mt-2 text-xs text-text-muted">
-            {COPY.resumenCortado(MAX_ROWS, sucursalesCerca.sucursales.length)}
-          </p>
-        ) : null}
-      </>
-    )
+    // The list arrives price-first, so without this split the user's own city
+    // would sit below every cheaper branch hundreds of km away. Grouping keeps
+    // the price order INSIDE each group and never re-sorts across groups.
+    const grupos = agruparPorCercania(sucursalesCerca.sucursales)
+    if (grupos.localidad !== null) {
+      anuncio = COPY.conPreciosCerca(
+        grupos.cerca.length,
+        grupos.localidad,
+        grupos.lejos.length,
+        Math.min(grupos.cerca.length, MAX_ROWS),
+        Math.min(grupos.lejos.length, MAX_ROWS),
+      )
+      contenido = (
+        <>
+          <h3 className="mt-3 text-[11px] font-medium text-text-secondary">
+            {COPY.enLocalidad(grupos.localidad)}
+          </h3>
+          <GrupoLista sucursales={grupos.cerca} />
+          {grupos.lejos.length > 0 ? (
+            <>
+              <h3 className="mt-3 text-[11px] font-medium text-text-secondary">
+                {COPY.otrasCiudades}
+              </h3>
+              <GrupoLista sucursales={grupos.lejos} />
+            </>
+          ) : null}
+        </>
+      )
+    } else {
+      // Notice the announcement needs to know whether ANY branch carried a
+      // distance: with none, the grouping declines to claim a city and the
+      // announcement must not assert the branches are far either.
+      const hayDistancia = grupos.lejos.some((sucursal) => sucursal.distanciaNumero !== null)
+      anuncio = COPY.conPreciosSinCerca(
+        grupos.lejos.length,
+        Math.min(grupos.lejos.length, MAX_ROWS),
+        hayDistancia,
+      )
+      contenido = (
+        <>
+          <p className="mt-2 text-sm text-text-secondary">{COPY.sinCerca}</p>
+          <h3 className="mt-3 text-[11px] font-medium text-text-secondary">
+            {COPY.lasMasBaratas}
+          </h3>
+          <GrupoLista sucursales={grupos.lejos} />
+        </>
+      )
+    }
   }
 
   return (
