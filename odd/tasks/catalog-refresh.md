@@ -1,7 +1,8 @@
 # Feature: actualización diaria del catálogo desde kioskos.app (`catalog-refresh`)
 
 **Status:** Etapa 1 (T1-T4) **hecha y commiteada** en `dc93f8c` · Etapa 2: T5 **hecha, verificada y
-commiteada** en `ddb780d` · **Started:** 2026-10-02
+commiteada** en `ddb780d` · T6 **hecha y commiteada**, pendiente de la primera corrida manual ·
+**Started:** 2026-10-02
 **Branch:** `main` (convención del repo: se commitea sobre `main`, no se crea feature branch)
 **Origen:** pedido del usuario, 2026-10-02: *"tenemos que empezar a ver cómo hacer para actualizar
 el catálogo"* → *"el catálogo sale de un scrapeo, tendríamos que ver cómo hacer para que se
@@ -169,14 +170,47 @@ escribió" de "escribió y borró". Ahora usan un centinela cuyos bytes se compa
 **Lo que el verificador dejó declarado como NO verificado**: la discriminación del punto 5 contra un
 cliente roto (el archivo estaba fuera de las superficies permitidas para esa tarea) y el
 comportamiento de reintento interno de `undici`. Ninguna de las dos se reportó como verificada.
-- [ ] **T6** — `.github/workflows/actualizar-catalogo.yml`: `schedule` (07:00 UTC = 04:00 AR) +
-  `workflow_dispatch`. Pasos: checkout `main` → `npm ci` → `extract` con los secrets → `refresh`
-  → commit de `public/data/*` al branch `datos` → disparo del deploy. Y **si algo falla, abre un
-  issue**: un job diario que muere en silencio es peor que no tener job.
+- [x] **T6** — `.github/workflows/actualizar-catalogo.yml`: `schedule` (07:00 UTC = 04:00 AR) +
+  `workflow_dispatch`; permisos mínimos (`contents: write` para el branch, `issues: write` para el
+  aviso); `concurrency` fijo sin cancelar (una corrida que ya extrajo no se desperdicia); checkout de
+  `main` → `npm ci` → `npm run extract` con los secrets por entorno → `npm run --silent refresh --
+  --json` (el `--silent` es necesario: el banner de npm sale por stdout y rompería el contrato de
+  "un solo objeto JSON") → publica **solo** `public/data/*.json` en el branch `datos` → y si algo
+  falla, **abre un issue**. El branch `datos` se arma en un repo descartable con plumbing
+  (`hash-object`/`update-index`/`write-tree`/`commit-tree`): nunca se hace checkout de `datos` sobre
+  el working tree, porque eso reemplazaría el árbol entero por contenido de solo datos y borraría el
+  código a mitad del job. Un commit por corrida, sin force push, así el rechazo de un push cruzado es
+  ruidoso en vez de reescribir el historial. **Evidencia**: YAML parseado y estructura verificada
+  (triggers, permisos, `concurrency`, 7 pasos en orden, `if: failure()` al final); ninguna ocurrencia
+  de `force` fuera de comentarios, refspec sin `+`, cero menciones a `raw-catalog` fuera del
+  comentario de higiene, cero `upload-artifact`.
+
+#### Primera corrida manual: qué tiene que probar
+
+Nada de este workflow se puede ejecutar antes de que exista el secret, así que el archivo es lo
+menos verificado de la feature y hay que mirarlo. En orden:
+
+1. **R1** — que el login sobreviva desde la IP del runner.
+2. **R4** — qué local reporta el extractor (lo imprime).
+3. Que `refresh` produzca el reporte y los tres JSON.
+4. Que el plumbing de publicación cree `datos` con **exactamente** los tres archivos de datos y un
+   solo commit. Es la parte más frágil: el fetch es `--depth=1` y el push se hace desde un repo
+   superficial, cosa que en teoría es un fast-forward válido (el remoto ya tiene el padre) pero que
+   nadie ejecutó todavía.
+5. Que una **segunda** corrida agregue un commit en vez de ser rechazada.
+6. Que un fallo forzado abra el issue esperado.
+
+**Orden de operaciones obligatorio**: los secrets se cargan **antes** de pushear este archivo. Si el
+cron empieza a correr sin credenciales, va a fallar y a abrir un issue por día.
 - [ ] **T7** — `deploy.yml`: agregar `repository_dispatch` (hoy el único trigger es un push a
   `main`), bajar el branch `datos` e inyectar los archivos en `dist/data/` antes de publicar. Sacar
   `public/data` del control de versiones y mudar a T6 el check "los assets de búsqueda corresponden
   al catálogo" (`deploy.yml:38-47`), que ahora vive donde se generan los datos.
+  **Acoplamiento que dejó T6 y T7 tiene que resolver**: hoy el baseline del diff sale del
+  `public/data` commiteado en el checkout. Cuando los datos se muden al branch `datos`, el paso de
+  `refresh` tiene que tomar el baseline de la punta de `datos` (copiar `catalogo.json` a un temporal
+  y pasarlo por `--catalogo`) o **todos los días el reporte va a decir `primeraCarga`** y el diff
+  deja de servir para lo único que existe: decirte qué cambió. T6 ya lo dejó comentado en el paso.
 - [ ] **T8** — `scripts/fetch-data.ts` + `"fetch-data"`: baja `public/data/*` del branch `datos` para
   el desarrollo local, porque `scripts/acceptance.ts` y `scripts/tune-threshold.ts` leen el catálogo
   real. El build falla ruidoso si falta.
