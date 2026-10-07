@@ -1,6 +1,7 @@
 # Feature: actualización diaria del catálogo desde kioskos.app (`catalog-refresh`)
 
-**Status:** Etapa 1 (T1-T4) **hecha, verificada y commiteada** en `dc93f8c` · **Started:** 2026-10-02
+**Status:** Etapa 1 (T1-T4) **hecha y commiteada** en `dc93f8c` · Etapa 2: T5 **hecha, verificada y
+commiteada** en `ddb780d` · **Started:** 2026-10-02
 **Branch:** `main` (convención del repo: se commitea sobre `main`, no se crea feature branch)
 **Origen:** pedido del usuario, 2026-10-02: *"tenemos que empezar a ver cómo hacer para actualizar
 el catálogo"* → *"el catálogo sale de un scrapeo, tendríamos que ver cómo hacer para que se
@@ -130,11 +131,44 @@ los mantiene el orquestador (parent-owned), no el writer.
 
 ### Etapa 2 — extracción y publicación automática
 
-- [ ] **T5** — `scripts/extract-catalog.ts`: login con `KIOSKOS_EMAIL`/`KIOSKOS_CLAVE` desde el
-  entorno → `token` → `GET /api/productos-cuantos` → paginar `GET /api/productos?tope=500&desde=N`
-  hasta que una página venga incompleta → assert `length === cuantos` → escribir
-  `raw-catalog.json`. `fetch` inyectable para poder testear sin red. Registra qué `negocio` quedó
-  asociado al token (si el día de mañana hay más de un local, esto lo delata).
+- [x] **T5** — `scripts/kioskos-client.ts` (cliente HTTP con `fetch` inyectable, sin `fs`, sin
+  `process.exit`, sin leer el entorno) + `scripts/extract-catalog.ts` (el CLI). El CLI lee
+  `KIOSKOS_EMAIL`/`KIOSKOS_CLAVE` del entorno —así la credencial no se tipea nunca en una línea de
+  comandos, que la dejaría en el history y en `ps`—, hace login, pide el oráculo, pagina de a 500
+  **secuencialmente**, asserta `length === cuantos` **antes de escribir**, y escribe
+  `raw-catalog.json` con la forma que `normalize` ya acepta. Imprime **a qué local quedó atado el
+  token** y advierte si la cuenta tiene más de uno: eso es lo que resuelve R4 desde el propio job.
+  Exit codes `0` ok · `1` login/argumentos · `2` API o escritura · `3` el conteo no coincide con el
+  oráculo. `--tope`, `--out`, `--help`. Ningún reintento en ninguna ruta, y timeout de 15 s en cada
+  request. **Evidencia**: 41 tests entre los dos archivos nuevos, suite completa 415/32/0.
+
+### Verificación independiente de T5 (2026-10-02)
+
+Antes del commit, un verificador con mandato explícito de **falsificar** (no de confirmar) atacó
+cinco propiedades: que ningún secreto pueda escapar por stdout/stderr en ninguna ruta de error
+(incluidos HTTP 401/500, body no-JSON, body con forma equivocada, timeout, argumentos inválidos y
+excepciones no capturadas), que no se escriba nada antes del assert del oráculo, que no haya
+reintentos ni paralelismo, que todo request esté acotado por un `AbortSignal`, y que los tests no
+sean vacuos.
+
+**Resultado: ninguna de las cinco pudo falsificarse**, pero encontró un defecto real y cuatro huecos
+de test, todos cerrados en el mismo `ddb780d` y cada uno re-chequeado por inyección de fallas
+(romper el comportamiento y ver el test ponerse rojo):
+
+1. **Defecto real** — el `writeFileSync` quedaba fuera del manejador de errores del CLI, así que un
+   fallo de escritura escapaba como stack crudo de Node. Ahora es una línea limpia y sale con `2`.
+2. El test de login rechazado no pinnaba la ruta: con la URL apuntando a un puerto cerrado daba
+   exactamente las mismas aserciones. Ahora exige un `POST /api/entrar`.
+3. Los tests de "no escribió nada" usaban directorios vacíos, así que no distinguían "nunca
+escribió" de "escribió y borró". Ahora usan un centinela cuyos bytes se comparan antes y después, y
+   el caso de conteo distinto cubre también un `--out` explícito.
+4. Nada pinnaba "un solo intento": ahora un reintento futuro rompe un test.
+5. El timeout no estaba guardado por ningún test (solo por sondas manuales del verificador): ahora
+   se asserta que login, conteo y cada página reciben un `AbortSignal` real.
+
+**Lo que el verificador dejó declarado como NO verificado**: la discriminación del punto 5 contra un
+cliente roto (el archivo estaba fuera de las superficies permitidas para esa tarea) y el
+comportamiento de reintento interno de `undici`. Ninguna de las dos se reportó como verificada.
 - [ ] **T6** — `.github/workflows/actualizar-catalogo.yml`: `schedule` (07:00 UTC = 04:00 AR) +
   `workflow_dispatch`. Pasos: checkout `main` → `npm ci` → `extract` con los secrets → `refresh`
   → commit de `public/data/*` al branch `datos` → disparo del deploy. Y **si algo falla, abre un
@@ -179,9 +213,11 @@ los mantiene el orquestador (parent-owned), no el writer.
 - **R3 — Cron de Actions**: impreciso bajo carga, y GitHub desactiva los workflows programados tras
   60 días sin actividad en el repo. El commit diario al branch `datos` cuenta como actividad, así que
   solo importa si el job muere en silencio; de ahí la notificación por issue de T6.
-- **R4 — ¿Un local o varios?** El token queda atado al negocio. Si el usuario tiene más de uno, hay
-  que fijar explícitamente cuál se extrae y el reporte de diff tiene que decir cuál, o un `cuantos`
-  distinto va a parecer un catálogo que se derrumbó.
+- **R4 — ¿Un local o varios?** El token queda atado al negocio. **Mitigado en T5**: el CLI imprime a
+  qué local quedó atado el token y advierte si la cuenta tiene más de uno, así que la primera corrida
+  real lo responde sola. Queda pendiente **decidir** qué hacer si son varios (hoy se extrae el que el
+  token tenga seleccionado), y que el reporte de diff diga cuál, o un `cuantos` distinto va a parecer
+  un catálogo que se derrumbó.
 - **R5 — Fuga por logs.** Regla 1 y 2 de higiene existen porque el repo es público; cualquier
   `console.log` que imprima filas publica el margen del usuario. Es el riesgo con peor relación
   daño/probabilidad de toda la feature.
