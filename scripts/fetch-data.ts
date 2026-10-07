@@ -9,7 +9,7 @@
  * under `public/data/`. `scripts/acceptance.ts` and `scripts/tune-threshold.ts`
  * read the real catalog, so a developer needs a way to pull it down.
  *
- * Why git and not HTTP: `git fetch origin datos` reuses the remote and the
+ * Why git and not HTTP: `git fetch --depth=1 origin datos` reuses the remote and the
  * credentials the developer (or the CI runner) already has, has no rate limits
  * and no API surface to authenticate against, and behaves the same locally and
  * in CI. Pulling the same bytes over an HTTP URL would need a token, a
@@ -190,7 +190,10 @@ export function descargarDatos(
 ): ResultadoFetch {
   const cwd = opts.cwd ?? process.cwd()
 
-  const fetched = run(['fetch', 'origin', opts.branch], cwd)
+  // `--depth=1` a propósito: este script solo lee archivos de la punta del
+  // branch, y el branch `datos` suma un commit por día con megas de JSON. Un
+  // fetch completo se bajaría esa historia entera en cada deploy, para siempre.
+  const fetched = run(['fetch', '--depth=1', 'origin', opts.branch], cwd)
   if (fetched.code !== 0) {
     throw new FetchDataError(
       `no se pudo hacer git fetch origin ${opts.branch} (código ${fetched.code})${detalle(fetched.stderr)}`,
@@ -271,7 +274,7 @@ export function parseArgs(argv: string[]): OpcionesCli | { help: true } {
 const USAGE = `Uso: node scripts/fetch-data.ts [--branch <nombre>] [--dest <dir>] [--check]
 
 Baja public/data/{catalogo,catalogo-index,catalogo-facets}.json desde un branch
-de datos (default "${BRANCH_DEFAULT}") usando git: hace \`git fetch origin <branch>\` y lee
+de datos (default "${BRANCH_DEFAULT}") usando git: hace \`git fetch --depth=1 origin <branch>\` y lee
 cada archivo del commit bajado, sin hacer checkout. Reutiliza el remoto y las
 credenciales que ya tenés, sin límites de tasa y sin llamar a ninguna API.
 

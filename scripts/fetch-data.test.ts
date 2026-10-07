@@ -178,7 +178,10 @@ describe('scripts/fetch-data.ts — core', () => {
     expect(res.products).toBe(1)
     expect(res.version).toBe('v-dataset-123')
 
-    expect(llamadas[0]).toEqual(['fetch', 'origin', 'datos'])
+    // `--depth=1` is part of the contract, not an optimisation detail: without
+    // it every deploy would download the entire history of the data branch,
+    // which grows by a commit of several megabytes per day, forever.
+    expect(llamadas[0]).toEqual(['fetch', '--depth=1', 'origin', 'datos'])
     expect(llamadas[1]).toEqual(['rev-parse', '--verify', 'FETCH_HEAD'])
     expect(llamadas.slice(2).map((a) => a[1])).toEqual([
       `${COMMIT}:public/data/catalogo.json`,
@@ -193,7 +196,7 @@ describe('scripts/fetch-data.ts — core', () => {
 
     const res = descargarDatos(run, { branch: 'datos-v2', dest, cwd: '/irrelevante' })
 
-    expect(llamadas[0]).toEqual(['fetch', 'origin', 'datos-v2'])
+    expect(llamadas[0]).toEqual(['fetch', '--depth=1', 'origin', 'datos-v2'])
     expect(res.branch).toBe('datos-v2')
   })
 
