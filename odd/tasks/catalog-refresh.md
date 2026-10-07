@@ -1,8 +1,8 @@
 # Feature: actualización diaria del catálogo desde kioskos.app (`catalog-refresh`)
 
-**Status:** Etapa 1 (T1-T4) **hecha y commiteada** en `dc93f8c` · Etapa 2: T5 **hecha, verificada y
-commiteada** en `ddb780d` · T6 **hecha, pusheada y verificada en su primera corrida real**
-(2026-10-07) · T12 **hecha y pusheada** en `328ee09` · **Started:** 2026-10-02
+**Status:** **Etapa 1 (T1-T4), T5, T6, T8, T12 y T7 hechas, verificadas y en producción.** El ciclo
+completo corre solo: cron → login → extracción → validación → publicación en `datos` → dispatch →
+deploy → sitio. Faltan T9, T10 y T11 (cliente) · **Started:** 2026-10-02
 **Branch:** `main` (convención del repo: se commitea sobre `main`, no se crea feature branch)
 **Origen:** pedido del usuario, 2026-10-02: *"tenemos que empezar a ver cómo hacer para actualizar
 el catálogo"* → *"el catálogo sale de un scrapeo, tendríamos que ver cómo hacer para que se
@@ -211,15 +211,33 @@ con el usuario **antes** de que T7 publique los datos.
 
 **Orden de operaciones obligatorio**: los secrets se cargan **antes** de pushear este archivo. Si el
 cron empieza a correr sin credenciales, va a fallar y a abrir un issue por día.
-- [ ] **T7** — `deploy.yml`: agregar `repository_dispatch` (hoy el único trigger es un push a
-  `main`), bajar el branch `datos` e inyectar los archivos en `dist/data/` antes de publicar. Sacar
-  `public/data` del control de versiones y mudar a T6 el check "los assets de búsqueda corresponden
-  al catálogo" (`deploy.yml:38-47`), que ahora vive donde se generan los datos.
-  **Gate levantado por decisión del usuario (2026-10-07)**: *"sigamos a pesar de esto"*. Se sigue con
-  T7 sin esperar el veredicto sobre los 44. El riesgo queda **aceptado y acotado**: a partir de T7 el
-  catálogo se refresca todos los días, así que un precio equivocado se corrige en el sistema y
-  desaparece en la corrida siguiente. Eso es justamente lo que cambió: antes un precio mal cargado
-  se quedaba meses. T12 hace que la evidencia de los 44 llegue igual, anotada en el reporte.
+- [x] **T7** — El dato dejó de ser fuente y pasó a ser artefacto. `deploy.yml` ganó
+  `repository_dispatch` (`catalogo-actualizado`), el job de deploy baja el catálogo del branch antes
+  de construir y **falla fuerte si no puede**, el workflow de datos baja la punta de `datos` como
+  `--baseline` (y si ese fetch falla, frena el job en vez de reportar `primeraCarga` todos los días),
+  y `public/data` salió del control de versiones (`25f0171`).
+
+  **Evidencia — todo en corridas reales del 2026-10-07:**
+  1. **Producción ya sirve los datos nuevos.** Un deploy sin datos en el repo bajó el catálogo del
+     branch (`commit 389a05fc`, 20.733 productos) y publicó: el sitio en vivo sirve
+     `version 42fe8fa23b6e0a9b` con **20.733 productos**. Producción pasó de los precios de
+     septiembre a los de octubre.
+  2. El diff ahora mide **el delta diario**, no el artefacto de transición: `primeraCarga: false`,
+     20.733 → 20.733, delta 0.
+  3. El `repository_dispatch` funciona: la corrida del workflow de datos disparó el deploy
+     (`37578690319`, verde) sin intervención humana. Es el último eslabón y era el único sin probar.
+  4. El check "los assets corresponden al catálogo commiteado" **se eliminó**: con los datos fuera del
+     repo ese diff siempre está limpio, así que habría pasado sin probar nada. Un check que pasa
+     siempre es peor que no tener check.
+
+  **Dos defectos encontrados en la revisión del orquestador, arreglados en el mismo bloque:**
+  - `fetch-data` hacía `git fetch` **sin `--depth=1`**, o sea se bajaba la historia entera del branch
+    `datos` en cada deploy —y ese branch suma un commit con megas de JSON por día, para siempre—.
+    El test pinneaba la lista de argumentos vieja, que es exactamente por qué sobrevivió.
+  - `refresh` usaba `--catalogo` como baseline **y** como destino, así que pasarle un temporal habría
+    hecho que `normalize` escribiera ahí y `public/data` nunca se actualizara. Ahora `--baseline`
+    separa las dos cosas, y un baseline explícito ilegible es fatal (exit 3) en vez de degradar a
+    `primeraCarga`.
   **Acoplamiento que dejó T6 y T7 tiene que resolver**: hoy el baseline del diff sale del
   `public/data` commiteado en el checkout. Cuando los datos se muden al branch `datos`, el paso de
   `refresh` tiene que tomar el baseline de la punta de `datos` (copiar `catalogo.json` a un temporal
