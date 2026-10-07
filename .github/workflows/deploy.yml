@@ -3,6 +3,12 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+  # The catalog job publishes to the `datos` branch, not `main`, so a push here
+  # never fires for a fresh dataset. `actualizar-catalogo.yml` dispatches this
+  # event after a successful publish; without it the site would keep the catalog
+  # from the last code push (T7/D7).
+  repository_dispatch:
+    types: [catalogo-actualizado]
 
 permissions:
   contents: read
@@ -17,8 +23,9 @@ jobs:
   # Gate: nothing reaches the deploy job unless this passes.
   #
   # Before this job existed the workflow ran `npm ci` and `npm run build` only, so
-  # typecheck, the test suite and the search-asset check never ran in CI at all — and
-  # since a push to main deploys, that meant publishing code no check had verified.
+  # typecheck and the test suite never ran in CI at all — and since a push to main
+  # deploys, that meant publishing code no check had verified. (It also used to run a
+  # search-asset diff against the committed catalog; T7/D7 removed it, see below.)
   verify:
     runs-on: ubuntu-latest
     # Least privilege: this job only reads. It must not hold the Pages deploy
@@ -35,21 +42,17 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
-      # The committed search assets must be exactly what the committed catalog
-      # produces. `catalogo-facets.json` carries the sha256 of `catalogo.json` as its
-      # `version`, so editing the catalog without regenerating is caught here.
+      # REMOVED (T7/D7): the "Search assets match the committed catalog" step.
+      # It regenerated the index and failed if `git diff -- public/data` was dirty.
+      # Once `public/data` left version control that diff is always clean, so the
+      # check would pass while proving nothing — worse than no check. The guarantee
+      # it stood for moved to `actualizar-catalogo.yml`, which validates the raw
+      # extraction before it writes and publishes only validated files to `datos`;
+      # the deploy job below then re-validates them by fetching through
+      # `npm run fetch-data`.
       #
-      # `--quiet` takes only the exit code, then `--stat` prints the file summary: the
-      # assets are single-line JSON, so a plain `git diff` would dump a 2 MB line into
-      # the log if the index ever goes stale.
-      - name: Search assets match the committed catalog
-        run: |
-          npm run generate-index
-          if ! git diff --quiet -- public/data; then
-            echo "::error::public/data is stale — run 'npm run generate-index' and commit the result."
-            git --no-pager diff --stat -- public/data
-            exit 1
-          fi
+      # `--quiet` used to matter here: the assets are single-line JSON, so a plain
+      # `git diff` would dump a 2 MB line into the log. There is no diff any more.
 
       # NOT checkable here: `npm run normalize` reads `raw-catalog.json`, which is
       # gitignored ("Raw catalog extraction (never commit; keep local only)"). CI
@@ -71,6 +74,19 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # `public/data` is generated and lives on the `datos` branch: a build with no
+      # catalog publishes an app with no data (D7). `npm run fetch-data` validates
+      # the three files before writing them and exits non-zero if it cannot fetch;
+      # the step must fail loudly rather than build an empty catalog.
+      - name: Fetch the catalog from the datos branch
+        run: |
+          if npm run --silent fetch-data -- --branch datos
+          then
+            echo "catálogo listo en public/data"
+          else
+            echo "::error::no se pudo bajar public/data del branch datos: un build sin catálogo publicaría una app sin datos. Se cancela el deploy."
+            exit 1
+          fi
       # The Firebase web config reaches the build here and nowhere else. `verify` does not
       # need it: typecheck and the tests do not depend on it, and the app is written to
       # degrade to "no auth configured" when the values are absent — which is also what

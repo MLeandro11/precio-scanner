@@ -116,6 +116,23 @@ jobs:
           echo "extract exit ${status}"
           exit "$status"
 
+      # Baseline del diff (T7/D7): `public/data` dejó de estar commiteado en
+      # `main`, así que el catálogo previo se baja de la punta de `datos` a un
+      # temporal. `fetch-data` valida los tres archivos antes de escribir y sale
+      # con 2 si el branch no existe o no se puede leer.
+      #
+      # Si esto falla, el job SE FRENA: sin baseline el diff diría
+      # `primeraCarga` todos los días y el reporte perdería lo único para lo que
+      # existe (decir qué cambió). No hay fallback silencioso a "sin baseline".
+      - name: Fetch the previous catalog as the diff baseline
+        run: |
+          if npm run --silent fetch-data -- --branch datos --dest "$RUNNER_TEMP/baseline"; then
+            echo "baseline listo: $RUNNER_TEMP/baseline/catalogo.json"
+          else
+            echo "::error::no se pudo bajar el catálogo previo del branch datos: sin baseline el diff reportaría primeraCarga. Se frena la corrida."
+            exit 1
+          fi
+
       # `--json` deja un único objeto de reporte en stdout (guardado en un
       # archivo para el issue de fallo) y manda los diagnósticos del pipeline a
       # stderr. `--silent` es necesario: el banner de `npm run` sale por stdout
@@ -124,17 +141,16 @@ jobs:
       # La validación corre antes de escribir, así que una extracción mala deja
       # `public/data` intacto.
       #
-      # ACOPLAMIENTO CONOCIDO (T7/D7): hoy `public/data` sigue commiteado en
-      # `main`, así que el baseline del diff sale del checkout. Cuando T7/D7
-      # muevan los datos al branch `datos`, este paso tiene que tomar el
-      # baseline de la punta de `datos` (por ejemplo copiando `catalogo.json` a
-      # un temporal y pasándolo por `--catalogo`) o `refresh` reportará
-      # `primeraCarga` todos los días y el diff deja de servir.
+      # Baseline (T7/D7): `public/data` ya no vive en `main`, vive en el branch
+      # `datos`, así que el catálogo previo se baja a un temporal y se pasa por
+      # `--baseline`. `refresh` sigue escribiendo el catálogo regenerado en
+      # `public/data` (el default de `--catalogo`).
       - name: Validate and regenerate public/data
         id: refresh
         run: |
           set +e
           npm run --silent refresh -- --json \
+            --baseline "$RUNNER_TEMP/baseline/catalogo.json" \
             >"$RUNNER_TEMP/refresh-report.json" \
             2>"$RUNNER_TEMP/refresh.err"
           status=$?
@@ -217,6 +233,18 @@ jobs:
           git push \
             "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             refs/heads/datos:refs/heads/datos
+
+      # Los datos nuevos no llegan solos al sitio: `deploy.yml` se dispara con un
+      # push a `main`, y este job no empuja a `main`. Después de publicar hay que
+      # avisarle con un `repository_dispatch` del tipo que `deploy.yml` escucha
+      # (`catalogo-actualizado`). Si el dispatch falla, el job falla y el issue
+      # avisa: un dataset nuevo que no llega a la web es un deploy que no pasó.
+      - name: Dispatch the Pages deploy
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/dispatches" \
+            -f event_type=catalogo-actualizado
 
       # Obligatorio (riesgo R3): un job diario que muere en silencio es peor que
       # no tener job. El cuerpo del issue es público, así que solo lleva el

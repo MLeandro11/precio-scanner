@@ -12,6 +12,11 @@ dist/
 # Raw catalog extraction (never commit; keep local only)
 raw-catalog.json
 
+# Generated catalog data (never commit; it lives on the `datos` branch and reaches the
+# build through `npm run fetch-data`). See odd/tasks/catalog-refresh.md (D7). The entries are
+# still tracked on main until the untracking commit; this rule stops new ones appearing.
+public/data/
+
 # Windows/WSL NTFS metadata artifacts (e.g. raw-catalog.json:Zone.Identifier)
 *:Zone.Identifier
 
