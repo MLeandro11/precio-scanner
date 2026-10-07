@@ -1,0 +1,270 @@
+# Actualización diaria del catálogo desde kioskos.app.
+#
+# Este workflow es el único escritor automático de `public/data/*`: inicia sesión
+# en kioskos.app, extrae el catálogo, lo valida, regenera los JSON publicados y
+# agrega el resultado al branch `datos`, un commit por corrida. Los comentarios
+# de abajo explican por qué la forma es esta y no otra; el próximo lector tiene
+# que poder confiar en el archivo sin reconstruir el razonamiento.
+#
+# Referencia de decisiones: `odd/tasks/catalog-refresh.md` (T6; D2/D7; riesgo R3).
+#
+# --- Por qué el cron es así -------------------------------------------------
+# `0 7 * * *` son las 07:00 UTC, o sea las 04:00 en Argentina (UTC-3, sin
+# horario de verano). Cae antes de abrir el kiosco: los precios del día ya están
+# publicados a la mañana.
+# El scheduler de GitHub es best-effort: las corridas programadas se demoran
+# bajo carga y se desactivan tras 60 días sin actividad en el repo. No lo trates
+# como un reloj exacto ni te sorprenda una corrida tardía.
+#
+# --- Higiene (el repositorio es PÚBLICO) ------------------------------------
+# `raw-catalog.json` trae `costo`, `margen`, `proveedorId` y `stockMinimo` del
+# usuario. Se produce y se consume dentro de este job y muere con el runner.
+# Este archivo NUNCA debe hacer `cat` del raw, imprimir una fila ni un campo
+# suyo, subirlo como artifact, ni pasárselo a ningún paso que pueda ecoarlo. El
+# log y el issue de fallo sí pueden llevar el reporte de diff y los diagnósticos
+# de los CLIs, porque ahí solo viajan `id`, `nombre`, `barcode` y `precio` — los
+# mismos campos que el sitio público ya muestra. El branch `datos` recibe
+# únicamente `public/data/*.json`.
+#
+# --- El branch `datos` (decisión D2) ----------------------------------------
+# Los datos generados no son código, así que no viven en `main`. Viven en un
+# branch `datos` que contiene SOLO los archivos de datos. Ese branch nunca se
+# hace checkout sobre el working tree: un `git checkout datos` acá reemplazaría
+# todo el árbol por contenido de solo datos y borraría el código a mitad del
+# job. En su lugar el paso de publicación arma un repositorio descartable en el
+# directorio temporal del runner y empuja desde ahí.
+#
+# --- Un commit por corrida, nunca force push (decisión D2) ------------------
+# Cada corrida agrega exactamente un commit sobre la punta de `datos`, así que
+# `git log datos` acumula un historial diario que es, de regalo, un historial de
+# precios. El push es un `git push` pelado, sin `+` en el refspec y sin
+# `--force`: si la punta remota se movió (por ejemplo una corrida manual
+# cruzada con una programada), el push se rechaza y el job falla ruidosamente en
+# vez de pisar el historial. El grupo de `concurrency` de abajo es la primera
+# defensa; el push sin force es la segunda.
+#
+# --- El fallo nunca es silencioso (riesgo R3) -------------------------------
+# Si la extracción, la validación o la publicación falla, el último paso abre un
+# issue con el reporte de diff (o el motivo del fallo). Un job diario que muere
+# en silencio es peor que no tener job: el usuario tiene que enterarse.
+
+name: Actualizar catálogo
+
+on:
+  schedule:
+    # 07:00 UTC = 04:00 en Argentina. Ver arriba: GitHub puede demorar la
+    # corrida programada.
+    - cron: '0 7 * * *'
+  # Corrida manual. Es la que se mira la primera vez: si el login funciona
+  # desde la IP del runner es el riesgo abierto R1.
+  workflow_dispatch:
+
+# Mínimo privilegio: `contents: write` solo para empujar el branch `datos`, e
+# `issues: write` solo para abrir el issue de fallo. Nada más.
+permissions:
+  contents: write
+  issues: write
+
+# Grupo fijo: dos corridas no pueden publicar a la vez. `cancel-in-progress:
+# false` a propósito: cancelar una corrida que ya extrajo desperdiciaría el
+# único intento de login del día (regla de higiene 3: un solo intento).
+concurrency:
+  group: actualizar-catalogo
+  cancel-in-progress: false
+
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+    # Acota un job colgado: la extracción son ~46 requests secuenciales con
+    # timeout de 15 s cada uno, así que una corrida sana termina en minutos.
+    timeout-minutes: 30
+    steps:
+      # Siempre se construye desde `main`: el código publicado y la lógica de
+      # publicación son los de main, sin importar qué ref disparó la corrida
+      # manual.
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Un solo intento de login por corrida, sin retry: un job reintentando una
+      # credencial rechazada es la vía rápida al bloqueo de la cuenta (regla de
+      # higiene 3). La credencial va por entorno, nunca como argumento, así no
+      # aparece en `ps` ni en la línea de comando que el runner refleja en el
+      # log.
+      #
+      # La salida se copia a un archivo para poder citar el motivo en el issue.
+      # Es seguro publicarla: el CLI nunca imprime el raw, la clave ni el token.
+      - name: Extract catalog from kioskos.app
+        id: extract
+        env:
+          KIOSKOS_EMAIL: ${{ secrets.KIOSKOS_EMAIL }}
+          KIOSKOS_CLAVE: ${{ secrets.KIOSKOS_CLAVE }}
+        run: |
+          set +e
+          npm run extract 2>&1 | tee "$RUNNER_TEMP/extract.log"
+          status=${PIPESTATUS[0]}
+          echo "extract exit ${status}"
+          exit "$status"
+
+      # `--json` deja un único objeto de reporte en stdout (guardado en un
+      # archivo para el issue de fallo) y manda los diagnósticos del pipeline a
+      # stderr. `--silent` es necesario: el banner de `npm run` sale por stdout
+      # y contaminaría ese único objeto JSON.
+      #
+      # La validación corre antes de escribir, así que una extracción mala deja
+      # `public/data` intacto.
+      #
+      # ACOPLAMIENTO CONOCIDO (T7/D7): hoy `public/data` sigue commiteado en
+      # `main`, así que el baseline del diff sale del checkout. Cuando T7/D7
+      # muevan los datos al branch `datos`, este paso tiene que tomar el
+      # baseline de la punta de `datos` (por ejemplo copiando `catalogo.json` a
+      # un temporal y pasándolo por `--catalogo`) o `refresh` reportará
+      # `primeraCarga` todos los días y el diff deja de servir.
+      - name: Validate and regenerate public/data
+        id: refresh
+        run: |
+          set +e
+          npm run --silent refresh -- --json \
+            >"$RUNNER_TEMP/refresh-report.json" \
+            2>"$RUNNER_TEMP/refresh.err"
+          status=$?
+          echo "refresh exit ${status}"
+          cat "$RUNNER_TEMP/refresh.err"
+          cat "$RUNNER_TEMP/refresh-report.json"
+          exit "$status"
+
+      # Publica SOLO los archivos de datos en el branch `datos`, como un commit
+      # nuevo sobre la punta anterior. Ver el comentario largo de arriba del
+      # archivo (D2) para las reglas de solo-datos y sin-force.
+      - name: Publish data to the datos branch
+        id: publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # El campo `version` que `normalize` escribe en catalogo.json es el
+          # que identifica al dataset en el mensaje de commit, para que
+          # `git log datos` se lea como un historial de precios.
+          VERSION="$(node -e 'const fs=require("node:fs");const c=JSON.parse(fs.readFileSync("public/data/catalogo.json","utf8"));process.stdout.write(String(c.version ?? "sin-version"))')"
+          STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          MESSAGE="catálogo ${STAMP} (version ${VERSION})"
+
+          shopt -s nullglob
+          DATA_FILES=("$GITHUB_WORKSPACE"/public/data/*.json)
+          if [ "${#DATA_FILES[@]}" -eq 0 ]; then
+            echo "::error::no hay public/data/*.json para publicar"
+            exit 1
+          fi
+
+          # Repositorio descartable: no toca el working tree del checkout, así
+          # que `datos` nunca puede reemplazar el código. `mktemp` no borra nada
+          # preexistente.
+          WORK="$(mktemp -d "${RUNNER_TEMP}/datos-branch.XXXXXX")"
+          cd "$WORK"
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # El repo es público: el fetch no necesita credencial y el token no
+          # queda escrito en el config de este repo descartable. El token se usa
+          # solo, inline, en el push de más abajo.
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+
+          # Padre: la punta actual de `datos`. En la primerísima corrida el
+          # branch no existe, `git fetch` falla, PARENT queda vacío y el commit
+          # es un commit raíz (crea el branch).
+          PARENT=""
+          if git fetch -q --depth=1 origin datos 2>/dev/null; then
+            PARENT="$(git rev-parse --verify -q FETCH_HEAD)"
+          fi
+
+          # El árbol se arma desde los archivos generados en vez de copiarlos a
+          # un working tree: garantiza que el branch contenga solo los datos,
+          # sin código y sin archivos viejos que haya dejado una corrida
+          # anterior.
+          git read-tree --empty
+          for file in "${DATA_FILES[@]}"; do
+            rel="public/data/$(basename "$file")"
+            blob="$(git hash-object -w "$file")"
+            git update-index --add --cacheinfo "100644,${blob},${rel}"
+          done
+          TREE="$(git write-tree)"
+
+          if [ -n "$PARENT" ]; then
+            COMMIT="$(git commit-tree "$TREE" -p "$PARENT" -m "$MESSAGE")"
+          else
+            COMMIT="$(git commit-tree "$TREE" -m "$MESSAGE")"
+          fi
+          git update-ref refs/heads/datos "$COMMIT"
+
+          echo "publicando ${COMMIT} en datos: ${MESSAGE}"
+
+          # Sin `+` y sin `--force`: es un fast-forward sobre la punta previa.
+          # Si el remoto se movió (una corrida que se cruzó), el push se rechaza
+          # y el job falla ruidosamente en vez de reescribir el historial de
+          # precios.
+          git push \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            refs/heads/datos:refs/heads/datos
+
+      # Obligatorio (riesgo R3): un job diario que muere en silencio es peor que
+      # no tener job. El cuerpo del issue es público, así que solo lleva el
+      # reporte de diff y los diagnósticos de los CLIs (campos públicos); nunca
+      # el raw.
+      - name: Open an issue when the run fails
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          extract_tail="(no hubo salida de la extracción)"
+          if [ -f "$RUNNER_TEMP/extract.log" ]; then
+            extract_tail="$(tail -n 20 "$RUNNER_TEMP/extract.log")"
+          fi
+          refresh_err="(sin diagnósticos del refresh)"
+          if [ -s "$RUNNER_TEMP/refresh.err" ]; then
+            refresh_err="$(tail -n 20 "$RUNNER_TEMP/refresh.err")"
+          fi
+          report="(el refresh no llegó a producir el reporte de diff)"
+          if [ -s "$RUNNER_TEMP/refresh-report.json" ]; then
+            report="$(cat "$RUNNER_TEMP/refresh-report.json")"
+          fi
+
+          {
+            echo "La actualización diaria del catálogo falló."
+            echo
+            echo "- Corrida: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "- Fecha: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- Extracción: ${{ steps.extract.outcome }}"
+            echo "- Validación/refresh: ${{ steps.refresh.outcome }}"
+            echo "- Publicación: ${{ steps.publish.outcome }}"
+            echo
+            echo "## Motivo"
+            echo
+            echo '```'
+            echo "$extract_tail"
+            echo "$refresh_err"
+            echo '```'
+            echo
+            echo "## Reporte de diff"
+            echo
+            echo '```json'
+            echo "$report"
+            echo '```'
+          } > "$RUNNER_TEMP/issue-body.md"
+
+          gh issue create \
+            --title "Falló la actualización del catálogo ($(date -u +%Y-%m-%d))" \
+            --body-file "$RUNNER_TEMP/issue-body.md"
