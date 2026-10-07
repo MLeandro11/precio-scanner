@@ -2,7 +2,7 @@
 
 **Status:** Etapa 1 (T1-T4) **hecha y commiteada** en `dc93f8c` · Etapa 2: T5 **hecha, verificada y
 commiteada** en `ddb780d` · T6 **hecha, pusheada y verificada en su primera corrida real**
-(2026-10-07) · **Started:** 2026-10-02
+(2026-10-07) · T12 **hecha y pusheada** en `328ee09` · **Started:** 2026-10-02
 **Branch:** `main` (convención del repo: se commitea sobre `main`, no se crea feature branch)
 **Origen:** pedido del usuario, 2026-10-02: *"tenemos que empezar a ver cómo hacer para actualizar
 el catálogo"* → *"el catálogo sale de un scrapeo, tendríamos que ver cómo hacer para que se
@@ -215,9 +215,11 @@ cron empieza a correr sin credenciales, va a fallar y a abrir un issue por día.
   `main`), bajar el branch `datos` e inyectar los archivos en `dist/data/` antes de publicar. Sacar
   `public/data` del control de versiones y mudar a T6 el check "los assets de búsqueda corresponden
   al catálogo" (`deploy.yml:38-47`), que ahora vive donde se generan los datos.
-  **Gate: R7.** No se publica el dataset del 2026-10-07 hasta que el usuario confirme los 44 cambios
-  de precio anómalos. Hasta entonces, producción sigue sirviendo el catálogo viejo commiteado en
-  `main`, que es exactamente el estado seguro.
+  **Gate levantado por decisión del usuario (2026-10-07)**: *"sigamos a pesar de esto"*. Se sigue con
+  T7 sin esperar el veredicto sobre los 44. El riesgo queda **aceptado y acotado**: a partir de T7 el
+  catálogo se refresca todos los días, así que un precio equivocado se corrige en el sistema y
+  desaparece en la corrida siguiente. Eso es justamente lo que cambió: antes un precio mal cargado
+  se quedaba meses. T12 hace que la evidencia de los 44 llegue igual, anotada en el reporte.
   **Acoplamiento que dejó T6 y T7 tiene que resolver**: hoy el baseline del diff sale del
   `public/data` commiteado en el checkout. Cuando los datos se muden al branch `datos`, el paso de
   `refresh` tiene que tomar el baseline de la punta de `datos` (copiar `catalogo.json` a un temporal
@@ -237,13 +239,17 @@ cron empieza a correr sin credenciales, va a fallar y a abrir un issue por día.
   murió hace una semana.
 - [ ] **T11** — Des-hardcodear los conteos que cada refresh invalida: `scripts/acceptance.ts:5-8,30`
   (20.331 productos y EANs fijos) y `sdd/05-acceptance-report.md`.
-- [ ] **T12** — Que el reporte explique sus propias anomalías. En el momento del refresh el raw está
-  a mano, así que el reporte puede decir, para cada cambio grande, si el producto trae un
-  `precioCambiado` (o un `actualizado`) reciente. Sin eso, cada anomalía futura obliga a la
-  arqueología que hicimos hoy —y que **no se puede cerrar**, porque el raw del runner es efímero y
-  `normalize` descarta los tres campos de fecha—. Es la diferencia entre un reporte que dice "44
-  cambios raros" y uno que dice "44 cambios raros, de los cuales N tienen un cambio de precio
-  registrado el <fecha>".
+- [x] **T12** — El reporte explica sus propias anomalías. `compararCatalogos` acepta un mapa
+  opcional de las fechas del raw y agrega la sección `cambiosGrandes`: cuántos cambios superan
+  `UMBRAL_GRANDE = 50%`, cuántos de esos traen un `precioCambiado`, y hasta diez ejemplos anotados
+  con las dos fechas. `refresh-catalog` arma ese mapa del raw que ya lee, así que desde ahora el
+  reporte se explica solo. **Lo honesto es el default**: sin mapa de fechas, `fechasDisponibles` es
+  `false` y los dos conteos son `null`, **nunca 0** —no saber se reporta como no saber—.
+  **Evidencia**: 429 tests / 32 archivos / 0 fallos, typecheck limpio, y un smoke sobre el raw real de
+  23.230 registros y el catálogo real de 20.733 productos (100 cambios >50%, 1 con fecha), no solo
+  fixtures. Commiteado en `328ee09`. **Consecuencia inmediata**: la corrida del cron de las 07:00 UTC
+  del 2026-10-07 va a reportar los 44 con sus fechas, porque el baseline del diff sigue siendo el
+  catálogo viejo hasta T7. R7 se contesta solo, sin correr nada a mano.
 
 ## Verificación por etapa
 
@@ -306,4 +312,6 @@ cron empieza a correr sin credenciales, va a fallar y a abrir un issue por día.
   **correcciones individuales de precio**, no la de una transformación del pipeline. Pero la prueba
   definitiva está en los campos de fecha del raw **nuevo**, y ahí el pipeline se los come: `normalize`
   descarta `actualizado`, `precioCambiado` y `cartelImpreso`, y el raw del runner es efímero. Por eso
-  T12. Nada de esto está en producción: el branch `datos` no alimenta al sitio hasta T7.
+  T12. Nada de esto está en producción hasta T7; y **por decisión del usuario (2026-10-07) T7 sigue
+  sin esperar este veredicto**, con el riesgo aceptado porque el sistema se autocorrige al día
+  siguiente.
