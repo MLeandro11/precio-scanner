@@ -225,8 +225,11 @@ function imprimirReporte(r: ReporteDiff): void {
     for (const a of r.altas.ejemplos) lineas.push(`    + ${a.id} ${a.nombre} (EAN ${a.barcode || '—'})`)
     lineas.push(`  bajas: ${r.bajas.conteo}`)
     for (const b of r.bajas.ejemplos) lineas.push(`    - ${b.id} ${b.nombre} (EAN ${b.barcode || '—'})`)
-    lineas.push(`  ids huérfanos (rompen favoritos): ${r.idsHuerfanos.length}`)
-    for (const id of r.idsHuerfanos.slice(0, 10)) lineas.push(`    ! ${id}`)
+    lineas.push(
+      `  ids huérfanos (rompen favoritos): ${r.idsHuerfanos.conteo}` +
+        (r.idsHuerfanos.truncado ? ` (en --json se listan ${r.idsHuerfanos.valores.length})` : ''),
+    )
+    for (const id of r.idsHuerfanos.valores.slice(0, 10)) lineas.push(`    ! ${id}`)
     lineas.push(
       `  cambios de precio: ${r.cambiosDePrecio.conteo} (sin base para %: ${r.cambiosDePrecio.conBaseCero})`,
     )
@@ -240,8 +243,13 @@ function imprimirReporte(r: ReporteDiff): void {
       `  cobertura EAN: prev ${r.coberturaEan.prev}/${r.prevConteo} (${r.coberturaEan.prevPorcentaje!.toFixed(2)}%) → ` +
         `next ${r.coberturaEan.next}/${r.nextConteo} (${r.coberturaEan.nextPorcentaje.toFixed(2)}%)`,
     )
-    lineas.push(`  EANs desaparecidos: ${r.coberturaEan.barcodesDesaparecidos.length}`)
-    for (const ean of r.coberturaEan.barcodesDesaparecidos.slice(0, 10)) lineas.push(`    ! ${ean}`)
+    lineas.push(
+      `  EANs desaparecidos: ${r.coberturaEan.barcodesDesaparecidos.conteo}` +
+        (r.coberturaEan.barcodesDesaparecidos.truncado
+          ? ` (en --json se listan ${r.coberturaEan.barcodesDesaparecidos.valores.length})`
+          : ''),
+    )
+    for (const ean of r.coberturaEan.barcodesDesaparecidos.valores.slice(0, 10)) lineas.push(`    ! ${ean}`)
     lineas.push(`  categorias nuevas: ${r.categoriasAltas.length ? r.categoriasAltas.join(', ') : '—'}`)
     lineas.push(`  categorias desaparecidas: ${r.categoriasBajas.length ? r.categoriasBajas.join(', ') : '—'}`)
   }

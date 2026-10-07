@@ -94,6 +94,17 @@ export interface CambioDePrecio {
   pct: number
 }
 
+/**
+ * A list the report keeps bounded: the exact count is always present, the
+ * values are capped. `--json` feeds an issue body, so an unbounded list of
+ * 20k orphans must not become a megabyte of payload.
+ */
+export interface ListaAcotada {
+  conteo: number
+  truncado: boolean
+  valores: string[]
+}
+
 export interface ReporteDiff {
   /** `true` when there was no previous catalog to diff against. */
   primeraCarga: boolean
@@ -103,7 +114,7 @@ export interface ReporteDiff {
   altas: ConteoConEjemplos
   bajas: ConteoConEjemplos
   /** Ids present in `prev` but not in `next` (they orphan a user's favorites). */
-  idsHuerfanos: string[]
+  idsHuerfanos: ListaAcotada
   cambiosDePrecio: {
     /** Products whose price changed (including zero-baseline ones). */
     conteo: number
@@ -120,13 +131,23 @@ export interface ReporteDiff {
     prevPorcentaje: number | null
     nextPorcentaje: number
     /** EANs present in `prev` but not `next` (they break EAN-keyed lists). */
-    barcodesDesaparecidos: string[]
+    barcodesDesaparecidos: ListaAcotada
   }
   categoriasAltas: string[]
   categoriasBajas: string[]
 }
 
 const MAX_EJEMPLOS = 10
+/** Cap for the two lists that can grow with the catalog itself. */
+export const MAX_LISTA = 200
+
+function acotar(valores: string[]): ListaAcotada {
+  return {
+    conteo: valores.length,
+    truncado: valores.length > MAX_LISTA,
+    valores: valores.slice(0, MAX_LISTA),
+  }
+}
 
 /** Same numeric shape `normalize-catalog` accepts for an included record. */
 const NUMBER_RE = /^-?\d+(?:[.,]\d+)?$/
@@ -340,14 +361,14 @@ export function compararCatalogos(prev: ProductoLite[] | null, next: ProductoLit
       deltaConteo: null,
       altas: { conteo: 0, ejemplos: [] },
       bajas: { conteo: 0, ejemplos: [] },
-      idsHuerfanos: [],
+      idsHuerfanos: acotar([]),
       cambiosDePrecio: { conteo: 0, conBaseCero: 0, mediana: null, maximo: null, top10: [] },
       coberturaEan: {
         prev: 0,
         next: coberturaNext,
         prevPorcentaje: null,
         nextPorcentaje: porcentaje(coberturaNext, nextConteo),
-        barcodesDesaparecidos: [],
+        barcodesDesaparecidos: acotar([]),
       },
       categoriasAltas: [],
       categoriasBajas: [],
@@ -397,7 +418,7 @@ export function compararCatalogos(prev: ProductoLite[] | null, next: ProductoLit
     altas: { conteo: altasLista.length, ejemplos: ejemplos(altasLista) },
     bajas: { conteo: bajasLista.length, ejemplos: ejemplos(bajasLista) },
     // Same id set as `bajas`, as plain ids: these are the ones that orphan favorites.
-    idsHuerfanos: bajasLista.map((p) => p.id),
+    idsHuerfanos: acotar(bajasLista.map((p) => p.id)),
     cambiosDePrecio: {
       conteo: cambios.length + conBaseCero,
       conBaseCero,
@@ -410,7 +431,7 @@ export function compararCatalogos(prev: ProductoLite[] | null, next: ProductoLit
       next: coberturaNext,
       prevPorcentaje: porcentaje(contarEan(prev), prev.length),
       nextPorcentaje: porcentaje(coberturaNext, nextConteo),
-      barcodesDesaparecidos,
+      barcodesDesaparecidos: acotar(barcodesDesaparecidos),
     },
     categoriasAltas: [...nextCategorias].filter((c) => !prevCategorias.has(c)).sort(),
     categoriasBajas: [...prevCategorias].filter((c) => !nextCategorias.has(c)).sort(),

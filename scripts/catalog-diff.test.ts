@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { compararCatalogos, validarProductos } from './catalog-diff.ts'
+import { compararCatalogos, validarProductos, MAX_LISTA } from './catalog-diff.ts'
 import type { ProductoLite, ReporteDiff, ValidacionError } from './catalog-diff.ts'
 
 /** Minimal valid product builder; `id` is the only required override. */
@@ -17,6 +17,34 @@ function prod(over: Partial<ProductoLite> & { id: string }): ProductoLite {
 function motivoDe(errores: ValidacionError[], motivo: string) {
   return errores.find((e) => e.motivo === motivo)
 }
+
+// The report feeds an issue body through --json, so the two lists that grow
+// with the catalog must stay bounded while the count stays exact.
+describe('bounded lists', () => {
+  it('caps the orphan and disappeared-EAN lists and keeps the exact count', () => {
+    const prev = Array.from({ length: MAX_LISTA + 5 }, (_, i) =>
+      prod({ id: `id-${i}`, barcode: `ean-${i}` }),
+    )
+    const r = compararCatalogos(prev, [])
+
+    expect(r.idsHuerfanos.conteo).toBe(MAX_LISTA + 5)
+    expect(r.idsHuerfanos.truncado).toBe(true)
+    expect(r.idsHuerfanos.valores).toHaveLength(MAX_LISTA)
+
+    expect(r.coberturaEan.barcodesDesaparecidos.conteo).toBe(MAX_LISTA + 5)
+    expect(r.coberturaEan.barcodesDesaparecidos.truncado).toBe(true)
+    expect(r.coberturaEan.barcodesDesaparecidos.valores).toHaveLength(MAX_LISTA)
+  })
+
+  it('does not mark a list as truncated when it fits', () => {
+    const prev = Array.from({ length: MAX_LISTA }, (_, i) => prod({ id: `id-${i}` }))
+    const r = compararCatalogos(prev, [])
+
+    expect(r.idsHuerfanos.conteo).toBe(MAX_LISTA)
+    expect(r.idsHuerfanos.truncado).toBe(false)
+    expect(r.idsHuerfanos.valores).toHaveLength(MAX_LISTA)
+  })
+})
 
 describe('validarProductos', () => {
   it('rejects input that is not an array', () => {
@@ -194,7 +222,7 @@ describe('compararCatalogos', () => {
     expect(r.deltaConteo).toBeNull()
     expect(r.altas.conteo).toBe(0)
     expect(r.bajas.conteo).toBe(0)
-    expect(r.idsHuerfanos).toEqual([])
+    expect(r.idsHuerfanos).toEqual({ conteo: 0, truncado: false, valores: [] })
     expect(r.cambiosDePrecio.conteo).toBe(0)
     expect(r.coberturaEan.next).toBe(1)
     expect(r.coberturaEan.prev).toBe(0)
@@ -220,7 +248,8 @@ describe('compararCatalogos', () => {
     })
     expect(r.bajas.conteo).toBe(10)
     expect(r.bajas.ejemplos).toHaveLength(10)
-    expect(r.idsHuerfanos).toEqual(prev.slice(5).map((p) => p.id))
+    expect(r.idsHuerfanos.valores).toEqual(prev.slice(5).map((p) => p.id))
+    expect(r.idsHuerfanos.conteo).toBe(prev.length - 5)
   })
 
   it('computes price-change count, median, max and the top 10 by absolute change', () => {
@@ -289,7 +318,8 @@ describe('compararCatalogos', () => {
     expect(r.coberturaEan.next).toBe(3)
     expect(r.coberturaEan.prevPorcentaje).toBe(75)
     expect(r.coberturaEan.nextPorcentaje).toBe(75)
-    expect(r.coberturaEan.barcodesDesaparecidos).toEqual(['111'])
+    expect(r.coberturaEan.barcodesDesaparecidos.valores).toEqual(['111'])
+    expect(r.coberturaEan.barcodesDesaparecidos.conteo).toBe(1)
   })
 
   it('lists category altas / bajas, ignoring the empty category', () => {
