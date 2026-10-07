@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { compararCatalogos, validarProductos, MAX_LISTA } from './catalog-diff.ts'
-import type { ProductoLite, ReporteDiff, ValidacionError } from './catalog-diff.ts'
+import { compararCatalogos, validarProductos, MAX_LISTA, UMBRAL_GRANDE } from './catalog-diff.ts'
+import type { FechasDelRaw, ProductoLite, ReporteDiff, ValidacionError } from './catalog-diff.ts'
 
 /** Minimal valid product builder; `id` is the only required override. */
 function prod(over: Partial<ProductoLite> & { id: string }): ProductoLite {
@@ -338,6 +338,156 @@ describe('compararCatalogos', () => {
     compararCatalogos(prev, next)
     expect(JSON.stringify(prev)).toBe(beforePrev)
     expect(JSON.stringify(next)).toBe(beforeNext)
+  })
+})
+
+// The whole point of the section: a big change arrives annotated, not naked.
+// R7 could not be closed because the raw's date fields never reach the report.
+describe('compararCatalogos — cambios grandes', () => {
+  it('exports the 50% threshold and reports the value it applied', () => {
+    expect(UMBRAL_GRANDE).toBe(50)
+    const r = compararCatalogos([prod({ id: 'a', precio: 100 })], [prod({ id: 'a', precio: 101 })])
+    expect(r.cambiosGrandes.umbralPct).toBe(UMBRAL_GRANDE)
+    expect(r.cambiosGrandes.umbralPct).toBe(50)
+  })
+
+  it('counts a change only when |pct| is strictly greater than the threshold', () => {
+    // 49.9% is not big; 50.0% is not big either (strict >); 50.1% is on both sides.
+    const prev = [
+      prod({ id: 'up-49.9', precio: 1000 }),
+      prod({ id: 'up-50.1', precio: 1000 }),
+      prod({ id: 'down-50.0', precio: 1000 }),
+      prod({ id: 'down-50.1', precio: 1000 }),
+    ]
+    const next = [
+      prod({ id: 'up-49.9', precio: 1499 }),
+      prod({ id: 'up-50.1', precio: 1501 }),
+      prod({ id: 'down-50.0', precio: 500 }),
+      prod({ id: 'down-50.1', precio: 499 }),
+    ]
+    const r = compararCatalogos(prev, next)
+
+    expect(r.cambiosDePrecio.conteo).toBe(4)
+    expect(r.cambiosGrandes.conteo).toBe(2)
+    expect(r.cambiosGrandes.ejemplos.map((e) => e.id).sort()).toEqual(['down-50.1', 'up-50.1'])
+  })
+
+  it('reuses the percentage already computed for the price changes', () => {
+    const prev = [prod({ id: 'a', precio: 100 }), prod({ id: 'b', precio: 400 })]
+    const next = [prod({ id: 'a', precio: 900 }), prod({ id: 'b', precio: 100 })]
+    const r = compararCatalogos(prev, next)
+
+    for (const e of r.cambiosGrandes.ejemplos) {
+      const match = r.cambiosDePrecio.top10.find((c) => c.id === e.id)
+      expect(match?.pct).toBe(e.pct)
+    }
+    expect(r.cambiosGrandes.ejemplos.map((e) => e.id)).toEqual(['a', 'b'])
+  })
+
+  it('does NOT claim knowledge when no date map was passed: false and null, never 0', () => {
+    const prev = [prod({ id: 'a', precio: 100 })]
+    const next = [prod({ id: 'a', precio: 1000 })]
+
+    const sinOpts = compararCatalogos(prev, next)
+    expect(sinOpts.cambiosGrandes.conteo).toBe(1)
+    expect(sinOpts.cambiosGrandes.fechasDisponibles).toBe(false)
+    expect(sinOpts.cambiosGrandes.conFechaDeCambio).toBeNull()
+    expect(sinOpts.cambiosGrandes.sinFechaDeCambio).toBeNull()
+
+    const conNull = compararCatalogos(prev, next, { fechas: null })
+    expect(conNull.cambiosGrandes.fechasDisponibles).toBe(false)
+    expect(conNull.cambiosGrandes.conFechaDeCambio).toBeNull()
+    expect(conNull.cambiosGrandes.sinFechaDeCambio).toBeNull()
+    // `actualizado` is context, not evidence: it must not leak into the count.
+    expect(conNull.cambiosGrandes.ejemplos[0]).not.toHaveProperty('precioCambiado')
+  })
+
+  it('a map with no entries still counts as available (0/0 is a real measurement)', () => {
+    const r = compararCatalogos([prod({ id: 'a', precio: 100 })], [prod({ id: 'a', precio: 1000 })], {
+      fechas: new Map(),
+    })
+    expect(r.cambiosGrandes.fechasDisponibles).toBe(true)
+    expect(r.cambiosGrandes.conFechaDeCambio).toBe(0)
+    expect(r.cambiosGrandes.sinFechaDeCambio).toBe(1)
+  })
+
+  it('counts as with-date only a non-empty precioCambiado, and carries actualizado as context', () => {
+    const prev = ['a', 'b', 'c', 'd'].map((id) => prod({ id, precio: 100 }))
+    const next = ['a', 'b', 'c', 'd'].map((id) => prod({ id, precio: 1000 }))
+    const fechas = new Map<string, FechasDelRaw>([
+      ['a', { actualizado: '2026-09-02', precioCambiado: '2026-09-01' }],
+      // `actualizado` alone must NOT make this one "with date".
+      ['b', { actualizado: '2026-08-01', precioCambiado: '   ' }],
+      ['c', {}],
+      // d is deliberately absent from the map.
+    ])
+
+    const r = compararCatalogos(prev, next, { fechas })
+    expect(r.cambiosGrandes.fechasDisponibles).toBe(true)
+    expect(r.cambiosGrandes.conteo).toBe(4)
+    expect(r.cambiosGrandes.conFechaDeCambio).toBe(1)
+    expect(r.cambiosGrandes.sinFechaDeCambio).toBe(3)
+
+    const a = r.cambiosGrandes.ejemplos.find((e) => e.id === 'a')
+    expect(a?.precioCambiado).toBe('2026-09-01')
+    expect(a?.actualizado).toBe('2026-09-02')
+    expect(a).toMatchObject({ precioPrev: 100, precioNext: 1000 })
+
+    const b = r.cambiosGrandes.ejemplos.find((e) => e.id === 'b')
+    expect(b?.precioCambiado).toBeUndefined()
+    expect(b?.actualizado).toBe('2026-08-01')
+
+    const d = r.cambiosGrandes.ejemplos.find((e) => e.id === 'd')
+    expect(d?.precioCambiado).toBeUndefined()
+    expect(d?.actualizado).toBeUndefined()
+  })
+
+  it('orders the examples by absolute percentage and truncates them to 10', () => {
+    const prev = Array.from({ length: 15 }, (_, i) => prod({ id: `p${i}`, precio: 100 }))
+    const next = Array.from({ length: 15 }, (_, i) => prod({ id: `p${i}`, precio: 160 + i * 10 }))
+
+    const r = compararCatalogos(prev, next)
+    expect(r.cambiosGrandes.conteo).toBe(15)
+    expect(r.cambiosGrandes.ejemplos).toHaveLength(10)
+    expect(r.cambiosGrandes.ejemplos.map((e) => e.id)).toEqual(
+      Array.from({ length: 10 }, (_, i) => `p${14 - i}`),
+    )
+  })
+
+  it('excludes a zero previous price (there is no percentage to judge)', () => {
+    const prev = [prod({ id: 'zero', precio: 0 }), prod({ id: 'big', precio: 100 })]
+    const next = [prod({ id: 'zero', precio: 5000 }), prod({ id: 'big', precio: 1000 })]
+
+    const r = compararCatalogos(prev, next)
+    expect(r.cambiosDePrecio.conBaseCero).toBe(1)
+    expect(r.cambiosGrandes.conteo).toBe(1)
+    expect(r.cambiosGrandes.ejemplos.map((e) => e.id)).toEqual(['big'])
+    expect(r.cambiosGrandes.sinFechaDeCambio).toBeNull()
+  })
+
+  it('reports an empty section on a first load while staying honest about the map', () => {
+    const fechas = new Map<string, FechasDelRaw>([['a', { precioCambiado: '2026-09-01' }]])
+
+    const conMapa = compararCatalogos(null, [prod({ id: 'a', precio: 1000 })], { fechas })
+    expect(conMapa.cambiosGrandes.conteo).toBe(0)
+    expect(conMapa.cambiosGrandes.ejemplos).toEqual([])
+    expect(conMapa.cambiosGrandes.fechasDisponibles).toBe(true)
+    expect(conMapa.cambiosGrandes.conFechaDeCambio).toBe(0)
+    expect(conMapa.cambiosGrandes.sinFechaDeCambio).toBe(0)
+    expect(conMapa.cambiosGrandes.umbralPct).toBe(UMBRAL_GRANDE)
+
+    const sinMapa = compararCatalogos(null, [prod({ id: 'a', precio: 1000 })])
+    expect(sinMapa.cambiosGrandes.conteo).toBe(0)
+    expect(sinMapa.cambiosGrandes.fechasDisponibles).toBe(false)
+    expect(sinMapa.cambiosGrandes.conFechaDeCambio).toBeNull()
+    expect(sinMapa.cambiosGrandes.sinFechaDeCambio).toBeNull()
+  })
+
+  it('never mutates the date map it receives', () => {
+    const fechas = new Map<string, FechasDelRaw>([['a', { precioCambiado: '2026-09-01' }]])
+    const before = JSON.stringify([...fechas])
+    compararCatalogos([prod({ id: 'a', precio: 100 })], [prod({ id: 'a', precio: 1000 })], { fechas })
+    expect(JSON.stringify([...fechas])).toBe(before)
   })
 })
 

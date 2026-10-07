@@ -95,6 +95,35 @@ export interface CambioDePrecio {
 }
 
 /**
+ * The raw's own date fields for one product. `precioCambiado` is the "the
+ * price changed on this date" marker; `actualizado` is "last write of the
+ * record" and is context only — measured as uniformly recent in the real raw,
+ * so it never decides anything.
+ */
+export interface FechasDelRaw {
+  actualizado?: string | null
+  precioCambiado?: string | null
+}
+
+/** One big price change, annotated with whatever dates the raw had. */
+export interface CambioGrande {
+  id: string
+  nombre: string
+  pct: number
+  precioPrev: number
+  precioNext: number
+  actualizado?: string
+  precioCambiado?: string
+}
+
+/**
+ * A price change is "big" above this absolute percentage. Exported so the
+ * report can state the threshold it applied instead of leaving the number a
+ * mystery.
+ */
+export const UMBRAL_GRANDE = 50
+
+/**
  * A list the report keeps bounded: the exact count is always present, the
  * values are capped. `--json` feeds an issue body, so an unbounded list of
  * 20k orphans must not become a megabyte of payload.
@@ -124,6 +153,23 @@ export interface ReporteDiff {
     /** Largest signed percentage change. */
     maximo: number | null
     top10: CambioDePrecio[]
+  }
+  /**
+   * The anomalies, annotated. A naked "44 big changes" cannot be judged; with
+   * the raw's own dates a reader can tell whether a change was recorded as a
+   * price change or is unexplained (risk R7).
+   */
+  cambiosGrandes: {
+    /** The threshold used, in percent, so the number is never a mystery. */
+    umbralPct: number
+    conteo: number
+    /** Of those, how many carry a `precioCambiado` in the raw. `null` when we had no dates at all. */
+    conFechaDeCambio: number | null
+    sinFechaDeCambio: number | null
+    /** `false` when no date map was supplied — so a reader never mistakes "unknown" for "zero". */
+    fechasDisponibles: boolean
+    /** Up to 10, ordered by absolute percentage change, each with whatever dates exist. */
+    ejemplos: CambioGrande[]
   }
   coberturaEan: {
     prev: number
@@ -344,12 +390,76 @@ function categoriasUnicas(productos: ProductoLite[]): string[] {
   return [...vistos]
 }
 
+/** A non-empty string, trimmed; the raw's dates arrive as strings or not at all. */
+function textoDeFecha(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  const s = v.trim()
+  return s === '' ? null : s
+}
+
+/**
+ * Builds the `cambiosGrandes` section. `fechas === null` means no date map was
+ * supplied, and the counts are then `null` on purpose: reporting 0 would claim
+ * a measurement nobody made.
+ */
+function seccionCambiosGrandes(
+  cambios: CambioDePrecio[],
+  fechas: Map<string, FechasDelRaw> | null,
+): ReporteDiff['cambiosGrandes'] {
+  const fechasDisponibles = fechas !== null
+  // Reuses the exact percentage already computed for `cambiosDePrecio`; a
+  // zero baseline never reaches `cambios`, so it is excluded here too.
+  const grandes = cambios.filter((c) => Math.abs(c.pct) > UMBRAL_GRANDE)
+  const ordenados = [...grandes].sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct))
+
+  let conFecha = 0
+  if (fechas) {
+    for (const c of grandes) {
+      if (textoDeFecha(fechas.get(c.id)?.precioCambiado) !== null) conFecha++
+    }
+  }
+
+  const ejemplos: CambioGrande[] = ordenados.slice(0, MAX_EJEMPLOS).map((c) => {
+    const e: CambioGrande = {
+      id: c.id,
+      nombre: c.nombre,
+      pct: c.pct,
+      precioPrev: c.precioPrev,
+      precioNext: c.precioNext,
+    }
+    const f = fechas?.get(c.id)
+    const actualizado = textoDeFecha(f?.actualizado)
+    const precioCambiado = textoDeFecha(f?.precioCambiado)
+    if (actualizado !== null) e.actualizado = actualizado
+    // `actualizado` is carried as context only; it never decides `conFecha`.
+    if (precioCambiado !== null) e.precioCambiado = precioCambiado
+    return e
+  })
+
+  return {
+    umbralPct: UMBRAL_GRANDE,
+    conteo: grandes.length,
+    conFechaDeCambio: fechasDisponibles ? conFecha : null,
+    sinFechaDeCambio: fechasDisponibles ? grandes.length - conFecha : null,
+    fechasDisponibles,
+    ejemplos,
+  }
+}
+
 /**
  * Compares two catalogs and returns the refresh report. Pure: neither array is
  * mutated. `prev === null` means "first refresh" and is reported as such —
  * never as if every product were a new `alta`.
+ *
+ * `opts.fechas` maps a product id to the raw's date fields. Its absence is a
+ * fact the report states (`fechasDisponibles: false`) rather than hides.
  */
-export function compararCatalogos(prev: ProductoLite[] | null, next: ProductoLite[]): ReporteDiff {
+export function compararCatalogos(
+  prev: ProductoLite[] | null,
+  next: ProductoLite[],
+  opts?: { fechas?: Map<string, FechasDelRaw> | null },
+): ReporteDiff {
+  const fechas = opts?.fechas ?? null
   const nextConteo = next.length
   const coberturaNext = contarEan(next)
 
@@ -363,6 +473,7 @@ export function compararCatalogos(prev: ProductoLite[] | null, next: ProductoLit
       bajas: { conteo: 0, ejemplos: [] },
       idsHuerfanos: acotar([]),
       cambiosDePrecio: { conteo: 0, conBaseCero: 0, mediana: null, maximo: null, top10: [] },
+      cambiosGrandes: seccionCambiosGrandes([], fechas),
       coberturaEan: {
         prev: 0,
         next: coberturaNext,
@@ -426,6 +537,7 @@ export function compararCatalogos(prev: ProductoLite[] | null, next: ProductoLit
       maximo: pcts.length === 0 ? null : pcts.reduce((a, b) => (b > a ? b : a)),
       top10,
     },
+    cambiosGrandes: seccionCambiosGrandes(cambios, fechas),
     coberturaEan: {
       prev: contarEan(prev),
       next: coberturaNext,

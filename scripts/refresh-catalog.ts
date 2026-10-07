@@ -35,7 +35,7 @@ import {
   compararCatalogos,
   validarProductos,
 } from './catalog-diff.ts'
-import type { ProductoLite, ReporteDiff, ResultadoValidacion } from './catalog-diff.ts'
+import type { FechasDelRaw, ProductoLite, ReporteDiff, ResultadoValidacion } from './catalog-diff.ts'
 
 const DEFAULT_RAW = 'raw-catalog.json'
 const DEFAULT_CATALOGO = 'public/data/catalogo.json'
@@ -154,6 +154,33 @@ function extraerProductos(parsed: unknown): unknown {
   return parsed
 }
 
+/**
+ * The raw's date fields, keyed by product id. Only string values are kept —
+ * anything else is "no date". This is the evidence T12 exists to preserve:
+ * `normalize` drops these fields and the runner's raw dies with the job.
+ *
+ * Read-only and log-safe: it never echoes a record, and the dates are
+ * timestamps, not commercial data.
+ */
+function fechasDelRaw(parsed: unknown): Map<string, FechasDelRaw> {
+  const fechas = new Map<string, FechasDelRaw>()
+  const productos = extraerProductos(parsed)
+  if (!Array.isArray(productos)) return fechas
+
+  for (const registro of productos) {
+    if (!esObjetoPlano(registro)) continue
+    const id = typeof registro.id === 'string' ? registro.id.trim() : ''
+    if (id === '') continue
+    const actualizado = typeof registro.actualizado === 'string' ? registro.actualizado : null
+    const precioCambiado = typeof registro.precioCambiado === 'string' ? registro.precioCambiado : null
+    // A record with neither field is "without date" anyway: the absent entry
+    // says the same thing and keeps the map small.
+    if (actualizado === null && precioCambiado === null) continue
+    fechas.set(id, { actualizado, precioCambiado })
+  }
+  return fechas
+}
+
 function imprimirErrores(resultado: ResultadoValidacion): void {
   console.error(
     `refresh-catalog: el raw no pasó la validación (conteo ${resultado.conteo}, ` +
@@ -209,6 +236,14 @@ function pct(n: number | null): string {
   return n === null ? 'n/d' : `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`
 }
 
+/** ` · actualizado <x> · precioCambiado <y>` for whichever dates exist. */
+function fechasDeEjemplo(c: { actualizado?: string; precioCambiado?: string }): string {
+  let s = ''
+  if (c.actualizado) s += ` · actualizado ${c.actualizado}`
+  if (c.precioCambiado) s += ` · precioCambiado ${c.precioCambiado}`
+  return s
+}
+
 function imprimirReporte(r: ReporteDiff): void {
   const lineas: string[] = []
   if (r.primeraCarga) {
@@ -238,6 +273,20 @@ function imprimirReporte(r: ReporteDiff): void {
     )
     for (const c of r.cambiosDePrecio.top10) {
       lineas.push(`    ${pct(c.pct)} ${c.id} (${c.precioPrev} → ${c.precioNext})`)
+    }
+    // The anomalies, annotated: without this line a big change is bare, and a
+    // reader cannot tell a drifted price from a real correction (risk R7).
+    const g = r.cambiosGrandes
+    lineas.push(
+      `  cambios grandes (>${g.umbralPct}%): ${g.conteo}` +
+        (g.fechasDisponibles
+          ? ` — con fecha de cambio registrada: ${g.conFechaDeCambio} · sin fecha: ${g.sinFechaDeCambio}`
+          : ' — sin fechas del raw: no se puede saber si traen un cambio registrado'),
+    )
+    for (const c of g.ejemplos) {
+      lineas.push(
+        `    ${pct(c.pct)} ${c.id} (${c.precioPrev} → ${c.precioNext})${fechasDeEjemplo(c)}`,
+      )
     }
     lineas.push(
       `  cobertura EAN: prev ${r.coberturaEan.prev}/${r.prevConteo} (${r.coberturaEan.prevPorcentaje!.toFixed(2)}%) → ` +
@@ -293,9 +342,11 @@ function main(): void {
   correrPipeline('normalize-catalog.ts', [rawPath, catalogoPath], opts.json)
   correrPipeline('generate-index.ts', [catalogoPath, dirname(catalogoPath)], opts.json)
 
-  // 5. Re-read what was produced and report.
+  // 5. Re-read what was produced and report. The date map built from the raw
+  //    is passed along: the raw is ephemeral, so this report is the only place
+  //    those dates survive (T12).
   const next = leerProductosEscritos(catalogoPath)
-  const reporte = compararCatalogos(prev, next)
+  const reporte = compararCatalogos(prev, next, { fechas: fechasDelRaw(parsedRaw) })
 
   if (opts.json) {
     console.log(JSON.stringify(reporte))

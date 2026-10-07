@@ -24,6 +24,31 @@ function bigRaw(n = 20_001): Array<Record<string, unknown>> {
   return Array.from({ length: n }, (_, i) => rawRecord(i))
 }
 
+/**
+ * A big raw that turns the two PREV_PRODUCTS ids into big changes: p1 carries
+ * the raw's date fields, p2 does not.
+ */
+function rawConCambiosGrandes(): Array<Record<string, unknown>> {
+  const raw = bigRaw()
+  raw[0] = rawRecord(0, {
+    id: 'p1',
+    nombre: 'Producto que sube',
+    categoria: 'Cat',
+    barcode: '999',
+    precio: 1000,
+    actualizado: '2026-09-02T10:00:00.000Z',
+    precioCambiado: '2026-09-01T10:00:00.000Z',
+  })
+  raw[1] = rawRecord(1, {
+    id: 'p2',
+    nombre: 'Producto sin fecha',
+    categoria: 'Cat',
+    barcode: '888',
+    precio: 2000,
+  })
+  return raw
+}
+
 const PREV_PRODUCTS = [
   { id: 'p1', nombre: 'Producto que sube', marca: '', categoria: 'Cat', barcode: '999', precio: 100 },
   { id: 'p2', nombre: 'Producto que sale', marca: '', categoria: 'Cat', barcode: '888', precio: 200 },
@@ -207,6 +232,66 @@ describe('scripts/refresh-catalog.ts', () => {
 
       // pipeline output is still visible, on stderr
       expect(r.err).toContain('normalize-catalog:')
+    },
+    120_000,
+  )
+
+  it(
+    'prose report annotates big changes with the raw dates',
+    () => {
+      const dir = makeDir()
+      // Production shape: `extract-catalog` writes {"products": [...]}, so the
+      // date map has to be read through `raw.products ?? raw`.
+      writeFileSync(join(dir, 'raw-catalog.json'), JSON.stringify({ products: rawConCambiosGrandes() }))
+
+      const r = runRefresh(dir, ['--esperado', '20001'])
+      expect(r.code).toBe(0)
+      // p1 (+900%, with dates) and p2 (+900%, no dates)
+      expect(r.out).toContain('cambios grandes (>50%): 2')
+      expect(r.out).toContain('con fecha de cambio registrada: 1 · sin fecha: 1')
+      expect(r.out).toContain('precioCambiado 2026-09-01T10:00:00.000Z')
+      expect(r.out).toContain('actualizado 2026-09-02T10:00:00.000Z')
+    },
+    120_000,
+  )
+
+  it(
+    '--json report carries the cambios grandes section built from the raw dates',
+    () => {
+      const dir = makeDir()
+      writeFileSync(join(dir, 'raw-catalog.json'), JSON.stringify(rawConCambiosGrandes()))
+
+      const r = runRefresh(dir, ['--json', '--esperado', '20001'])
+      expect(r.code).toBe(0)
+      const report = JSON.parse(r.out) as {
+        cambiosGrandes: {
+          umbralPct: number
+          conteo: number
+          conFechaDeCambio: number | null
+          sinFechaDeCambio: number | null
+          fechasDisponibles: boolean
+          ejemplos: Array<Record<string, unknown>>
+        }
+      }
+      expect(report.cambiosGrandes.umbralPct).toBe(50)
+      expect(report.cambiosGrandes.fechasDisponibles).toBe(true)
+      expect(report.cambiosGrandes.conteo).toBe(2)
+      expect(report.cambiosGrandes.conFechaDeCambio).toBe(1)
+      expect(report.cambiosGrandes.sinFechaDeCambio).toBe(1)
+
+      const p1 = report.cambiosGrandes.ejemplos.find((e) => e.id === 'p1')
+      expect(p1).toMatchObject({
+        id: 'p1',
+        nombre: 'Producto que sube',
+        precioPrev: 100,
+        precioNext: 1000,
+        actualizado: '2026-09-02T10:00:00.000Z',
+        precioCambiado: '2026-09-01T10:00:00.000Z',
+      })
+      expect(p1?.pct).toBeCloseTo(900)
+      const p2 = report.cambiosGrandes.ejemplos.find((e) => e.id === 'p2')
+      expect(p2?.precioCambiado).toBeUndefined()
+      expect(p2?.actualizado).toBeUndefined()
     },
     120_000,
   )
