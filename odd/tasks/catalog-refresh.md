@@ -1,8 +1,8 @@
 # Feature: actualización diaria del catálogo desde kioskos.app (`catalog-refresh`)
 
 **Status:** Etapa 1 (T1-T4) **hecha y commiteada** en `dc93f8c` · Etapa 2: T5 **hecha, verificada y
-commiteada** en `ddb780d` · T6 **hecha y commiteada**, pendiente de la primera corrida manual ·
-**Started:** 2026-10-02
+commiteada** en `ddb780d` · T6 **hecha, pusheada y verificada en su primera corrida real**
+(2026-10-07) · **Started:** 2026-10-02
 **Branch:** `main` (convención del repo: se commitea sobre `main`, no se crea feature branch)
 **Origen:** pedido del usuario, 2026-10-02: *"tenemos que empezar a ver cómo hacer para actualizar
 el catálogo"* → *"el catálogo sale de un scrapeo, tendríamos que ver cómo hacer para que se
@@ -185,20 +185,29 @@ comportamiento de reintento interno de `undici`. Ninguna de las dos se reportó 
   de `force` fuera de comentarios, refspec sin `+`, cero menciones a `raw-catalog` fuera del
   comentario de higiene, cero `upload-artifact`.
 
-#### Primera corrida manual: qué tiene que probar
+#### Primera corrida manual (2026-10-07): qué probó
 
-Nada de este workflow se puede ejecutar antes de que exista el secret, así que el archivo es lo
-menos verificado de la feature y hay que mirarlo. En orden:
+Corrida `37573451884`, 44 s, **todos los pasos en verde**.
 
-1. **R1** — que el login sobreviva desde la IP del runner.
-2. **R4** — qué local reporta el extractor (lo imprime).
-3. Que `refresh` produzca el reporte y los tres JSON.
-4. Que el plumbing de publicación cree `datos` con **exactamente** los tres archivos de datos y un
-   solo commit. Es la parte más frágil: el fetch es `--depth=1` y el push se hace desde un repo
-   superficial, cosa que en teoría es un fast-forward válido (el remoto ya tiene el padre) pero que
-   nadie ejecutó todavía.
-5. Que una **segunda** corrida agregue un commit en vez de ser rechazada.
-6. Que un fallo forzado abra el issue esperado.
+1. **R1 — CERRADO.** `login ok`: el login funciona desde la IP de un runner. Era el riesgo que no se
+   podía resolver sin probar.
+2. **R4 — CERRADO.** `local del token: CERCA PROCREAR`, sin advertencia de varios locales ⇒ la
+   cuenta tiene **un solo local**.
+3. `refresh` produjo el reporte y los tres JSON: 48 páginas, **23.553 registros exactamente iguales
+   al oráculo**, 2.820 excluidos por `precio <= 0`.
+4. **CERRADO.** El branch `datos` quedó con **exactamente** los tres archivos
+   (`public/data/{catalogo,catalogo-index,catalogo-facets}.json`) y un commit raíz del bot: el fetch
+   `--depth=1` más el push desde un repo superficial funcionaron.
+5. **Pendiente:** que una segunda corrida agregue un commit en vez de ser rechazada (la hace el cron).
+6. **Pendiente:** que un fallo forzado abra el issue.
+
+**El primer diff real de la historia del catálogo**: 20.331 → **20.733** productos (+402), 516 altas,
+114 bajas, **1.589 cambios de precio**, 118 EANs desaparecidos, 4 categorías nuevas. La distribución
+de precios **no se movió** (mediana 2.600 → 2.700, máximo idéntico: 2.123.750), así que no hubo
+ningún reescalado.
+
+**Y de ahí salió R7** (ver riesgos): 44 de esos 1.589 cambios son anómalos y hay que confirmarlos
+con el usuario **antes** de que T7 publique los datos.
 
 **Orden de operaciones obligatorio**: los secrets se cargan **antes** de pushear este archivo. Si el
 cron empieza a correr sin credenciales, va a fallar y a abrir un issue por día.
@@ -206,6 +215,9 @@ cron empieza a correr sin credenciales, va a fallar y a abrir un issue por día.
   `main`), bajar el branch `datos` e inyectar los archivos en `dist/data/` antes de publicar. Sacar
   `public/data` del control de versiones y mudar a T6 el check "los assets de búsqueda corresponden
   al catálogo" (`deploy.yml:38-47`), que ahora vive donde se generan los datos.
+  **Gate: R7.** No se publica el dataset del 2026-10-07 hasta que el usuario confirme los 44 cambios
+  de precio anómalos. Hasta entonces, producción sigue sirviendo el catálogo viejo commiteado en
+  `main`, que es exactamente el estado seguro.
   **Acoplamiento que dejó T6 y T7 tiene que resolver**: hoy el baseline del diff sale del
   `public/data` commiteado en el checkout. Cuando los datos se muden al branch `datos`, el paso de
   `refresh` tiene que tomar el baseline de la punta de `datos` (copiar `catalogo.json` a un temporal
@@ -259,4 +271,15 @@ cron empieza a correr sin credenciales, va a fallar y a abrir un issue por día.
   `barcodesDesaparecidos` iban completos en el objeto (y por lo tanto en `--json`): en una caída
   catastrófica el payload podía rondar 1 MB. Ahora los dos son `ListaAcotada` — `conteo` exacto,
   `truncado`, y `valores` acotados a `MAX_LISTA = 200` — y la salida en prosa avisa cuando recorta.
-  Importa porque el cuerpo del issue de T6 sale de ese JSON.
+  Importaba porque el cuerpo del issue de T6 sale de ese JSON.
+- **R7 — 44 cambios de precio anómalos, a confirmar antes de publicar (2026-10-07).** De los 1.589
+  cambios medidos en la primera corrida, 44 superan +100% o caen por debajo de -50%, con casos como
+  `JUGO CITRUS IVESS CORMILLOT X 1.5L` 33 → 8.600, `TALITAS CON QUESO X 140` 20 → 2.500 o
+  `ALMOHADITAS CHOCOL LASFOR X 180G` 63 → 2.600. **La lectura de los números es que el catálogo
+  viejo tenía precios estancados o mal cargados en un puñado de artículos** (un jugo de 1,5 L a 33
+  pesos no es un precio, es un campo viejo), y no que la extracción nueva esté mal: la distribución
+  general no se movió, el máximo es idéntico y la mediana de los sospechosos (1.130) está **por
+  debajo** de la mediana del catálogo (2.600). Pero es una inferencia de plausibilidad, **no una
+  verificación**: el usuario tiene que mirar esos artículos en su sistema. Nada de esto está en
+  producción: el branch `datos` no alimenta al sitio hasta T7. Esta es la primera vez que el reporte
+  de diff hizo exactamente lo que existe para hacer.
