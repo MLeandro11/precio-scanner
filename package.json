@@ -15,6 +15,7 @@
     "normalize": "node scripts/normalize-catalog.ts",
     "generate-index": "node scripts/generate-index.ts",
     "refresh": "node scripts/refresh-catalog.ts",
+    "fetch-data": "node scripts/fetch-data.ts",
     "extract": "node scripts/extract-catalog.ts",
     "acceptance": "node scripts/acceptance.ts",
     "typecheck": "tsc --noEmit"
