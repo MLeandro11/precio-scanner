@@ -17,7 +17,7 @@
  *   0 — ok
  *   1 — raw validation failed (nothing was written)
  *   2 — raw record count differs from `--esperado`
- *   3 — a pipeline step (or an unreadable baseline/catalog) failed
+ *   3 — a pipeline step failed, or an explicit `--baseline` is missing/unreadable
  *
  * Log hygiene (the repo is public; `raw-catalog.json` carries the user's cost
  * and margin): this script never prints a record. Validation diagnostics name
@@ -26,7 +26,15 @@
  * `categoria`, price summaries).
  *
  * Usage: node scripts/refresh-catalog.ts [raw.json] [--raw <p>] [--catalogo <p>]
- *                                       [--esperado <N>] [--json] [--help]
+ *                                       [--baseline <p>] [--esperado <N>] [--json] [--help]
+ *
+ * `--catalogo` is the output path and, when `--baseline` is absent, the diff
+ * baseline too (today's behaviour). `--baseline` decouples the two: the diff is
+ * compared against that file while the regenerated catalog is still written to
+ * `--catalogo`. The daily workflow needs this because its baseline lives in a
+ * temp directory while the output goes to `public/data` (T7/D7). An explicitly
+ * passed baseline that is missing or unreadable is a failure, never a silent
+ * `primeraCarga`.
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
@@ -44,6 +52,7 @@ const SCRIPT_DIR = import.meta.dirname
 interface Opciones {
   raw: string
   catalogo: string
+  baseline: string | null
   esperado: number | null
   json: boolean
 }
@@ -55,7 +64,9 @@ generate-index; al final imprime el reporte del refresh.
 
 Opciones:
   --raw <path>        extracción cruda (default: ${DEFAULT_RAW}); también se acepta como primer argumento posicional
-  --catalogo <path>   catálogo vigente y destino (default: ${DEFAULT_CATALOGO})
+  --catalogo <path>   catálogo regenerado, destino de la escritura (default: ${DEFAULT_CATALOGO})
+  --baseline <path>   catálogo contra el que se calcula el diff (default: el mismo que --catalogo).
+                      Debe existir: si falta o no se puede leer, el CLI falla sin escribir nada
   --esperado <N>      conteo del oráculo GET /api/productos-cuantos; si el raw difiere, exit 2
   --json              imprime el reporte como un único objeto JSON (la prosa del pipeline va a stderr)
   --help              muestra esta ayuda y no ejecuta nada
@@ -72,7 +83,13 @@ function esObjetoPlano(v: unknown): v is Record<string, unknown> {
 }
 
 function parseArgs(argv: string[]): Opciones | { help: true } {
-  const opts: Opciones = { raw: DEFAULT_RAW, catalogo: DEFAULT_CATALOGO, esperado: null, json: false }
+  const opts: Opciones = {
+    raw: DEFAULT_RAW,
+    catalogo: DEFAULT_CATALOGO,
+    baseline: null,
+    esperado: null,
+    json: false,
+  }
   let rawFromFlag = false
   let rawFromPositional = false
 
@@ -90,6 +107,10 @@ function parseArgs(argv: string[]): Opciones | { help: true } {
       const value = argv[++i]
       if (!value) fail(1, '--catalogo necesita un path')
       opts.catalogo = value
+    } else if (arg === '--baseline') {
+      const value = argv[++i]
+      if (!value) fail(1, '--baseline necesita un path')
+      opts.baseline = value
     } else if (arg === '--esperado') {
       const value = argv[++i]
       const n = Number(value)
@@ -113,12 +134,28 @@ function parseArgs(argv: string[]): Opciones | { help: true } {
   return opts
 }
 
-/** Reads the published catalog as the diff baseline. Missing file => null. */
-function leerCatalogoVigente(path: string): ProductoLite[] | null {
-  if (!existsSync(path)) return null
+/**
+ * Reads the diff baseline. A missing file means "no previous catalog" ONLY for
+ * the default (`--catalogo`) baseline, where `null` is today's `primeraCarga`.
+ * An EXPLICIT `--baseline` must exist: silently treating it as absent would turn
+ * every daily report into `primeraCarga` and destroy the one thing the diff is
+ * for (T7/D7), so it fails loudly instead.
+ */
+function leerCatalogoVigente(path: string, requerido: boolean): ProductoLite[] | null {
+  if (!existsSync(path)) {
+    if (requerido) fail(3, `no existe el baseline: ${path}`)
+    return null
+  }
+  let text: string
+  try {
+    text = readFileSync(path, 'utf8')
+  } catch {
+    // Deliberately no errno message: it can quote a path we did not choose.
+    fail(3, `no se pudo leer el baseline: ${path}`)
+  }
   let parsed: unknown
   try {
-    parsed = JSON.parse(readFileSync(path, 'utf8'))
+    parsed = JSON.parse(text)
   } catch {
     fail(3, `el catálogo vigente no es JSON válido: ${path}`)
   }
@@ -314,9 +351,14 @@ function main(): void {
   const opts = parsedArgs
   const rawPath = resolve(opts.raw)
   const catalogoPath = resolve(opts.catalogo)
+  // `--baseline` is optional: absent means "the output path is the baseline too",
+  // which is exactly what this CLI did before the flag existed.
+  const baselinePath = opts.baseline === null ? catalogoPath : resolve(opts.baseline)
 
-  // 1. Baseline first, so the diff has something to compare against.
-  const prev = leerCatalogoVigente(catalogoPath)
+  // 1. Baseline first, so the diff has something to compare against. An explicit
+  //    baseline that does not exist is fatal here — before the raw is read and
+  //    long before anything is written.
+  const prev = leerCatalogoVigente(baselinePath, opts.baseline !== null)
 
   // 2. Read the raw.
   const parsedRaw = leerRaw(rawPath)

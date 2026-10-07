@@ -55,6 +55,16 @@ const PREV_PRODUCTS = [
   { id: 'p3', nombre: 'Otro que sale', marca: '', categoria: 'Otra', barcode: '', precio: 300 },
 ]
 
+/**
+ * A catalog that is NOT the baseline. It lives at the `--catalogo` path so a
+ * test can tell "read the baseline from --baseline" apart from "read it from the
+ * output file": its ids (x1/x2) never appear in PREV_PRODUCTS.
+ */
+const STALE_PRODUCTS = [
+  { id: 'x1', nombre: 'Stale uno', marca: '', categoria: 'Vieja', barcode: '111', precio: 10 },
+  { id: 'x2', nombre: 'Stale dos', marca: '', categoria: 'Vieja', barcode: '222', precio: 20 },
+]
+
 const DATA_DIR = ['public', 'data']
 
 function makeDir(opts: { withCatalog?: boolean } = {}): string {
@@ -254,6 +264,139 @@ describe('scripts/refresh-catalog.ts', () => {
     },
     120_000,
   )
+
+  it(
+    '--baseline reads the diff baseline from its own path and writes the catalog to --catalogo',
+    () => {
+      // The output path holds a stale, unrelated catalog: if the CLI wrongly used
+      // it as the baseline, the report would describe x1/x2, not p1/p2/p3.
+      const dir = makeDir({ withCatalog: false })
+      const outDir = join(dir, ...DATA_DIR)
+      writeFileSync(
+        join(outDir, 'catalogo.json'),
+        JSON.stringify({ version: 'stale', products: STALE_PRODUCTS }),
+      )
+
+      const baselineDir = join(dir, 'baseline')
+      mkdirSync(baselineDir, { recursive: true })
+      const baselinePath = join(baselineDir, 'catalogo.json')
+      const baselineBytes = JSON.stringify({ version: 'baseline', products: PREV_PRODUCTS })
+      writeFileSync(baselinePath, baselineBytes)
+
+      const raw = bigRaw()
+      raw[0] = rawRecord(0, {
+        id: 'p1',
+        nombre: 'Producto que sube',
+        categoria: 'Cat',
+        barcode: '999',
+        precio: 150,
+      })
+      writeFileSync(join(dir, 'raw-catalog.json'), JSON.stringify(raw))
+
+      const r = runRefresh(dir, [
+        '--json',
+        '--baseline',
+        baselinePath,
+        '--catalogo',
+        join('public', 'data', 'catalogo.json'),
+        '--esperado',
+        '20001',
+      ])
+      expect(r.code).toBe(0)
+
+      const report = JSON.parse(r.out) as {
+        prevConteo: number | null
+        bajas: { conteo: number; ejemplos: Array<{ id: string }> }
+      }
+      // The baseline file was read: 3 products, p2/p3 gone. The output file's
+      // x1/x2 are absent, which proves it was not used as the baseline.
+      expect(report.prevConteo).toBe(3)
+      expect(report.bajas.conteo).toBe(2)
+      expect(report.bajas.ejemplos.map((b) => b.id).sort()).toEqual(['p2', 'p3'])
+      expect(r.out).not.toContain('x1')
+
+      // The baseline is read-only: byte-identical after the run.
+      expect(readFileSync(baselinePath, 'utf8')).toBe(baselineBytes)
+
+      // The regenerated catalog went to --catalogo, not to the baseline.
+      const written = JSON.parse(readFileSync(join(outDir, 'catalogo.json'), 'utf8')) as {
+        version: string
+        products: unknown[]
+      }
+      expect(written.products).toHaveLength(20001)
+      expect(written.version).not.toBe('stale')
+      expect(written.version).not.toBe('baseline')
+    },
+    120_000,
+  )
+
+  it(
+    'without --baseline the diff baseline is --catalogo itself (behaviour unchanged)',
+    () => {
+      const dir = makeDir()
+      const raw = bigRaw()
+      raw[0] = rawRecord(0, {
+        id: 'p1',
+        nombre: 'Producto que sube',
+        categoria: 'Cat',
+        barcode: '999',
+        precio: 150,
+      })
+      writeFileSync(join(dir, 'raw-catalog.json'), JSON.stringify(raw))
+
+      const r = runRefresh(dir, ['--json', '--esperado', '20001'])
+      expect(r.code).toBe(0)
+      const report = JSON.parse(r.out) as {
+        prevConteo: number | null
+        bajas: { conteo: number }
+      }
+      // The pre-existing public/data/catalogo.json (PREV_PRODUCTS) is the baseline.
+      expect(report.prevConteo).toBe(3)
+      expect(report.bajas.conteo).toBe(2)
+    },
+    120_000,
+  )
+
+  it('an explicit --baseline that does not exist fails (exit 3) before anything is written', () => {
+    const dir = makeDir()
+    // A raw big enough to pass validation: if the missing baseline were silently
+    // treated as "no baseline", the run would succeed and overwrite public/data.
+    writeFileSync(join(dir, 'raw-catalog.json'), JSON.stringify(bigRaw()))
+    const before = sentinels(dir)
+
+    const r = runRefresh(dir, ['--baseline', join(dir, 'baseline', 'catalogo.json')])
+    expect(r.code).toBe(3)
+    expect(r.err).toContain('baseline')
+    expect(r.err).not.toContain('at Object.')
+    expect(sentinels(dir)).toEqual(before)
+  })
+
+  it('an unreadable baseline (a directory) fails (exit 3) before anything is written', () => {
+    const dir = makeDir()
+    writeFileSync(join(dir, 'raw-catalog.json'), JSON.stringify(bigRaw()))
+    const dirBaseline = join(dir, 'baseline-is-a-dir')
+    mkdirSync(dirBaseline)
+    const before = sentinels(dir)
+
+    const r = runRefresh(dir, ['--baseline', dirBaseline])
+    expect(r.code).toBe(3)
+    expect(r.err).toContain('baseline')
+    expect(r.err).not.toContain('at Object.')
+    expect(sentinels(dir)).toEqual(before)
+  })
+
+  it('a baseline without a products array fails (exit 3) before anything is written', () => {
+    const dir = makeDir()
+    writeFileSync(join(dir, 'raw-catalog.json'), JSON.stringify(bigRaw()))
+    const badBaseline = join(dir, 'bad-baseline.json')
+    writeFileSync(badBaseline, JSON.stringify({ version: 'sin-products' }))
+    const before = sentinels(dir)
+
+    const r = runRefresh(dir, ['--baseline', badBaseline])
+    expect(r.code).toBe(3)
+    expect(r.err).toContain('products')
+    expect(sentinels(dir)).toEqual(before)
+  })
 
   it(
     '--json report carries the cambios grandes section built from the raw dates',
