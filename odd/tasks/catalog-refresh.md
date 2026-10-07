@@ -237,6 +237,13 @@ cron empieza a correr sin credenciales, va a fallar y a abrir un issue por día.
   murió hace una semana.
 - [ ] **T11** — Des-hardcodear los conteos que cada refresh invalida: `scripts/acceptance.ts:5-8,30`
   (20.331 productos y EANs fijos) y `sdd/05-acceptance-report.md`.
+- [ ] **T12** — Que el reporte explique sus propias anomalías. En el momento del refresh el raw está
+  a mano, así que el reporte puede decir, para cada cambio grande, si el producto trae un
+  `precioCambiado` (o un `actualizado`) reciente. Sin eso, cada anomalía futura obliga a la
+  arqueología que hicimos hoy —y que **no se puede cerrar**, porque el raw del runner es efímero y
+  `normalize` descarta los tres campos de fecha—. Es la diferencia entre un reporte que dice "44
+  cambios raros" y uno que dice "44 cambios raros, de los cuales N tienen un cambio de precio
+  registrado el <fecha>".
 
 ## Verificación por etapa
 
@@ -275,11 +282,28 @@ cron empieza a correr sin credenciales, va a fallar y a abrir un issue por día.
 - **R7 — 44 cambios de precio anómalos, a confirmar antes de publicar (2026-10-07).** De los 1.589
   cambios medidos en la primera corrida, 44 superan +100% o caen por debajo de -50%, con casos como
   `JUGO CITRUS IVESS CORMILLOT X 1.5L` 33 → 8.600, `TALITAS CON QUESO X 140` 20 → 2.500 o
-  `ALMOHADITAS CHOCOL LASFOR X 180G` 63 → 2.600. **La lectura de los números es que el catálogo
-  viejo tenía precios estancados o mal cargados en un puñado de artículos** (un jugo de 1,5 L a 33
-  pesos no es un precio, es un campo viejo), y no que la extracción nueva esté mal: la distribución
-  general no se movió, el máximo es idéntico y la mediana de los sospechosos (1.130) está **por
-  debajo** de la mediana del catálogo (2.600). Pero es una inferencia de plausibilidad, **no una
-  verificación**: el usuario tiene que mirar esos artículos en su sistema. Nada de esto está en
-  producción: el branch `datos` no alimenta al sitio hasta T7. Esta es la primera vez que el reporte
-  de diff hizo exactamente lo que existe para hacer.
+  `ALMOHADITAS CHOCOL LASFOR X 180G` 63 → 2.600.
+
+  **Qué se descartó, con evidencia:**
+  - *No es un reescalado.* La distribución general no se movió (mediana 2.600 → 2.700, máximo
+    idéntico: 2.123.750) y los multiplicadores de los 44 son **todos distintos** (260×, 125×, 41×,
+    39×, 30×, 26×, 25×). Un bug de unidad daría un factor constante. Los valores nuevos son precios
+    de góndola redondos (8.600, 2.500, 2.600, 3.500, 800); los viejos no.
+  - *No es duplicación de ids.* De los 12 peores, solo **1** tiene un hermano con el mismo nombre, y
+    0 con el mismo EAN.
+  - *No es "precios estancados".* Esa fue mi primera lectura y **el campo `actualizado` la
+    falsifica**: va del 2026-07-31 al 2026-09-03 con mediana 2026-08-03 **para los 23.230
+    registros**. Es "última escritura del registro", no "último cambio de precio", y no distingue
+    nada: ni los anómalos ni los sin cambio se separan de esa distribución.
+
+  **El campo que sí importa es `precioCambiado`** (punta del usuario, y estaba en lo cierto):
+  presente en 1.091 de 23.230 registros, **todos** entre 2026-08-25 y 2026-09-03, 980 de ellos
+  idénticos a `actualizado` ⇒ marca una actualización masiva de precios, no un cambio individual.
+  Pero **tampoco explica los 44**: solo **1 de los 44** lo trae, contra 133 de 1.545 en los cambios
+  normales y 954 de 18.628 en los que no cambiaron.
+
+  **Conclusión honesta:** la firma de los datos (factores distintos, valores nuevos redondos) es la de
+  **correcciones individuales de precio**, no la de una transformación del pipeline. Pero la prueba
+  definitiva está en los campos de fecha del raw **nuevo**, y ahí el pipeline se los come: `normalize`
+  descarta `actualizado`, `precioCambiado` y `cartelImpreso`, y el raw del runner es efímero. Por eso
+  T12. Nada de esto está en producción: el branch `datos` no alimenta al sitio hasta T7.
