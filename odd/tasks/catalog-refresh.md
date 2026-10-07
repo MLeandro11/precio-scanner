@@ -221,7 +221,8 @@ comportamiento de reintento interno de `undici`. Ninguna de las dos se reportó 
 - **R5 — Fuga por logs.** Regla 1 y 2 de higiene existen porque el repo es público; cualquier
   `console.log` que imprima filas publica el margen del usuario. Es el riesgo con peor relación
   daño/probabilidad de toda la feature.
-- **R6 — Los listados completos del reporte.** `idsHuerfanos` y `barcodesDesaparecidos` van
-  completos en el objeto (y por lo tanto en `--json`): en una caída catastrófica el payload puede
-  rondar 1 MB. En la salida de prosa se imprimen truncados a 10. Hay que acotarlos (con su conteo
-  exacto y una marca de truncado) **antes de T6**, porque el cuerpo del issue sale de ese JSON.
+- **R6 — Los listados completos del reporte. CERRADO (2026-10-02).** `idsHuerfanos` y
+  `barcodesDesaparecidos` iban completos en el objeto (y por lo tanto en `--json`): en una caída
+  catastrófica el payload podía rondar 1 MB. Ahora los dos son `ListaAcotada` — `conteo` exacto,
+  `truncado`, y `valores` acotados a `MAX_LISTA = 200` — y la salida en prosa avisa cuando recorta.
+  Importa porque el cuerpo del issue de T6 sale de ese JSON.
