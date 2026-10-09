@@ -1,11 +1,12 @@
 # Feature: actualización diaria del catálogo desde kioskos.app (`catalog-refresh`)
 
-**Status:** **Etapa 1 (T1-T4), T5, T6, T8, T12, T7, T13, T9 y T10 hechas, verificadas y en producción.**
-El ciclo completo corre solo: cron → login → extracción → validación → publicación en `datos` → dispatch
-→ deploy → sitio; el cliente ya no acumula versiones muertas del catálogo y la app dice de qué fecha
-son los datos. **Corrió 3 veces sin supervisión**: el 7 y el 9 en verde, y el 8 falló **seguro** por R8
-(abrió el issue correspondiente y no publicó nada), que ya está mitigado. Faltan T11 y la decisión de
-T14 · **Started:** 2026-10-02
+**Status:** **La feature está completa: Etapa 1 (T1-T4), T5, T6, T8, T12, T7, T13, T9, T10, T11 y T14
+hechas, verificadas y en producción.** El ciclo completo corre solo: cron → login → extracción →
+validación → publicación en `datos` → dispatch → deploy → sitio; el cliente no acumula versiones
+muertas del catálogo y la app dice de qué fecha son los datos. **Corrió 3 veces sin supervisión**: el 7
+y el 9 en verde, y el 8 falló **seguro** por R8 (abrió su issue y no publicó nada), ya mitigado.
+**Pendiente**: una pasada por la atribución de la fuente en `PRODUCT.md`/`sdd/03`, y R9 (el cron corre
+~7 h tarde) · **Started:** 2026-10-02
 **Branch:** `main` (convención del repo: se commitea sobre `main`, no se crea feature branch)
 **Origen:** pedido del usuario, 2026-10-02: *"tenemos que empezar a ver cómo hacer para actualizar
 el catálogo"* → *"el catálogo sale de un scrapeo, tendríamos que ver cómo hacer para que se
@@ -286,13 +287,31 @@ cron empieza a correr sin credenciales, va a fallar y a abrir un issue por día.
   `catalogo.json` quedó con **el mismo md5** que antes (`f11d6735…`), o sea que la clave de cache del
   cliente no se movió. Commiteado en `8da4187` + `d9ef99f`.
 
-  **Queda una pregunta para el usuario (T14)**: la fila `Datos: Precios Claros` de esa misma tarjeta
-  atribuye el catálogo a Precios Claros, pero el catálogo viene de su cuenta de kioskos.app;
-  Precios Claros (SEPA) es la fuente de los **precios por sucursal**. `PRODUCT.md:51` y
-  `sdd/03-design.md:12` arrastran la misma atribución. No se tocó porque puede ser intencional (por
-  ejemplo si los precios se importaron desde ahí) y es una afirmación sobre su negocio.
-- [ ] **T11** — Des-hardcodear los conteos que cada refresh invalida: `scripts/acceptance.ts:5-8,30`
-  (20.331 productos y EANs fijos) y `sdd/05-acceptance-report.md`.
+  **T14 resuelto (decisión del usuario, 2026-10-09): dos filas.** La fila `Datos: Precios Claros`
+  atribuía el catálogo a Precios Claros, cuando el catálogo viene de su cuenta de kioskos.app y
+  Precios Claros (SEPA) es la fuente de los **precios por sucursal**. Ahora dice `Catálogo — KioskOS`
+  y `Sucursales — Precios Claros` (`7bdf753`), verificado en el navegador. **Queda una pasada por la
+  documentación**: `PRODUCT.md:51` y `sdd/03-design.md:12` arrastran la misma atribución.
+- [x] **T11** — El harness de aceptación ya no depende de que un producto sobreviva. Hardcodeaba el
+  EAN `7793940219009` en diez lugares, y ese producto no es una fixture: vive en un catálogo que se
+  refresca todos los días, así que el día que se edite o se borre, la corrida falla por algo que no
+  tiene que ver con la app —y va a parecer un bug de la app—. Ahora `scripts/acceptance-fixtures.ts`
+  tiene un selector **puro** que devuelve un producto que cumple los requisitos que los rows
+  realmente imponen (barcode de 13 dígitos en su forma almacenada, y que lo lleve **un solo**
+  producto, porque FR-2.8a/FR-2.8b assertan un único resultado y los rows de listas agregan un único
+  ítem); el harness baja el catálogo **que sirve la propia app** y elige una vez, así que la fixture
+  no puede discrepar con lo que está bajo prueba. Si ningún producto cumple un requisito, falla
+  **antes** de abrir el navegador nombrando el requisito.
+  **Los criterios no se debilitaron**: mismos ids de row, misma cantidad y mismas aserciones.
+  **Evidencia**: el harness se corrió **antes y después** — **53/53 PASS las dos veces**, con ids y
+  estados idénticos (ese diff vacío es la comparación que importa). 493 tests / 34 archivos / 0
+  fallos, typecheck limpio. Commiteado en `e5123fc`.
+  **`sdd/05-acceptance-report.md` NO se reescribió**: es un registro histórico y su propio banner lo
+  dice ("the evidence below was NOT rewritten"); un reporte medido es evidencia, no un dato a
+  mantener al día. Solo se calificó la única frase que hablaba en presente de un conteo pasado.
+  **Sigue dependiendo del contenido del catálogo, y queda reportado en vez de arreglado en
+  silencio**: los rows que dependen de **nombres** de producto (AC-2, AC-3, multi-palabra, offline) y
+  el código supuestamente ausente de FR-2.8c.
 - [x] **T12** — El reporte explica sus propias anomalías. `compararCatalogos` acepta un mapa
   opcional de las fechas del raw y agrega la sección `cambiosGrandes`: cuántos cambios superan
   `UMBRAL_GRANDE = 50%`, cuántos de esos traen un `precioCambiado`, y hasta diez ejemplos anotados
