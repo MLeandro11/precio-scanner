@@ -1,10 +1,10 @@
 # Feature: actualización diaria del catálogo desde kioskos.app (`catalog-refresh`)
 
-**Status:** **Etapa 1 (T1-T4), T5, T6, T8, T12 y T7 hechas, verificadas y en producción.** El ciclo
-completo corre solo: cron → login → extracción → validación → publicación en `datos` → dispatch →
-deploy → sitio. **Corrió 3 veces sin supervisión**: el 7 y el 9 en verde, y el 8 falló **seguro** por
-R8 (abrió el issue correspondiente y no publicó nada). Faltan T9, T10, T11 y T13 · **Started:**
-2026-10-02
+**Status:** **Etapa 1 (T1-T4), T5, T6, T8, T12, T7 y T13 hechas, verificadas y en producción.** El
+ciclo completo corre solo: cron → login → extracción → validación → publicación en `datos` → dispatch
+→ deploy → sitio. **Corrió 3 veces sin supervisión**: el 7 y el 9 en verde, y el 8 falló **seguro**
+por R8 (abrió el issue correspondiente y no publicó nada), que ya está mitigado. Faltan T9, T10 y T11
+· **Started:** 2026-10-02
 **Branch:** `main` (convención del repo: se commitea sobre `main`, no se crea feature branch)
 **Origen:** pedido del usuario, 2026-10-02: *"tenemos que empezar a ver cómo hacer para actualizar
 el catálogo"* → *"el catálogo sale de un scrapeo, tendríamos que ver cómo hacer para que se
@@ -268,12 +268,26 @@ cron empieza a correr sin credenciales, va a fallar y a abrir un issue por día.
   **Evidencia**: 429 tests / 32 archivos / 0 fallos, typecheck limpio, y un smoke sobre el raw real de
   23.230 registros y el catálogo real de 20.733 productos (100 cambios >50%, 1 con fecha), no solo
   fixtures. Commiteado en `328ee09`.
-- [ ] **T13** — Sacarle el día perdido a R8. Si la validación del raw falla, **reintentar la
-  extracción una vez** antes de dar el día por perdido. La regla de "un solo intento" es sobre el
-  **login** (por el riesgo de bloqueo de cuenta), no sobre la paginación: una re-extracción no vuelve
-  a autenticar. Un solo reintento convierte un día perdido en un minuto más; si el segundo intento
-  también falla, falla ruidoso como hoy. **No deduplicar y publicar**: el duplicado es el síntoma
-  visible de un salteo invisible.
+- [x] **T13** — Sacarle el día perdido a R8, en las **tres** direcciones del corrimiento. El
+  extractor valida cada recorrido completo con el mismo `validarProductos` puro que usa el refresh
+  —así la regla vive en un solo lugar— y **reintenta un solo recorrido más** cuando el resultado es
+  inválido; si el segundo también falla, imprime los motivos y sale con `3` sin escribir nada. Nunca
+  se reintenta un login (esa regla existe por el bloqueo de cuenta, y el reintento recorre de nuevo
+  **con la sesión que ya tiene**: un solo `POST /api/entrar` por corrida en todos los escenarios) ni
+  un fallo de API (exit 2, sin segundo recorrido). **No deduplica y publica**: el duplicado es el
+  síntoma visible de un salteo invisible.
+
+  **La verificación independiente encontró que faltaba una dirección.** El guard de runaway del
+  cliente cortaba apenas el total superaba el oráculo, así que un recorrido con **una fila de más**
+  —la firma de un producto **agregado** a mitad de camino, y la dirección más probable para un
+  catálogo que crece— nunca llegaba a la validación y no se reintentaba. Ahora corta solo si el total
+  supera al oráculo por **más de una página entera** (`cuantos + tope`): un corrimiento no puede
+  producir eso, y una API que ignore `desde` lo sigue disparando. La reproducción del verificador es
+  un test.
+
+  **Evidencia**: 469 tests / 33 archivos / 0 fallos, typecheck limpio. El verificador no pudo
+  falsificar que el login nunca se repite, que son como máximo dos recorridos, que no se escribe
+  nada cuando los dos fallan y que ningún secreto llega a stdout/stderr. Commiteado en `1f956ea`.
 
 ## Verificación por etapa
 
@@ -354,7 +368,8 @@ cron empieza a correr sin credenciales, va a fallar y a abrir un issue por día.
   salteo porque el conteo total no cerraría contra el oráculo `/api/productos-cuantos`. Por eso nunca
   se publicó un catálogo roto: el costo es un día perdido. **El duplicado es la parte visible; el
   salteo es la silenciosa, y la validación es lo único que lo delata.** Pasó 1 de cada 3 corridas
-  programadas hasta ahora ⇒ T13.
+  programadas hasta ahora. **Las tres direcciones del corrimiento quedaron cubiertas por T13**
+  (duplicado con salteo, salteo solo, y una fila de más por un producto agregado a mitad de camino).
 - **R9 — El cron de GitHub corre ~7 horas tarde.** Las corridas programadas cayeron a las 14:07,
   14:22 y 14:12 UTC en vez de a las 07:00: el scheduler de Actions es best-effort y posterga los
   repos de baja actividad. Consecuencia práctica: los precios se actualizan alrededor de las 11 de la
