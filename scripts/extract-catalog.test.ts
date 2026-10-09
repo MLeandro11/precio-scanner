@@ -208,7 +208,7 @@ const CREDENCIALES = { KIOSKOS_EMAIL: EMAIL_FALSO, KIOSKOS_CLAVE: CLAVE_FALSA }
 
 describe('scripts/extract-catalog.ts', () => {
   it(
-    'logs in, extracts every page, writes {products} and exits 0 with a summary',
+    'logs in, extracts every page, writes {generada, products} and exits 0 with a summary',
     async () => {
       const dir = tmp()
       const catalogo = productos(1200)
@@ -218,10 +218,17 @@ describe('scripts/extract-catalog.ts', () => {
 
         expect(r.code).toBe(0)
         const escrito = JSON.parse(readFileSync(join(dir, 'raw-catalog.json'), 'utf8')) as {
+          generada: unknown
           products: unknown[]
         }
-        // shape normalize-catalog already accepts
-        expect(Object.keys(escrito)).toEqual(['products'])
+        // shape normalize-catalog already accepts, plus the extraction date the
+        // About/Settings screen reads (T10): the date lives in the raw/facets,
+        // never in catalogo.json (that would re-key the client cache).
+        expect(Object.keys(escrito)).toEqual(['generada', 'products'])
+        expect(typeof escrito.generada).toBe('string')
+        expect(Number.isNaN(Date.parse(escrito.generada as string))).toBe(false)
+        // ISO 8601 UTC, written at the moment of the successful walk
+        expect(escrito.generada).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
         expect(escrito.products).toHaveLength(1200)
         expect(escrito.products[0]).toEqual(catalogo[0])
         expect(escrito.products[1199]).toEqual(catalogo[1199])

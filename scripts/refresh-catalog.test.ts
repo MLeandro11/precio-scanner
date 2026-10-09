@@ -213,9 +213,63 @@ describe('scripts/refresh-catalog.ts', () => {
       }
       expect(written.products).toHaveLength(20001)
       expect(written.version).not.toBe('old-version')
+
+      // This raw predates the `generada` field (a bare array): no date reaches
+      // the facets...
+      const facets = JSON.parse(
+        readFileSync(join(dir, ...DATA_DIR, 'catalogo-facets.json'), 'utf8'),
+      )
+      expect(facets).not.toHaveProperty('generada')
+      // ...and catalogo.json NEVER carries one, date or no date: its sha256 is
+      // the client cache key, so a changing field there would re-download the
+      // catalog on every run.
+      expect(written).not.toHaveProperty('generada')
+      expect(Object.keys(written).sort()).toEqual(['products', 'version'])
     },
     120_000,
   )
+
+  it(
+    'a raw with a generada passes the date to the facets and never into catalogo.json',
+    () => {
+      const dir = makeDir()
+      writeFileSync(
+        join(dir, 'raw-catalog.json'),
+        JSON.stringify({ generada: '2026-10-02T04:00:15.123Z', products: bigRaw() }),
+      )
+
+      const r = runRefresh(dir)
+      expect(r.code).toBe(0)
+
+      const facets = JSON.parse(
+        readFileSync(join(dir, ...DATA_DIR, 'catalogo-facets.json'), 'utf8'),
+      )
+      expect(facets.generada).toBe('2026-10-02T04:00:15.123Z')
+
+      // The cache key lives in catalogo.json: the date must not get in there.
+      const written = JSON.parse(readFileSync(join(dir, ...DATA_DIR, 'catalogo.json'), 'utf8'))
+      expect(written).not.toHaveProperty('generada')
+      expect(Object.keys(written).sort()).toEqual(['products', 'version'])
+    },
+    120_000,
+  )
+
+  it('a raw with a generada that is not a usable date is treated as no date', () => {
+    const dir = makeDir()
+    writeFileSync(
+      join(dir, 'raw-catalog.json'),
+      JSON.stringify({ generada: 'ayer', products: bigRaw() }),
+    )
+
+    const r = runRefresh(dir)
+    expect(r.code).toBe(0)
+
+    // No valid date to pass, so no flag and no field: the facets stays clean.
+    const facets = JSON.parse(
+      readFileSync(join(dir, ...DATA_DIR, 'catalogo-facets.json'), 'utf8'),
+    )
+    expect(facets).not.toHaveProperty('generada')
+  }, 120_000)
 
   it(
     '--json prints the report as a single JSON object, keeping pipeline prose off stdout',

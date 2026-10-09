@@ -5,7 +5,10 @@
  * This is the only script that talks to the real site. It logs in with the
  * account credentials, asks the oracle how many products the catalog has,
  * walks every page sequentially, and writes the result in the shape
- * `scripts/normalize-catalog.ts` already accepts: `{"products": [...]}`.
+ * `scripts/normalize-catalog.ts` already accepts: `{"generada": "<ISO>",
+ * "products": [...]}`. `generada` is when the validated walk finished; both
+ * downstream readers use `parsed.products ?? parsed`, so a raw without it still
+ * works.
  *
  * The credential never has to touch a command line, and should not:
  *
@@ -67,8 +70,9 @@ interface Opciones {
 const USAGE = `Uso: node --env-file=<archivo> scripts/extract-catalog.ts [out.json] [opciones]
 
 Inicia sesión en kioskos.app con KIOSKOS_EMAIL / KIOSKOS_CLAVE, cuenta el
-catálogo con su oráculo, lo pagina entero y escribe {"products": [...]} en
-raw-catalog.json: el formato que ya acepta scripts/normalize-catalog.ts.
+catálogo con su oráculo, lo pagina entero y escribe {"generada": "<ISO>",
+"products": [...]} en raw-catalog.json: el formato que ya acepta
+scripts/normalize-catalog.ts.
 
 La forma recomendada de pasar la credencial es --env-file, no la línea de
 comandos: un argumento queda en el historial del shell y en \`ps\`.
@@ -280,8 +284,16 @@ async function main(): Promise<void> {
   // succeeded API-wise, so a write failure is exit 2 too — and it goes through
   // the same one-line path as every other failure, never a raw Node stack.
   // `outPath` is the resolved path; the message shows the user's own argument.
+  //
+  // `generada` is the moment this (validated) walk finished, read at write
+  // time. It is data about the extraction, not the clock at generate time, so
+  // the downstream pipeline stays reproducible. Read-only consumers keep using
+  // `parsed.products ?? parsed`, so an old raw without the field still works.
   try {
-    writeFileSync(outPath, `${JSON.stringify({ products: extraccion.productos })}\n`)
+    writeFileSync(
+      outPath,
+      `${JSON.stringify({ generada: new Date().toISOString(), products: extraccion.productos })}\n`,
+    )
   } catch (err) {
     fail(2, `no se pudo escribir ${opts.out}: ${codigoDeError(err)}`)
   }

@@ -192,6 +192,19 @@ function extraerProductos(parsed: unknown): unknown {
 }
 
 /**
+ * The extraction moment the raw itself carries (`generada`), or `null` when it
+ * is absent or not a usable date — an old raw that predates the field has
+ * neither. Anything that is not a string parsing as a date is treated as "no
+ * date", never guessed from the clock here: the date must come from the data.
+ */
+function fechaDelRaw(parsed: unknown): string | null {
+  if (!esObjetoPlano(parsed)) return null
+  const generada = parsed.generada
+  if (typeof generada !== 'string' || generada.trim() === '') return null
+  return Number.isNaN(Date.parse(generada)) ? null : generada
+}
+
+/**
  * The raw's date fields, keyed by product id. Only string values are kept —
  * anything else is "no date". This is the evidence T12 exists to preserve:
  * `normalize` drops these fields and the runner's raw dies with the job.
@@ -380,9 +393,18 @@ function main(): void {
       `${resultado.sinPrecio + resultado.precioNoPositivo} quedan fuera del catálogo)`,
   )
 
-  // 4. Pipeline, by subprocess (D4).
+  // 4. Pipeline, by subprocess (D4). The extraction date, when the raw has
+  //    one, is passed to `generate-index` as `--generada` so it lands in the
+  //    facets ONLY — never in `catalogo.json`, whose sha256 keys the client
+  //    cache. Without a usable date, no flag and no field, which keeps the
+  //    output byte-identical to the pre-T10 pipeline.
+  const generada = fechaDelRaw(parsedRaw)
   correrPipeline('normalize-catalog.ts', [rawPath, catalogoPath], opts.json)
-  correrPipeline('generate-index.ts', [catalogoPath, dirname(catalogoPath)], opts.json)
+  correrPipeline(
+    'generate-index.ts',
+    [catalogoPath, dirname(catalogoPath), ...(generada === null ? [] : ['--generada', generada])],
+    opts.json,
+  )
 
   // 5. Re-read what was produced and report. The date map built from the raw
   //    is passed along: the raw is ephemeral, so this report is the only place

@@ -88,4 +88,58 @@ describe('scripts/generate-index.mjs', () => {
     const r = runScript(dir, join(dir, 'nope.json'), dir)
     expect(r.code).not.toBe(0)
   })
+
+  it('without --generada the facets bytes are exactly what the script produced before the flag', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'genidx-bytes-'))
+    const input = join(dir, 'catalogo.json')
+    const catalogJson = JSON.stringify(smallCatalog())
+    writeFileSync(input, catalogJson)
+
+    const r = runScript(dir, input, dir)
+    expect(r.code).toBe(0)
+
+    // The field is omitted, not written as null/undefined: callers that never
+    // pass a date must reproduce the previous file byte for byte, so the
+    // refresh stays reproducible on a raw without a date.
+    const expected = JSON.stringify({
+      version: createHash('sha256').update(catalogJson).digest('hex'),
+      categories: ['Categoria 0', 'Categoria 1', 'Categoria 2'],
+      brands: [],
+      priceBounds: { min: 100, max: 129 },
+    })
+    const facetsBytes = readFileSync(join(dir, 'catalogo-facets.json'), 'utf8')
+    expect(facetsBytes).toBe(expected)
+    expect(facetsBytes).not.toContain('generada')
+  })
+
+  it('--generada records the extraction date in the facets, changing nothing else', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'genidx-gen-'))
+    const input = join(dir, 'catalogo.json')
+    const catalogJson = JSON.stringify(smallCatalog())
+    writeFileSync(input, catalogJson)
+
+    const r = runScript(dir, input, dir, '--generada', '2026-10-02T04:00:15.123Z')
+    expect(r.code).toBe(0)
+
+    const facets = JSON.parse(readFileSync(join(dir, 'catalogo-facets.json'), 'utf8'))
+    expect(facets.generada).toBe('2026-10-02T04:00:15.123Z')
+    // The flag only adds a field: version, facets and bounds are untouched.
+    expect(facets.version).toBe(createHash('sha256').update(catalogJson).digest('hex'))
+    expect(facets.categories).toEqual(['Categoria 0', 'Categoria 1', 'Categoria 2'])
+    expect(facets.brands).toEqual([])
+    expect(facets.priceBounds).toEqual({ min: 100, max: 129 })
+  })
+
+  it('--generada with a value that is not a date fails loud and writes nothing', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'genidx-badgen-'))
+    const input = join(dir, 'catalogo.json')
+    writeFileSync(input, JSON.stringify(smallCatalog()))
+
+    const r = runScript(dir, input, dir, '--generada', 'no-es-una-fecha')
+    expect(r.code).not.toBe(0)
+    // names the problem instead of writing a facets file the app would show
+    expect(r.err).toContain('generada')
+    expect(existsSync(join(dir, 'catalogo-facets.json'))).toBe(false)
+    expect(existsSync(join(dir, 'catalogo-index.json'))).toBe(false)
+  })
 })

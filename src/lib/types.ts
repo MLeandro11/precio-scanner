@@ -29,6 +29,18 @@ export interface Facets {
   categories: string[]
   brands: string[]
   priceBounds: { min: number; max: number }
+  /**
+   * When the dataset was extracted, taken from the raw extraction's own
+   * `generada` (never the clock at generate time). Optional and absent when
+   * the raw carried no usable date.
+   *
+   * It deliberately lives here and NOT in `catalogo.json`: `version` above is
+   * the sha256 of the whole catalog file and keys the client-side cache, so a
+   * field that changes on every run inside `catalogo.json` would make every
+   * installed PWA re-download the catalog daily. A future reader moving this
+   * field into the catalog would break the cache.
+   */
+  generada?: string
 }
 
 /** Shape of `public/data/catalogo-index.json`. */
