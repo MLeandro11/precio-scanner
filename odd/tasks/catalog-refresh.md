@@ -1,10 +1,10 @@
 # Feature: actualización diaria del catálogo desde kioskos.app (`catalog-refresh`)
 
-**Status:** **Etapa 1 (T1-T4), T5, T6, T8, T12, T7 y T13 hechas, verificadas y en producción.** El
+**Status:** **Etapa 1 (T1-T4), T5, T6, T8, T12, T7, T13 y T9 hechas, verificadas y en producción.** El
 ciclo completo corre solo: cron → login → extracción → validación → publicación en `datos` → dispatch
-→ deploy → sitio. **Corrió 3 veces sin supervisión**: el 7 y el 9 en verde, y el 8 falló **seguro**
-por R8 (abrió el issue correspondiente y no publicó nada), que ya está mitigado. Faltan T9, T10 y T11
-· **Started:** 2026-10-02
+→ deploy → sitio, y el cliente ya no acumula versiones muertas del catálogo. **Corrió 3 veces sin
+supervisión**: el 7 y el 9 en verde, y el 8 falló **seguro** por R8 (abrió el issue correspondiente y
+no publicó nada), que ya está mitigado. Faltan T10 y T11 · **Started:** 2026-10-02
 **Branch:** `main` (convención del repo: se commitea sobre `main`, no se crea feature branch)
 **Origen:** pedido del usuario, 2026-10-02: *"tenemos que empezar a ver cómo hacer para actualizar
 el catálogo"* → *"el catálogo sale de un scrapeo, tendríamos que ver cómo hacer para que se
@@ -251,9 +251,25 @@ cron empieza a correr sin credenciales, va a fallar y a abrir un issue por día.
 
 ### Etapa 3 — que el cliente se entere
 
-- [ ] **T9** — `src/lib/catalogLoader.ts`: evictar las claves `?v=<versión vieja>` de la Cache API.
-  Hoy cada versión nueva agrega claves y ninguna se borra (`catalogLoader.ts:157-163`): con un
-  refresh diario, la cache de una PWA instalada crece para siempre.
+- [x] **T9** — `src/lib/catalogLoader.ts`: el prune de las claves `?v=` viejas de la Cache API. Los
+  archivos pesados se cachean con la versión de datos en la clave, que es lo que da la invalidación
+  automática —pero **nadie borraba las claves viejas**, así que con un refresh diario una PWA
+  instalada sumaba ~5,5 MB por día, para siempre—. Ahora, después de una carga exitosa, el loader
+  borra toda entrada cuyo `?v=` no sea el de la versión en uso. **Sobreviven por construcción** las
+  entradas de la versión actual (el prune corre sobre lo que no se está sirviendo) y el
+  `catalogo-facets.json`, que no lleva `v` y es el fallback offline del que depende todo el boot.
+  Corre **solo después de tener los dos archivos pesados en mano**, así que una carga que falla a
+  mitad no toca el último juego que funcionaba, y cualquier error del prune se traga: la limpieza no
+  puede ser la razón por la que alguien se queda sin app.
+
+  **Evidencia**: 475 tests / 33 archivos / 0 fallos, typecheck limpio, y —lo que más importa acá—
+  **verificado en un navegador real**, porque los tests usan una cache falsa y la Cache API solo
+  existe en un contexto de navegador. Con el server de dev levantado: la app cargó y dejó las tres
+  entradas esperadas; sembré **a mano** dos entradas con un `?v=` viejo y recargué; quedaron
+  exactamente las dos de la versión actual más el facets, las viejas desaparecieron y la app siguió
+  buscando. Commiteado en `89bab63`.
+  **No cubierto**: el boot offline en un navegador de verdad (necesita un build de producción con el
+  service worker activo; en dev no hay SW). El camino offline sí está cubierto por tests.
 - [ ] **T10** — Fecha de los datos visible: `normalize` escribe `fecha` en `catalogo.json`,
   `generate-index` la copia a `facets`, y Ajustes la muestra. Hoy no hay forma de saber si el job
   murió hace una semana.
