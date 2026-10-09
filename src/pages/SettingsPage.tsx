@@ -13,10 +13,16 @@ import { version } from '../../package.json'
  * changes every time the data pipeline is regenerated (`npm run normalize` /
  * `npm run generate-index`), and `public/data/catalogo-facets.json` exposes no product
  * total, so there is no cheap runtime source for it.
+ *
+ * The two sources are named separately because they are different things: the catalog
+ * the app searches comes from the shop's own system (KioskOS), while the per-branch
+ * prices on a product page come from Precios Claros (SEPA). A single "Datos" row
+ * attributed the catalog to the wrong one.
  */
 const ABOUT: Array<{ label: string; value: string }> = [
   { label: 'Versión', value: version },
-  { label: 'Datos', value: 'Precios Claros' },
+  { label: 'Catálogo', value: 'KioskOS' },
+  { label: 'Sucursales', value: 'Precios Claros' },
   { label: 'Tiendas', value: '1' },
 ]
 
