@@ -26,6 +26,14 @@
  * badge to follow **without a reload** — the exact assertion that fails when the hook
  * instances are not subscribed to each other.
  *
+ * The product the code rows use is **derived, not hardcoded**. The catalog refreshes daily
+ * from the shop's own system, so a fixed EAN is a real row that can be edited or removed
+ * tomorrow; when it goes, the run would fail for a reason that has nothing to do with the
+ * app. The harness fetches `<baseUrl>data/catalogo.json` — the same bytes the app searches —
+ * and `scripts/acceptance-fixtures.ts` picks a product that satisfies every requirement the
+ * rows impose (a 13-digit, catalog-unique barcode). If the catalog cannot satisfy them, the
+ * run aborts with a HARNESS row naming the requirement instead of misreporting an app bug.
+ *
  * Requires a built app (`npm run build`), served in one of two modes:
  *
  *   - **Self-serve (default, no `BASE_URL`).** The harness starts
@@ -51,6 +59,8 @@
 import { createRequire } from 'node:module'
 import { existsSync } from 'node:fs'
 import { startServer, type GhPagesServer } from './ghpages-server.ts'
+import { elegirProductoDePrueba, separarEan } from './acceptance-fixtures.ts'
+import type { Catalog } from '../src/lib/types.ts'
 
 const EXTERNAL_BASE_URL = process.env.BASE_URL
 const SELF_SERVE_PORT = 4173
@@ -123,6 +133,29 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
         `\`npm run build\`, or start a server and point BASE_URL at it.`,
     )
   }
+
+  // Derive the product fixture from the catalog the app itself serves, so the
+  // fixture can never disagree with the bytes under test. This runs before the
+  // browser launches: an unsatisfiable catalog aborts with a clear message and no
+  // half-started run. `elegirProductoDePrueba` is pure and unit-tested.
+  const catalogRes = await fetch(`${baseUrl}data/catalogo.json`, {
+    signal: AbortSignal.timeout(30000),
+  })
+  if (!catalogRes.ok) {
+    throw new Error(
+      `could not fetch the served catalog (data/catalogo.json): HTTP ${catalogRes.status}`,
+    )
+  }
+  const catalog = (await catalogRes.json()) as Catalog
+  const eleccion = elegirProductoDePrueba(catalog.products ?? [], { digitosDeBarcode: 13 })
+  if ('error' in eleccion) {
+    throw new Error(
+      `the catalog served at ${baseUrl}data/catalogo.json cannot provide the product the ` +
+        `acceptance code rows need: ${eleccion.error}`,
+    )
+  }
+  /** The picked product's 13-digit EAN: every code row below runs against this. */
+  const ean = eleccion.producto.barcode
 
   const baseLaunch: { executablePath?: string } = {}
   const chrome = process.env.CHROME_PATH || '/usr/bin/google-chrome'
@@ -309,7 +342,7 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
   )
 
   // A shared product link: /producto/<ean> straight from the address bar.
-  const deepEan = '7793940219009'
+  const deepEan = ean
   await page.goto(`${baseUrl}producto/${deepEan}`, { waitUntil: 'domcontentloaded' })
   const detailRendered = await waitForVisible(page.locator(`text=EAN ${deepEan}`))
   const notFoundShown = await page.locator('text=Producto no encontrado').count()
@@ -379,14 +412,14 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
   )
 
   // ---------------------------------------------------------------- FR-2.8 (barcode)
-  const exact = await search('7793940219009')
-  record('FR-2.8a', exact.length === 1, `exact 13-digit EAN -> ${exact.length} result(s)`)
+  const exact = await search(ean)
+  record('FR-2.8a', exact.length === 1, `exact 13-digit EAN ${ean} -> ${exact.length} result(s)`)
 
-  const spaced = await search('779 3940 219009')
+  const spaced = await search(separarEan(ean))
   record(
     'FR-2.8b',
     spaced.length === 1,
-    `EAN with separators -> ${spaced.length} result(s) (separators are stripped)`,
+    `EAN with separators (${separarEan(ean)}) -> ${spaced.length} result(s) (separators are stripped)`,
   )
 
   // The spec forbids inventing near-misses for codes: an unknown code must be empty.
@@ -398,10 +431,10 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
     `unknown code -> ${unknown.length} results (no false positives, as required)`,
   )
 
-  const labelled = await search('EAN 7793940219009')
+  const labelled = await search(`EAN ${ean}`)
   info(
     'FR-2.8d',
-    `"EAN 7793940219009" -> ${labelled.length} results: it has letters, so by spec it is a text query`,
+    `"EAN ${ean}" -> ${labelled.length} results: it has letters, so by spec it is a text query`,
   )
 
   // ---------------------------------------------------------------- AC-5
@@ -645,7 +678,7 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
 
   // The documented primary fallback must survive the redesign: type an EAN and land
   // on the search screen with the product resolved.
-  const manualEan = '7793940219009'
+  const manualEan = ean
   await noCamPage.locator('input[aria-label="Código EAN"]').fill(manualEan)
   await noCamPage.getByRole('button', { name: 'Buscar' }).click()
   let manualNavigated = false
@@ -856,7 +889,7 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
    * useResolveEans resolves names/prices from the catalog and the steppers render.
    */
   const touchItems = [
-    { ean: '7793940219009', cantidad: 2, alerta: true },
+    { ean, cantidad: 2, alerta: true },
     { ean: '7790895000016', cantidad: 1, alerta: false },
   ]
   /** Maps every control in a page snapshot to {label, w, h}; null when the page never booted. */
@@ -1089,7 +1122,7 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
   )
 
   // The product detail controls on the same rule.
-  await page.goto(`${baseUrl}producto/7793940219009`, { waitUntil: 'domcontentloaded' })
+  await page.goto(`${baseUrl}producto/${ean}`, { waitUntil: 'domcontentloaded' })
   // The star renders only after the worker resolves the EAN; wait for it, never sleep.
   const prodReady = await waitForVisible(page.locator('button[aria-label="Agregar a favoritos"], button[aria-label="Quitar de favoritos"]'))
   const prodTouch = prodReady ? await touchTargets() : null
@@ -1120,7 +1153,7 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
    * compositing backgrounds until opaque — the effective background a pixel
    * actually renders against, not just the first colored box.
    */
-  const contrastRoutes = ['/', '/lista', '/perfil', '/buscar', '/producto/7793940219009']
+  const contrastRoutes = ['/', '/lista', '/perfil', '/buscar', `/producto/${ean}`]
   /** Sets a theme by OS emulation (never localStorage: it must not persist). */
   const useScheme = async (scheme: 'light' | 'dark') => {
     await page.emulateMedia({ colorScheme: scheme })
@@ -1516,7 +1549,7 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
   // The critical row. The scanner's manual EAN path navigates client-side, so
   // AppLayout keeps the badge it rendered at mount; the add then happens on the
   // search card, i.e. from SearchPage's useList instance — a different one.
-  const badgeEan = '7793940219009'
+  const badgeEan = ean
   const rowsBefore = await listaRows()
   const expectedCount = rowsBefore + 1
   await page.goto(`${baseUrl}escanear`, { waitUntil: 'domcontentloaded' })
@@ -1717,7 +1750,7 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
 
   // A known working list, so "unchanged" is a comparison and not merely an absence.
   const sentinelItems = [
-    { ean: '7793940219009', cantidad: 2, alerta: true },
+    { ean, cantidad: 2, alerta: true },
     { ean: '7790895000016', cantidad: 1, alerta: false },
   ]
   await page.evaluate(

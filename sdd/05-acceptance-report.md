@@ -27,7 +27,10 @@ npm run build && npm run preview   # serve the production build on :4173
 npm run acceptance                 # in a second shell
 ```
 
-The script drives the real app over the real 20,331-product catalog.
+The script drives the real app over the real catalog **as it was on that run**: 20,331
+products. That count moves with every daily refresh; it is this run's snapshot, not today's
+catalog (and the harness now derives its product fixture from whatever catalog it serves, so
+it no longer depends on any one count or product surviving).
 
 ## Results (Lupa re-run, 2026-09-14)
 
