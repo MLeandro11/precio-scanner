@@ -19,18 +19,57 @@ const CATALOG: Catalog = {
 }
 const INDEX: CatalogIndex = { keys: ['nombre', 'categoria'], fuseIndex: { tags: {} } }
 
-function fakeCache(): CacheLike & { calls: { match: number; put: number } } {
+interface FakeCache extends CacheLike {
+  calls: { match: number; put: number; keys: number; delete: number }
+  /** URLs the fake was asked to delete, in call order (normalized absolute). */
+  deleted: string[]
+  keys(): Promise<Request[]>
+  delete(request: Request): Promise<boolean>
+}
+
+/**
+ * The real Cache stores requests against absolute URLs, so the fake normalizes
+ * the string keys the loader puts/matches with and the `Request` objects
+ * `keys()`/`delete()` hand back to the same form. `seed` lets a test start from
+ * a cache that already holds entries of earlier versions.
+ */
+function fakeCache(seed: Record<string, unknown> = {}): FakeCache {
+  const keyOf = (input: string | Request) =>
+    new URL(typeof input === 'string' ? input : input.url, 'http://localhost').toString()
   const store = new Map<string, Response>()
-  return {
-    calls: { match: 0, put: 0 },
+  for (const [key, body] of Object.entries(seed)) {
+    store.set(keyOf(key), jsonResponse(body))
+  }
+  const cache: FakeCache = {
+    calls: { match: 0, put: 0, keys: 0, delete: 0 },
+    deleted: [],
     async match(key: string) {
-      this.calls.match++
-      return store.get(key) ?? undefined
+      cache.calls.match++
+      return store.get(keyOf(key))
     },
     async put(key: string, res: Response) {
-      this.calls.put++
-      store.set(key, res)
+      cache.calls.put++
+      store.set(keyOf(key), res)
     },
+    async keys() {
+      cache.calls.keys++
+      return [...store.keys()].map((url) => new Request(url))
+    },
+    async delete(request: Request) {
+      cache.calls.delete++
+      const key = keyOf(request)
+      cache.deleted.push(key)
+      return store.delete(key)
+    },
+  }
+  return cache
+}
+
+/** The two heavy files cached under a given `?v=` version. */
+function versionedEntries(version: string): Record<string, unknown> {
+  return {
+    [`${BASE}data/catalogo.json?v=${version}`]: CATALOG,
+    [`${BASE}data/catalogo-index.json?v=${version}`]: INDEX,
   }
 }
 
@@ -181,5 +220,112 @@ describe('catalogLoader', () => {
   it('throws a clear error when the catalog fails to download', async () => {
     const { deps } = makeDeps({ catalogStatus: 500 })
     await expect(loadCatalog(deps)).rejects.toThrow(/catalog/)
+  })
+
+  /*
+   * Pruning (T9). The cache can only shrink: a daily refresh mints a new `?v=`
+   * every day, so without this an installed PWA accumulates ~5.5 MB of heavy
+   * files per day, forever. Nothing here may ever cost the user the boot.
+   */
+  it('prunes the entries of earlier versions after a successful load', async () => {
+    const OLD = 'old999'
+    const cache = fakeCache({
+      ...versionedEntries(OLD),
+      ...versionedEntries(FACETS.version), // the version in use
+      [`${BASE}data/catalogo-facets.json`]: FACETS,
+    })
+    const { deps } = makeDeps({ cache })
+
+    const result = await loadCatalog(deps)
+
+    expect(result.products).toEqual(CATALOG.products)
+    // exactly the two old-version entries, named one by one
+    expect(cache.deleted).toEqual([
+      `http://localhost${BASE}data/catalogo.json?v=${OLD}`,
+      `http://localhost${BASE}data/catalogo-index.json?v=${OLD}`,
+    ])
+    // the version in use and the unversioned facets entry survive
+    expect(await cache.match(`${BASE}data/catalogo.json?v=${FACETS.version}`)).toBeDefined()
+    expect(await cache.match(`${BASE}data/catalogo-index.json?v=${FACETS.version}`)).toBeDefined()
+    expect(await cache.match(`${BASE}data/catalogo-facets.json`)).toBeDefined()
+  })
+
+  it('deletes nothing on a fresh cache that only holds the current version', async () => {
+    const cache = fakeCache()
+    const { deps } = makeDeps({ cache })
+
+    await loadCatalog(deps)
+
+    expect(cache.calls.keys).toBe(1) // pruning ran...
+    expect(cache.deleted).toEqual([]) // ...and found nothing old
+    expect(cache.calls.delete).toBe(0)
+  })
+
+  it('prunes nothing on an offline load: the cached version is the version in use', async () => {
+    const cache = fakeCache()
+    await loadCatalog(makeDeps({ cache }).deps) // online boot populates the current version
+    const keysBefore = cache.calls.keys
+
+    const offline: typeof fetch = async () => {
+      throw new TypeError('Failed to fetch')
+    }
+    const result = await loadCatalog({
+      fetchFn: offline,
+      caches: { open: async () => cache },
+      baseUrl: BASE,
+    })
+
+    expect(result.catalogVersion).toBe(CATALOG.version)
+    expect(cache.calls.keys).toBe(keysBefore + 1) // pruning ran on this load too...
+    expect(cache.deleted).toEqual([]) // ...and deleted nothing
+    // the files the offline boot just read are intact
+    expect(await cache.match(`${BASE}data/catalogo.json?v=${FACETS.version}`)).toBeDefined()
+  })
+
+  it('deletes nothing when the load fails, and still propagates the error', async () => {
+    const OLD = 'old999'
+    const cache = fakeCache({
+      ...versionedEntries(OLD),
+      [`${BASE}data/catalogo-facets.json`]: FACETS,
+    })
+    const { deps } = makeDeps({ cache, catalogStatus: 500 })
+
+    await expect(loadCatalog(deps)).rejects.toThrow(/catalog/)
+    expect(cache.calls.keys).toBe(0) // pruning never even started
+    expect(cache.deleted).toEqual([])
+    // the last working set is untouched, not partially evicted
+    expect(await cache.match(`${BASE}data/catalogo.json?v=${OLD}`)).toBeDefined()
+  })
+
+  it('still returns the catalog when pruning fails because keys() rejects', async () => {
+    const cache = fakeCache()
+    cache.keys = async () => {
+      throw new Error('cache refuses to enumerate')
+    }
+    const { deps } = makeDeps({ cache })
+
+    const result = await loadCatalog(deps)
+
+    expect(result.products).toEqual(CATALOG.products)
+    expect(result.index.keys).toEqual(INDEX.keys)
+  })
+
+  it('still returns the catalog when a prune delete() rejects', async () => {
+    const OLD = 'old999'
+    const cache = fakeCache({
+      ...versionedEntries(OLD),
+      [`${BASE}data/catalogo-facets.json`]: FACETS,
+    })
+    cache.delete = async () => {
+      cache.calls.delete++
+      throw new Error('cache refuses to delete')
+    }
+    const { deps } = makeDeps({ cache })
+
+    const result = await loadCatalog(deps)
+
+    expect(result.products).toEqual(CATALOG.products)
+    expect(cache.calls.keys).toBe(1)
+    expect(cache.calls.delete).toBe(2) // both old-version entries attempted, both rejected
   })
 })
