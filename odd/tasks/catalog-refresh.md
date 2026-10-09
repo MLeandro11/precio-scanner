@@ -247,9 +247,16 @@ cron empieza a correr sin credenciales, va a fallar y a abrir un issue por día.
   `refresh` tiene que tomar el baseline de la punta de `datos` (copiar `catalogo.json` a un temporal
   y pasarlo por `--catalogo`) o **todos los días el reporte va a decir `primeraCarga`** y el diff
   deja de servir para lo único que existe: decirte qué cambió. T6 ya lo dejó comentado en el paso.
-- [ ] **T8** — `scripts/fetch-data.ts` + `"fetch-data"`: baja `public/data/*` del branch `datos` para
-  el desarrollo local, porque `scripts/acceptance.ts` y `scripts/tune-threshold.ts` leen el catálogo
-  real. El build falla ruidoso si falta.
+- [x] **T8** — `scripts/fetch-data.ts` + `"fetch-data"`: baja `public/data/*` del branch `datos` con
+  `git fetch --depth=1 origin datos` + `git show <commit>:<path>` (sin HTTP, sin API, sin dependencias
+  nuevas), valida los tres archivos **antes** de escribir nada, y tiene un modo `--check` que valida
+  lo que ya está en disco sin tocar la red —ese es el guard de build: un build sin catálogo publicaría
+  una app sin datos—. **Evidencia**: 26 tests, incluido uno de **git real y offline** contra un origen
+  `bare` temporal, así que la plomería se ejercita de verdad y no solo con un runner falso. Está en uso
+  diario: el workflow de datos lo llama para bajar el baseline del diff y el de deploy para llenar
+  `public/data` (sus corridas verdes bajan 20.733 productos). Commiteado en `1053b63`.
+  **Nota de bookkeeping**: quedó sin tilde hasta el 2026-10-09 por un descuido del orquestador. Se
+  corrige acá porque un lector futuro lo habría leído como pendiente y lo habría reimplementado.
 
 ### Etapa 3 — que el cliente se entere
 
