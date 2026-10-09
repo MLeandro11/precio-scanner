@@ -2,7 +2,9 @@
 
 **Status:** **Etapa 1 (T1-T4), T5, T6, T8, T12 y T7 hechas, verificadas y en producción.** El ciclo
 completo corre solo: cron → login → extracción → validación → publicación en `datos` → dispatch →
-deploy → sitio. Faltan T9, T10 y T11 (cliente) · **Started:** 2026-10-02
+deploy → sitio. **Corrió 3 veces sin supervisión**: el 7 y el 9 en verde, y el 8 falló **seguro** por
+R8 (abrió el issue correspondiente y no publicó nada). Faltan T9, T10, T11 y T13 · **Started:**
+2026-10-02
 **Branch:** `main` (convención del repo: se commitea sobre `main`, no se crea feature branch)
 **Origen:** pedido del usuario, 2026-10-02: *"tenemos que empezar a ver cómo hacer para actualizar
 el catálogo"* → *"el catálogo sale de un scrapeo, tendríamos que ver cómo hacer para que se
@@ -265,9 +267,13 @@ cron empieza a correr sin credenciales, va a fallar y a abrir un issue por día.
   `false` y los dos conteos son `null`, **nunca 0** —no saber se reporta como no saber—.
   **Evidencia**: 429 tests / 32 archivos / 0 fallos, typecheck limpio, y un smoke sobre el raw real de
   23.230 registros y el catálogo real de 20.733 productos (100 cambios >50%, 1 con fecha), no solo
-  fixtures. Commiteado en `328ee09`. **Consecuencia inmediata**: la corrida del cron de las 07:00 UTC
-  del 2026-10-07 va a reportar los 44 con sus fechas, porque el baseline del diff sigue siendo el
-  catálogo viejo hasta T7. R7 se contesta solo, sin correr nada a mano.
+  fixtures. Commiteado en `328ee09`.
+- [ ] **T13** — Sacarle el día perdido a R8. Si la validación del raw falla, **reintentar la
+  extracción una vez** antes de dar el día por perdido. La regla de "un solo intento" es sobre el
+  **login** (por el riesgo de bloqueo de cuenta), no sobre la paginación: una re-extracción no vuelve
+  a autenticar. Un solo reintento convierte un día perdido en un minuto más; si el segundo intento
+  también falla, falla ruidoso como hoy. **No deduplicar y publicar**: el duplicado es el síntoma
+  visible de un salteo invisible.
 
 ## Verificación por etapa
 
@@ -330,6 +336,28 @@ cron empieza a correr sin credenciales, va a fallar y a abrir un issue por día.
   **correcciones individuales de precio**, no la de una transformación del pipeline. Pero la prueba
   definitiva está en los campos de fecha del raw **nuevo**, y ahí el pipeline se los come: `normalize`
   descarta `actualizado`, `precioCambiado` y `cartelImpreso`, y el raw del runner es efímero. Por eso
-  T12. Nada de esto está en producción hasta T7; y **por decisión del usuario (2026-10-07) T7 sigue
-  sin esperar este veredicto**, con el riesgo aceptado porque el sistema se autocorrige al día
-  siguiente.
+  T12.
+
+  **CERRADO el 2026-10-07, y a favor del usuario.** El reporte anotado que habilitó T12 mostró que
+  los 100 cambios grandes tienen `actualizado` **posterior al máximo de todo el catálogo viejo**
+  (2026-09-03) ⇒ esos productos se escribieron después de la extracción vieja. Son correcciones
+  reales hechas en el POS entre septiembre y octubre, y los precios mal cargados eran los viejos.
+  `precioCambiado` no los marcaba porque no significa "el precio cambió". La decisión del usuario de
+  seguir sin esperar el veredicto quedó respaldada por la evidencia en vez de por su autoridad.
+- **R8 — La paginación por offset corre una carrera contra un catálogo que cambia. Observado en
+  producción el 2026-10-08.** Esa corrida falló en la validación con un id duplicado en los índices
+  **1499 y 1500**, el borde exacto entre la página 3 y la 4. No es un producto duplicado en el
+  sistema: ese id aparece **una sola vez** en los catálogos del 7 y del 9. Es la firma de un
+  corrimiento de offsets, porque la extracción recorre `desde=N&tope=500` durante ~40 s sobre datos
+  mutables y, si alguien agrega o borra un producto en el medio, una fila puede aparecer dos veces
+  —o saltearse—. **Las dos direcciones están cubiertas**: el duplicado por `id-duplicado`, y el
+  salteo porque el conteo total no cerraría contra el oráculo `/api/productos-cuantos`. Por eso nunca
+  se publicó un catálogo roto: el costo es un día perdido. **El duplicado es la parte visible; el
+  salteo es la silenciosa, y la validación es lo único que lo delata.** Pasó 1 de cada 3 corridas
+  programadas hasta ahora ⇒ T13.
+- **R9 — El cron de GitHub corre ~7 horas tarde.** Las corridas programadas cayeron a las 14:07,
+  14:22 y 14:12 UTC en vez de a las 07:00: el scheduler de Actions es best-effort y posterga los
+  repos de baja actividad. Consecuencia práctica: los precios se actualizan alrededor de las 11 de la
+  mañana hora argentina, no antes de abrir. No rompe nada —el dato del día llega igual— pero conviene
+  saberlo antes de confiar en el horario. Mitigaciones posibles: aceptarlo, agregar una entrada de
+  cron más temprana, o dispararlo desde afuera.
