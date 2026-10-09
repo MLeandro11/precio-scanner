@@ -1,4 +1,5 @@
 import { LogOut, Monitor, Moon, Sun } from 'lucide-react'
+import { useCatalog } from '../App'
 import Brand from '../components/Brand'
 import LupaLockup from '../components/LupaLockup'
 import Button from '../components/ui/Button'
@@ -19,6 +20,20 @@ const ABOUT: Array<{ label: string; value: string }> = [
   { label: 'Tiendas', value: '1' },
 ]
 
+/**
+ * When the dataset was extracted, in the reader's own timezone. Returns null when
+ * the facet is absent or unparseable, and the row is then simply not rendered: this
+ * screen shows a fact or nothing, never a guess. It is a pipeline fact, not a price
+ * one — the catalog is refreshed by a scheduled job, so this date is how someone
+ * notices that the job stopped without going to look at GitHub Actions.
+ */
+function fechaDeDatos(generada: string | undefined): string | null {
+  if (!generada) return null
+  const fecha = new Date(generada)
+  if (Number.isNaN(fecha.getTime())) return null
+  return fecha.toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' })
+}
+
 const OPTIONS: Array<{ value: ThemePreference; label: string; icon: React.ReactNode }> = [
   { value: 'system', label: 'Sistema', icon: <Monitor size={16} aria-hidden="true" /> },
   { value: 'light', label: 'Claro', icon: <Sun size={16} aria-hidden="true" /> },
@@ -32,6 +47,10 @@ const OPTIONS: Array<{ value: ThemePreference; label: string; icon: React.ReactN
 export default function SettingsPage() {
   const [theme, setTheme] = useTheme()
   const { configured, user, ready, error, signIn, signOut } = useAuth()
+  const { facets } = useCatalog()
+
+  const fecha = fechaDeDatos(facets.generada)
+  const about = fecha ? [...ABOUT, { label: 'Datos actualizados', value: fecha }] : ABOUT
 
   return (
     <main className="safe-top mx-auto w-full max-w-lg px-4 pb-8">
@@ -163,7 +182,7 @@ export default function SettingsPage() {
         </div>
 
         <div className="mt-4 space-y-2">
-          {ABOUT.map((row) => (
+          {about.map((row) => (
             <div key={row.label} className="flex items-center justify-between text-[13px]">
               <span className="text-text-secondary">{row.label}</span>
               <span className="text-text-secondary">{row.value}</span>
