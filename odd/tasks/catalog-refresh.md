@@ -1,10 +1,11 @@
 # Feature: actualización diaria del catálogo desde kioskos.app (`catalog-refresh`)
 
-**Status:** **Etapa 1 (T1-T4), T5, T6, T8, T12, T7, T13 y T9 hechas, verificadas y en producción.** El
-ciclo completo corre solo: cron → login → extracción → validación → publicación en `datos` → dispatch
-→ deploy → sitio, y el cliente ya no acumula versiones muertas del catálogo. **Corrió 3 veces sin
-supervisión**: el 7 y el 9 en verde, y el 8 falló **seguro** por R8 (abrió el issue correspondiente y
-no publicó nada), que ya está mitigado. Faltan T10 y T11 · **Started:** 2026-10-02
+**Status:** **Etapa 1 (T1-T4), T5, T6, T8, T12, T7, T13, T9 y T10 hechas, verificadas y en producción.**
+El ciclo completo corre solo: cron → login → extracción → validación → publicación en `datos` → dispatch
+→ deploy → sitio; el cliente ya no acumula versiones muertas del catálogo y la app dice de qué fecha
+son los datos. **Corrió 3 veces sin supervisión**: el 7 y el 9 en verde, y el 8 falló **seguro** por R8
+(abrió el issue correspondiente y no publicó nada), que ya está mitigado. Faltan T11 y la decisión de
+T14 · **Started:** 2026-10-02
 **Branch:** `main` (convención del repo: se commitea sobre `main`, no se crea feature branch)
 **Origen:** pedido del usuario, 2026-10-02: *"tenemos que empezar a ver cómo hacer para actualizar
 el catálogo"* → *"el catálogo sale de un scrapeo, tendríamos que ver cómo hacer para que se
@@ -270,9 +271,26 @@ cron empieza a correr sin credenciales, va a fallar y a abrir un issue por día.
   buscando. Commiteado en `89bab63`.
   **No cubierto**: el boot offline en un navegador de verdad (necesita un build de producción con el
   service worker activo; en dev no hay SW). El camino offline sí está cubierto por tests.
-- [ ] **T10** — Fecha de los datos visible: `normalize` escribe `fecha` en `catalogo.json`,
-  `generate-index` la copia a `facets`, y Ajustes la muestra. Hoy no hay forma de saber si el job
-  murió hace una semana.
+- [x] **T10** — Fecha de los datos visible en la app, para saber si el job murió sin mirar Actions.
+  **La fecha viaja como dato, no como reloj**: el extractor estampa `generada` en el raw que escribe,
+  el refresh la propaga, y `generate-index --generada` la escribe en los facets; Ajustes la muestra.
+  **Deliberadamente NO va en `catalogo.json`**, porque `facets.version` es el sha256 de ese archivo y
+  es la clave de cache de los dos archivos pesados del cliente: un valor que cambie en cada corrida
+  haría que cada PWA instalada rebaje ~5,5 MB por día **aunque no cambie ningún producto**. Si un raw
+  viejo no trae la fecha, el campo no existe (nada de `null`), y Ajustes simplemente no muestra la
+  fila: la pantalla muestra un hecho o nada, nunca una adivinanza.
+  **Evidencia**: 480 tests / 33 archivos / 0 fallos, typecheck limpio, y **verificado en un navegador
+  real en las dos direcciones**: con un raw con `generada` el pipeline real produjo
+  `"generada":"2026-10-09T14:07:00.000Z"` en los facets y Ajustes mostró *"Datos actualizados — 9 de
+  octubre de 2026"*; con el raw real (sin fecha) la fila desaparece. Y lo que más importaba: el
+  `catalogo.json` quedó con **el mismo md5** que antes (`f11d6735…`), o sea que la clave de cache del
+  cliente no se movió. Commiteado en `8da4187` + `d9ef99f`.
+
+  **Queda una pregunta para el usuario (T14)**: la fila `Datos: Precios Claros` de esa misma tarjeta
+  atribuye el catálogo a Precios Claros, pero el catálogo viene de su cuenta de kioskos.app;
+  Precios Claros (SEPA) es la fuente de los **precios por sucursal**. `PRODUCT.md:51` y
+  `sdd/03-design.md:12` arrastran la misma atribución. No se tocó porque puede ser intencional (por
+  ejemplo si los precios se importaron desde ahí) y es una afirmación sobre su negocio.
 - [ ] **T11** — Des-hardcodear los conteos que cada refresh invalida: `scripts/acceptance.ts:5-8,30`
   (20.331 productos y EANs fijos) y `sdd/05-acceptance-report.md`.
 - [x] **T12** — El reporte explica sus propias anomalías. `compararCatalogos` acepta un mapa
