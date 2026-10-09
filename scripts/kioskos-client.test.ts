@@ -381,15 +381,53 @@ describe('extraerTodo', () => {
     expect(await motivoDe(extraerTodo(c.deps(), TOKEN_FALSO))).toBe('api')
   })
 
-  it('fails loudly instead of fetching forever when the accumulated count passes the oracle', async () => {
+  it('lets a one-row over-count reach the caller instead of calling it a runaway', async () => {
+    // R8's third direction: a product is added while the walk is in progress,
+    // so the offsets shift and one row is fetched twice with no compensating
+    // skip. The walk ends with oracle + 1 rows — data drift, not an API that
+    // ignores `desde`. It must return the rows so the caller can validate them.
+    const pagina0 = productos(500)
+    const pagina1 = [{ ...pagina0[499] }, ...productos(100, 500)]
+    const c = clienteFalso((url) => {
+      if (url.pathname !== '/api/productos') return sinJson(404)
+      const desde = Number(url.searchParams.get('desde'))
+      return ok({ productos: desde === 0 ? pagina0 : pagina1 })
+    })
+
+    const r = await extraerTodo(c.deps(), TOKEN_FALSO, { cuantos: 600 })
+
+    expect(r.productos).toHaveLength(601)
+    expect(paginados(c.llamadas)).toEqual([
+      { tope: 500, desde: 0 },
+      { tope: 500, desde: 500 },
+    ])
+  })
+
+  it('lets an over-count of a whole page through, because a shift cannot be larger', async () => {
+    // The boundary: exactly `cuantos + tope` is still data drift, and is the
+    // largest over-count that reaches validation instead of the runaway guard.
+    const c = clienteFalso(servicio(productos(1000)))
+
+    const r = await extraerTodo(c.deps(), TOKEN_FALSO, { cuantos: 500 })
+
+    expect(r.productos).toHaveLength(1000)
+    expect(paginados(c.llamadas)).toEqual([
+      { tope: 500, desde: 0 },
+      { tope: 500, desde: 500 },
+      { tope: 500, desde: 1000 },
+    ])
+  })
+
+  it('still cuts a full-page stream that overshoots the oracle by more than a page', async () => {
     // A server that always returns a full page: without the guard this loops
-    // forever. With `cuantos` it must stop after the page that crosses it.
+    // forever. With `cuantos` it must stop on the page that pushes the
+    // accumulated count past `cuantos + tope` (600 + 500 here).
     const c = clienteFalso((url) =>
       url.pathname === '/api/productos' ? ok({ productos: productos(500) }) : sinJson(404),
     )
 
-    expect(await motivoDe(extraerTodo(c.deps(), TOKEN_FALSO, { cuantos: 500 }))).toBe('bucle-infinito')
-    expect(c.llamadas).toHaveLength(2)
+    expect(await motivoDe(extraerTodo(c.deps(), TOKEN_FALSO, { cuantos: 600 }))).toBe('bucle-infinito')
+    expect(c.llamadas).toHaveLength(3)
   })
 
   it('has a page cap backstop for an unbounded stream when cuantos is not given', async () => {

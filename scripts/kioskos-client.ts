@@ -23,8 +23,10 @@
  *   - A failed login never echoes the response body, because that body can
  *     repeat the submitted credential. Only a reason and a status.
  *   - Pagination is strictly sequential, starts at `desde=0` and advances by
- *     `tope`; it stops on a short (or empty) page. The `contar` oracle is the
- *     ceiling against which a runaway full-page stream is rejected.
+ *     `tope`; it stops on a short (or empty) page. The `contar` oracle bounds a
+ *     runaway full-page stream, but only once the count overshoots it by more
+ *     than a page, so the small over-count of a shifted walk reaches validation
+ *     (risk R8).
  */
 
 /** Milliseconds any single request is allowed to take before it aborts. */
@@ -36,7 +38,8 @@ export const TOPE_DEFAULT = 500
 /**
  * Absolute backstop for a stream that never comes up short. Only reachable
  * when the caller does not pass the oracle count (`cuantos`): with it in hand,
- * crossing the oracle is caught on the offending page instead.
+ * overshooting the oracle by more than a page is caught on the offending page
+ * instead.
  */
 export const MAX_PAGINAS = 1000
 
@@ -64,9 +67,10 @@ export interface OpcionesExtraccion {
   /** Records per request (default `TOPE_DEFAULT`). */
   tope?: number
   /**
-   * The oracle count from `contar`. When present it is also the runaway
-   * ceiling: a page that pushes the accumulated count past it is a failure,
-   * not another request.
+   * The oracle count from `contar`. When present it also bounds a runaway: a
+   * page that pushes the accumulated count past `cuantos + tope` is a failure,
+   * not another request. A smaller over-count is data drift and is returned so
+   * the caller can validate it (risk R8).
    */
   cuantos?: number
   /** Called after each page with the accumulated record count. */
@@ -255,10 +259,15 @@ export async function extraerTodo(
     productos.push(...pagina)
     opts.alAvanzar?.(productos.length)
 
-    // The runaway guard runs BEFORE the stop conditions: a server that keeps
-    // answering with full pages and an over-counting final page must both fail
-    // rather than page on forever.
-    if (opts.cuantos !== undefined && productos.length > opts.cuantos) {
+    // A small over-count is data drift, not a runaway. The walk pages over
+    // mutable data, so a record added mid-walk shifts the offsets and makes a
+    // row appear twice with no compensating skip (risk R8): the walk then ends
+    // at `cuantos + 1` or so. Only an over-count larger than a whole page is
+    // proof the API is ignoring `desde`, because a shift cannot add a whole
+    // page. A smaller over-count is returned so the caller validates it. The
+    // guard runs BEFORE the stop conditions, so an over-counting final full
+    // page still fails rather than being mistaken for a completed walk.
+    if (opts.cuantos !== undefined && productos.length > opts.cuantos + tope) {
       throw new KioskosError(
         'bucle-infinito',
         `la extracción superó el oráculo (${productos.length} > ${opts.cuantos} registros); ` +

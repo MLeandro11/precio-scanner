@@ -17,27 +17,47 @@
  * retrying a rejected credential is the fast path to an account lockout, so
  * there are no retries here or in the client.
  *
+ * The extraction itself gets exactly one retry (`INTENTOS_MAXIMOS`), and only
+ * when a COMPLETED walk fails validation — never for a login or a request
+ * failure. Walking `desde=N` offsets over a catalog that can change underneath
+ * (risk R8) can make a row appear twice or be skipped even though the walk
+ * finishes; a second pass usually comes back clean. It is not a retry of the
+ * login: it re-walks with the same session and never sends the credential
+ * again, so it cannot contribute to an account lockout.
+ *
  * Log hygiene (the repo is public and `raw-catalog.json` carries the user's
  * cost and margin): this script never prints the password, the token, the
  * login body or a product record. Every line is a count, a page number, the
- * destination path, or the name/id of the `negocio` the token is bound to.
+ * destination path, or the name/id of the `negocio` the token is bound to. On
+ * a validation failure it prints the validator's reasons only — never a row.
  *
  * Exit codes (distinct so CI can branch):
  *   0 — ok
  *   1 — login failed (credentials missing or rejected, invalid arguments)
  *   2 — API, pagination or destination write failure
- *   3 — the extracted count differs from the oracle
+ *   3 — the extracted catalog failed validation after the retry
  *
  * Usage: node --env-file=<f> scripts/extract-catalog.ts [out.json]
  *             [--out <path>] [--tope <n>] [--help]
  */
 import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { validarProductos } from './catalog-diff.ts'
+import type { ResultadoValidacion } from './catalog-diff.ts'
 import { contar, entrar, extraerTodo, KioskosError, TOPE_DEFAULT } from './kioskos-client.ts'
 import type { Extraccion, KioskosDeps, Sesion } from './kioskos-client.ts'
 
 const BASE_URL_DEFAULT = 'https://kioskos.app'
 const OUT_DEFAULT = 'raw-catalog.json'
+
+/**
+ * How many walks a single run may perform. A completed walk whose data does
+ * not validate is retried once, because the pagination can race a catalog that
+ * changes mid-walk (risk R8). This is NOT a retry of the login: the second
+ * walk reuses the same session, so `entrar` still gets exactly one POST per
+ * run and a rejected credential can never be resubmitted.
+ */
+const INTENTOS_MAXIMOS = 2
 
 interface Opciones {
   out: string
@@ -67,7 +87,7 @@ Códigos de salida:
   0  ok
   1  login falló (credenciales ausentes o rechazadas, argumentos inválidos)
   2  fallo de la API, de la paginación o al escribir el destino
-  3  el conteo extraído difiere del oráculo
+  3  el catálogo extraído falló la validación después del reintento
 
 La salida lleva solo conteos, la cantidad de páginas y el nombre del local.
 Nunca imprime la clave, el token, el cuerpo del login ni un registro.`
@@ -165,6 +185,56 @@ function describirNegocio(negocio: unknown): string {
   return 'desconocido'
 }
 
+/** The distinct validation reasons, for a one-line log that contains no row. */
+function motivosUnicos(v: ResultadoValidacion): string {
+  return [...new Set(v.errores.map((e) => e.motivo))].join(', ')
+}
+
+/**
+ * Walks the catalog and validates every completed walk with the pure validator
+ * (`{ esperado: cuantos }`), so the count rule lives in exactly one place.
+ *
+ * Up to `INTENTOS_MAXIMOS` walks. A validation failure of the first walk is
+ * only announced, then retried; a validation failure of the last one prints
+ * the validator's errors and exits 3, having written nothing. A login or
+ * request failure throws through `conExit` and never reaches the retry: only a
+ * completed-but-invalid walk is retried.
+ */
+async function extraerValidado(
+  deps: KioskosDeps,
+  token: string,
+  opts: Opciones,
+  cuantos: number,
+): Promise<Extraccion> {
+  for (let intento = 1; ; intento++) {
+    const extraccion = await conExit(2, () =>
+      extraerTodo(deps, token, {
+        tope: opts.tope,
+        cuantos,
+        alAvanzar: (n) => console.error(`extract-catalog: ${n} registros leídos`),
+      }),
+    )
+
+    const validacion = validarProductos(extraccion.productos, { esperado: cuantos })
+    if (validacion.ok) return extraccion
+
+    const motivos = motivosUnicos(validacion)
+    if (intento < INTENTOS_MAXIMOS) {
+      console.error(`extract-catalog: la extracción no validó (${motivos}); se reintenta una vez`)
+      continue
+    }
+
+    for (const error of validacion.errores) {
+      console.error(`extract-catalog: ${error.motivo}: ${error.detalle}`)
+    }
+    fail(
+      3,
+      `el catálogo extraído no validó tras ${INTENTOS_MAXIMOS} intentos (${motivos}); ` +
+        'no se escribió nada',
+    )
+  }
+}
+
 async function main(): Promise<void> {
   const parsed = parseArgs(process.argv.slice(2))
   if ('help' in parsed) {
@@ -188,13 +258,10 @@ async function main(): Promise<void> {
 
   const cuantos: number = await conExit(2, () => contar(deps, sesion.token))
 
-  const extraccion: Extraccion = await conExit(2, () =>
-    extraerTodo(deps, sesion.token, {
-      tope: opts.tope,
-      cuantos,
-      alAvanzar: (n) => console.error(`extract-catalog: ${n} registros leídos`),
-    }),
-  )
+  // The walk plus validation. The validator's `conteo-esperado` check replaces
+  // the old hand-rolled count comparison, and a completed walk that fails is
+  // retried once (R8) before the run gives the day up.
+  const extraccion: Extraccion = await extraerValidado(deps, sesion.token, opts, cuantos)
 
   const local = describirNegocio(sesion.negocio)
 
@@ -208,19 +275,11 @@ async function main(): Promise<void> {
     )
   }
 
-  // Count assertion BEFORE the write: a mismatch must not touch the file.
-  if (extraccion.productos.length !== cuantos) {
-    console.error(
-      `extract-catalog: el conteo extraído (${extraccion.productos.length}) difiere del oráculo ` +
-        `(${cuantos}); no se escribió nada`,
-    )
-    process.exit(3)
-  }
-
-  // The API work already succeeded, so a write failure is exit 2 too — and it
-  // goes through the same one-line path as every other failure, never a raw
-  // Node stack. `outPath` is the resolved path; the message shows the user's
-  // own argument.
+  // Validation already ran inside `extraerValidado`, before any write: a walk
+  // that does not validate never reaches the file. The write itself already
+  // succeeded API-wise, so a write failure is exit 2 too — and it goes through
+  // the same one-line path as every other failure, never a raw Node stack.
+  // `outPath` is the resolved path; the message shows the user's own argument.
   try {
     writeFileSync(outPath, `${JSON.stringify({ products: extraccion.productos })}\n`)
   } catch (err) {

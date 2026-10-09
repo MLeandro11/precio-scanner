@@ -13,6 +13,10 @@
  *
  * The fake login body deliberately repeats the fake password: a passing run
  * must not contain it anywhere in stdout/stderr.
+ *
+ * `catalogos` lets one fake serve a different catalog per walk, which is how
+ * the R8 retry (a completed-but-invalid walk) is exercised: the first walk can
+ * come back duplicated or short and the second clean.
  */
 import { describe, it, expect } from 'vitest'
 import { createServer } from 'node:http'
@@ -30,6 +34,11 @@ const TOKEN_FALSO = 'token-secreto.abcdef012345'
 interface Fake {
   cuantos: number
   catalogo: unknown[]
+  /**
+   * Successive walks: index 0 for the first, 1 for the retry. Falls back to
+   * `catalogo` for every walk when omitted.
+   */
+  catalogos?: unknown[][]
   token?: string
   negocio?: unknown
   negocios?: unknown[]
@@ -39,7 +48,12 @@ interface Fake {
   loginStatus?: number
 }
 
-function manejador(cfg: Fake) {
+interface EstadoServidor {
+  /** Walks seen so far; a walk always opens with `desde=0`. */
+  walk: number
+}
+
+function manejador(cfg: Fake, estado: EstadoServidor) {
   return (req: IncomingMessage, res: ServerResponse): void => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     const responder = (status: number, cuerpo: unknown): void => {
@@ -79,7 +93,13 @@ function manejador(cfg: Fake) {
     if (url.pathname === '/api/productos') {
       const tope = Number(url.searchParams.get('tope'))
       const desde = Number(url.searchParams.get('desde'))
-      responder(200, { productos: cfg.catalogo.slice(desde, desde + tope) })
+      // A walk always opens with desde=0, so this is a walk counter, not a
+      // page counter: the retry's first page starts walk #2.
+      if (desde === 0) estado.walk++
+      const fuente = cfg.catalogos
+        ? cfg.catalogos[Math.min(estado.walk - 1, cfg.catalogos.length - 1)]
+        : cfg.catalogo
+      responder(200, { productos: fuente.slice(desde, desde + tope) })
       return
     }
 
@@ -99,10 +119,11 @@ async function conServidor<T>(
 ): Promise<T> {
   const peticiones: string[] = []
   const detalladas: Peticion[] = []
+  const estado: EstadoServidor = { walk: 0 }
   const server: Server = createServer((req, res) => {
     peticiones.push(req.url ?? '')
     detalladas.push({ method: req.method ?? '', url: req.url ?? '' })
-    manejador(cfg)(req, res)
+    manejador(cfg, estado)(req, res)
   })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   const address = server.address()
@@ -432,7 +453,206 @@ describe('scripts/extract-catalog.ts', () => {
     expect(r.out).toContain('0  ok')
     expect(r.out).toContain('1  login falló')
     expect(r.out).toContain('2  fallo de la API, de la paginación o al escribir el destino')
-    expect(r.out).toContain('3  el conteo extraído difiere del oráculo')
+    expect(r.out).toContain('3  el catálogo extraído falló la validación después del reintento')
     expect(existsSync(join(dir, 'raw-catalog.json'))).toBe(false)
+  })
+
+  it(
+    'retries the walk once when the first extraction has a duplicated id, then succeeds',
+    async () => {
+      const dir = tmp()
+      const limpio = productos(600)
+      // The R8 signature: one row repeated, at a page boundary, with the total
+      // count still equal to the oracle. Ids stay unique in the second walk.
+      const duplicado = [...limpio]
+      duplicado[300] = { ...duplicado[299] }
+
+      await conServidor(
+        { cuantos: 600, catalogo: limpio, catalogos: [duplicado, limpio] },
+        async (baseUrl, peticiones) => {
+          const r = await correrCli(dir, { ...CREDENCIALES, KIOSKOS_BASE_URL: baseUrl })
+
+          expect(r.code).toBe(0)
+          const escrito = JSON.parse(readFileSync(join(dir, 'raw-catalog.json'), 'utf8')) as {
+            products: unknown[]
+          }
+          expect(escrito.products).toHaveLength(600)
+          expect(escrito.products).toEqual(limpio)
+
+          // Exactly TWO full walks: each is two pages (500 + 100). A retry loop
+          // or a missing retry both break this exact list.
+          const paginas = peticiones.filter((p) => p.startsWith('/api/productos?'))
+          expect(paginas).toEqual([
+            '/api/productos?tope=500&desde=0',
+            '/api/productos?tope=500&desde=500',
+            '/api/productos?tope=500&desde=0',
+            '/api/productos?tope=500&desde=500',
+          ])
+          // The retry re-walks the catalog without authenticating again.
+          expect(peticiones.filter((p) => p === '/api/entrar')).toHaveLength(1)
+          // The retry is announced, and the first-walk reason is named.
+          expect(r.err).toMatch(/reintent/i)
+          expect(r.err).toContain('id-duplicado')
+        },
+      )
+    },
+    30_000,
+  )
+
+  it(
+    'retries once when the first walk over-counts by one row without a skip, then succeeds',
+    async () => {
+      const dir = tmp()
+      const limpio = productos(600)
+      // The verifier's reproduction: a product is added mid-walk, the offsets
+      // shift, and the row at the page boundary is fetched twice with no
+      // compensating skip, so the walk ends at oracle + 1. The retry is clean.
+      const sobreconteo = [...limpio]
+      sobreconteo.splice(500, 0, { ...limpio[499] })
+
+      await conServidor(
+        { cuantos: 600, catalogo: limpio, catalogos: [sobreconteo, limpio] },
+        async (baseUrl, peticiones) => {
+          const r = await correrCli(dir, { ...CREDENCIALES, KIOSKOS_BASE_URL: baseUrl })
+
+          expect(r.code).toBe(0)
+          const escrito = JSON.parse(readFileSync(join(dir, 'raw-catalog.json'), 'utf8')) as {
+            products: unknown[]
+          }
+          expect(escrito.products).toEqual(limpio)
+
+          // Exactly TWO walks (four pages): a single walk exits 2 on the old
+          // threshold, and a missing retry exits 3. Both break this list.
+          const paginas = peticiones.filter((p) => p.startsWith('/api/productos?'))
+          expect(paginas).toEqual([
+            '/api/productos?tope=500&desde=0',
+            '/api/productos?tope=500&desde=500',
+            '/api/productos?tope=500&desde=0',
+            '/api/productos?tope=500&desde=500',
+          ])
+          // The retry re-walks the catalog without authenticating again.
+          expect(peticiones.filter((p) => p === '/api/entrar')).toHaveLength(1)
+          // The over-count reached validation, which named the count reason.
+          expect(r.err).toContain('conteo-esperado')
+        },
+      )
+    },
+    30_000,
+  )
+
+  it(
+    'retries once when the first walk comes up short of the oracle, then succeeds',
+    async () => {
+      const dir = tmp()
+      const corto = productos(599)
+      const completo = productos(600)
+
+      await conServidor(
+        { cuantos: 600, catalogo: completo, catalogos: [corto, completo] },
+        async (baseUrl, peticiones) => {
+          const r = await correrCli(dir, { ...CREDENCIALES, KIOSKOS_BASE_URL: baseUrl })
+
+          expect(r.code).toBe(0)
+          const escrito = JSON.parse(readFileSync(join(dir, 'raw-catalog.json'), 'utf8')) as {
+            products: unknown[]
+          }
+          expect(escrito.products).toHaveLength(600)
+
+          // The short walk is the silent direction of R8: the count misses the
+          // oracle. It must be retried, and only a completed walk is retried.
+          const paginas = peticiones.filter((p) => p.startsWith('/api/productos?'))
+          expect(paginas).toEqual([
+            '/api/productos?tope=500&desde=0',
+            '/api/productos?tope=500&desde=500',
+            '/api/productos?tope=500&desde=0',
+            '/api/productos?tope=500&desde=500',
+          ])
+          expect(r.err).toContain('conteo-esperado')
+        },
+      )
+    },
+    30_000,
+  )
+
+  it(
+    'exits 3 with the validator reasons and writes NOTHING when both walks are invalid',
+    async () => {
+      const dir = tmp()
+      const destino = sembrarCentinela(dir)
+      const limpio = productos(600)
+      const duplicado = [...limpio]
+      duplicado[300] = { ...duplicado[299] }
+
+      await conServidor(
+        { cuantos: 600, catalogo: limpio, catalogos: [duplicado, duplicado] },
+        async (baseUrl, peticiones) => {
+          const r = await correrCli(dir, { ...CREDENCIALES, KIOSKOS_BASE_URL: baseUrl })
+
+          expect(r.code).toBe(3)
+          // The printed errors name the motivo, not just the count.
+          expect(r.err).toContain('id-duplicado')
+          expect(r.err).toContain('p00299')
+          esperarIntacto(destino)
+
+          // Two walks attempted (four pages), never a third.
+          const paginas = peticiones.filter((p) => p.startsWith('/api/productos?'))
+          expect(paginas).toHaveLength(4)
+        },
+      )
+    },
+    30_000,
+  )
+
+  it('never retries a rejected login: exactly one POST /api/entrar and no walk', async () => {
+    const dir = tmp()
+    const destino = sembrarCentinela(dir)
+    await conServidor(
+      { cuantos: 600, catalogo: productos(600), loginStatus: 401 },
+      async (baseUrl, peticiones, detalladas) => {
+        const r = await correrCli(dir, { ...CREDENCIALES, KIOSKOS_BASE_URL: baseUrl })
+
+        expect(r.code).toBe(1)
+        expect(
+          detalladas.filter((p) => p.method === 'POST' && p.url === '/api/entrar'),
+        ).toHaveLength(1)
+        expect(peticiones.filter((p) => p.startsWith('/api/productos'))).toHaveLength(0)
+        esperarIntacto(destino)
+      },
+    )
+  })
+
+  it('never retries an API failure on a page: exit 2 with a single walk', async () => {
+    const dir = tmp()
+    const destino = sembrarCentinela(dir)
+    await conServidor(
+      { cuantos: 600, catalogo: productos(600), falloEn: '/api/productos' },
+      async (baseUrl, peticiones) => {
+        const r = await correrCli(dir, { ...CREDENCIALES, KIOSKOS_BASE_URL: baseUrl })
+
+        expect(r.code).toBe(2)
+        expect(peticiones.filter((p) => p.startsWith('/api/productos?'))).toHaveLength(1)
+        esperarIntacto(destino)
+      },
+    )
+  })
+
+  it('never prints the password or the token on the retry-and-fail path', async () => {
+    const dir = tmp()
+    const limpio = productos(600)
+    const duplicado = [...limpio]
+    duplicado[300] = { ...duplicado[299] }
+
+    await conServidor(
+      { cuantos: 600, catalogo: limpio, catalogos: [duplicado, duplicado] },
+      async (baseUrl) => {
+        const r = await correrCli(dir, { ...CREDENCIALES, KIOSKOS_BASE_URL: baseUrl })
+
+        expect(r.code).toBe(3)
+        const todo = r.out + r.err
+        expect(todo).not.toContain(CLAVE_FALSA)
+        expect(todo).not.toContain(TOKEN_FALSO)
+        expect(todo).not.toContain(EMAIL_FALSO)
+      },
+    )
   })
 })
