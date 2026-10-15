@@ -493,3 +493,230 @@ describe('scripts/refresh-catalog.ts', () => {
     120_000,
   )
 })
+
+/**
+ * T2 — the pipeline emits the `/cambios` feed artifact next to the other three
+ * files. The window is rolling, and reading the previous artifact must never be
+ * fatal (risk R3).
+ */
+describe('scripts/refresh-catalog.ts — changes artifact', () => {
+  const CAMBIOS = join(...DATA_DIR, 'catalogo-cambios.json')
+
+  /** A minimal, valid previous artifact with just the given days. */
+  function artifactText(dias: string[], version = 1): string {
+    return JSON.stringify({
+      version,
+      ventanaDias: 7,
+      generado: '2026-10-01T00:00:00Z',
+      dias: dias.map((fecha) => ({
+        fecha,
+        nuevos: { conteo: 0, truncado: false, valores: [] },
+        bajaron: { conteo: 0, truncado: false, valores: [] },
+        subieron: { conteo: 0, truncado: false, valores: [] },
+      })),
+    })
+  }
+
+  /** The daily raw shape, with `p1` (100 → 150) as the only price change. */
+  function rawDelDia(): unknown {
+    const raw = bigRaw()
+    raw[0] = rawRecord(0, {
+      id: 'p1',
+      nombre: 'Producto que sube',
+      categoria: 'Cat',
+      barcode: '999',
+      precio: 150,
+    })
+    return { generada: '2026-10-15T12:00:00Z', products: raw }
+  }
+
+  interface Artefacto {
+    version: number
+    ventanaDias: number
+    generado: string
+    dias: Array<{ fecha: string; subieron: { conteo: number }; nuevos: { conteo: number; truncado: boolean; valores: unknown[] } }>
+  }
+
+  function leerCambios(dir: string): Artefacto {
+    return JSON.parse(readFileSync(join(dir, CAMBIOS), 'utf8')) as Artefacto
+  }
+
+  it(
+    "writes the artifact next to the other three files with today's diff and says the window restarted",
+    () => {
+      const dir = makeDir()
+      writeFileSync(join(dir, 'raw-catalog.json'), JSON.stringify(rawDelDia()))
+
+      const r = runRefresh(dir, ['--esperado', '20001'])
+      expect(r.code).toBe(0)
+
+      const art = leerCambios(dir)
+      expect(art.version).toBe(1)
+      expect(art.ventanaDias).toBe(7)
+      expect(art.generado).toBe('2026-10-15T12:00:00Z')
+      expect(art.dias.map((d) => d.fecha)).toEqual(['2026-10-15'])
+      expect(art.dias[0].subieron.conteo).toBe(1)
+      // The 20,000 new ids are counted exactly and capped at 200 per list.
+      expect(art.dias[0].nuevos.conteo).toBe(20_000)
+      expect(art.dias[0].nuevos.truncado).toBe(true)
+      expect(art.dias[0].nuevos.valores).toHaveLength(200)
+      // No previous artifact existed anywhere: the report has to say so.
+      expect(r.out).toContain('cambios: ventana reiniciada')
+      expect(r.out).toContain('no había artefacto previo')
+    },
+    120_000,
+  )
+
+  it(
+    'accumulates the previous days and drops what fell out of the 7-day window',
+    () => {
+      const dir = makeDir()
+      // 10-14 and 10-10 are inside the window; 10-08 is exactly 7 days back.
+      writeFileSync(join(dir, CAMBIOS), artifactText(['2026-10-14', '2026-10-10', '2026-10-08']))
+      writeFileSync(join(dir, 'raw-catalog.json'), JSON.stringify(rawDelDia()))
+
+      const r = runRefresh(dir, ['--esperado', '20001'])
+      expect(r.code).toBe(0)
+
+      const art = leerCambios(dir)
+      expect(art.dias.map((d) => d.fecha)).toEqual(['2026-10-15', '2026-10-14', '2026-10-10'])
+      expect(r.out).toContain('cambios: ventana de 7 días')
+    },
+    120_000,
+  )
+
+  it(
+    "replaces today's entry instead of duplicating it on a re-run",
+    () => {
+      const dir = makeDir()
+      writeFileSync(join(dir, CAMBIOS), artifactText(['2026-10-15', '2026-10-14']))
+      writeFileSync(join(dir, 'raw-catalog.json'), JSON.stringify(rawDelDia()))
+
+      const r = runRefresh(dir, ['--esperado', '20001'])
+      expect(r.code).toBe(0)
+
+      const art = leerCambios(dir)
+      expect(art.dias.map((d) => d.fecha)).toEqual(['2026-10-15', '2026-10-14'])
+      expect(art.dias[0].subieron.conteo).toBe(1)
+    },
+    120_000,
+  )
+
+  it(
+    'fails loudly (exit 3) on a previous artifact that is present but unusable',
+    () => {
+      // A previous artifact that EXISTS and cannot be read under this contract is a fault,
+      // not a first run. Degrading here would restart the window and silently drop up to
+      // six days of feed, so it gets the same treatment the CLI already gives an explicit
+      // unreadable --baseline: exit 3, and the previous artifact is left untouched.
+      const casos = ['{no soy JSON', '', artifactText(['2026-10-14'], 2)]
+
+      for (const contenido of casos) {
+        const dir = makeDir()
+        writeFileSync(join(dir, CAMBIOS), contenido)
+        writeFileSync(join(dir, 'raw-catalog.json'), JSON.stringify(rawDelDia()))
+
+        const r = runRefresh(dir, ['--esperado', '20001'])
+        expect(r.code).toBe(3)
+        expect(r.err).toContain('no se puede usar')
+        expect(r.err).not.toContain('at Object.')
+        // El artefacto previo no se pisa: lo que se rechaza no se reemplaza.
+        expect(readFileSync(join(dir, CAMBIOS), 'utf8')).toBe(contenido)
+      }
+    },
+    120_000,
+  )
+
+  it(
+    'treats an unreadable previous artifact as present-but-unusable, not as absent',
+    () => {
+      // A path that EXISTS but cannot be read (a directory here, a denied read in the wild) is
+      // not "there is no previous artifact": folding it into `absent` would restart the window
+      // and drop up to six days of feed **silently**, which is the exact loss R3 exists to
+      // prevent. The sibling rule for an explicit `--baseline` already fails (exit 3) on a
+      // directory, so the layers must not disagree at this boundary.
+      //
+      // The read source is isolated from the write destination on purpose: a directory at the
+      // default path fails the WRITE first (exit 3 too, but for the other reason) and would mask
+      // how the read was classified — the first version of this test did exactly that.
+      const dir = makeDir()
+      mkdirSync(join(dir, 'previos-es-un-directorio'), { recursive: true })
+      writeFileSync(join(dir, 'raw-catalog.json'), JSON.stringify(rawDelDia()))
+
+      const r = runRefresh(dir, [
+        '--esperado',
+        '20001',
+        '--cambios-previos',
+        join(dir, 'previos-es-un-directorio'),
+      ])
+      expect(r.code).toBe(3)
+      expect(r.err).toContain('no se puede usar')
+      expect(r.err).not.toContain('at Object.')
+      // Nothing was published: the run refused the input instead of replacing it.
+      expect(existsSync(join(dir, CAMBIOS))).toBe(false)
+    },
+    120_000,
+  )
+
+  it(
+    'a previous artifact that is absent restarts the window without failing',
+    () => {
+      const dir = makeDir({ withCatalog: false })
+      writeFileSync(join(dir, 'raw-catalog.json'), JSON.stringify(rawDelDia()))
+      // No hay CAMBIOS en ningún lado: primera corrida de la ventana.
+      expect(existsSync(join(dir, CAMBIOS))).toBe(false)
+
+      const r = runRefresh(dir, ['--esperado', '20001'])
+      expect(r.code).toBe(0)
+      expect(r.out).toContain('ventana reiniciada')
+      expect(leerCambios(dir).dias.map((d) => d.fecha)).toEqual(['2026-10-15'])
+    },
+    120_000,
+  )
+
+  it(
+    'reads the previous artifact from the --baseline directory when one is given',
+    () => {
+      const dir = makeDir({ withCatalog: false })
+      // Decoy next to the output: it must NOT be the one the window continues from.
+      writeFileSync(join(dir, CAMBIOS), artifactText(['2026-10-13']))
+      const baselineDir = join(dir, 'baseline')
+      mkdirSync(baselineDir, { recursive: true })
+      writeFileSync(
+        join(baselineDir, 'catalogo.json'),
+        JSON.stringify({ version: 'baseline', products: PREV_PRODUCTS }),
+      )
+      writeFileSync(join(baselineDir, 'catalogo-cambios.json'), artifactText(['2026-10-14']))
+      writeFileSync(join(dir, 'raw-catalog.json'), JSON.stringify(rawDelDia()))
+
+      const r = runRefresh(dir, [
+        '--baseline',
+        join(baselineDir, 'catalogo.json'),
+        '--catalogo',
+        join('public', 'data', 'catalogo.json'),
+        '--esperado',
+        '20001',
+      ])
+      expect(r.code).toBe(0)
+      expect(leerCambios(dir).dias.map((d) => d.fecha)).toEqual(['2026-10-15', '2026-10-14'])
+    },
+    120_000,
+  )
+
+  it(
+    '--json keeps a single JSON object on stdout and reports the window on stderr',
+    () => {
+      const dir = makeDir()
+      writeFileSync(join(dir, 'raw-catalog.json'), JSON.stringify(rawDelDia()))
+
+      const r = runRefresh(dir, ['--json', '--esperado', '20001'])
+      expect(r.code).toBe(0)
+      expect(r.out.trim().startsWith('{')).toBe(true)
+      expect(() => JSON.parse(r.out)).not.toThrow()
+      expect(r.out).not.toContain('cambios:')
+      expect(r.err).toContain('cambios:')
+      expect(existsSync(join(dir, CAMBIOS))).toBe(true)
+    },
+    120_000,
+  )
+})

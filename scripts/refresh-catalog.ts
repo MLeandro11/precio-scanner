@@ -26,7 +26,8 @@
  * `categoria`, price summaries).
  *
  * Usage: node scripts/refresh-catalog.ts [raw.json] [--raw <p>] [--catalogo <p>]
- *                                       [--baseline <p>] [--esperado <N>] [--json] [--help]
+ *                                       [--baseline <p>] [--cambios-previos <p>]
+ *                                       [--esperado <N>] [--json] [--help]
  *
  * `--catalogo` is the output path and, when `--baseline` is absent, the diff
  * baseline too (today's behaviour). `--baseline` decouples the two: the diff is
@@ -35,24 +36,39 @@
  * temp directory while the output goes to `public/data` (T7/D7). An explicitly
  * passed baseline that is missing or unreadable is a failure, never a silent
  * `primeraCarga`.
+ *
+ * A normal run also writes `catalogo-cambios.json` next to the catalog
+ * (`scripts/catalog-changes.ts`). Its rolling window continues from the previous
+ * artifact: the `--baseline` sibling when a baseline is given (the workflow's
+ * `fetch-data` puts it there), else `${DEFAULT_CAMBIOS}`. `--cambios-previos`
+ * overrides that input path. Reading it is never fatal: a missing, unreadable,
+ * corrupt or version-mismatched artifact restarts the window and the report says
+ * so.
  */
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
 import {
   compararCatalogos,
   validarProductos,
 } from './catalog-diff.ts'
+import {
+  buildChangesArtifact,
+  parseChangesArtifact,
+} from './catalog-changes.ts'
+import type { ChangesArtifact, DegradationReason } from './catalog-changes.ts'
 import type { FechasDelRaw, ProductoLite, ReporteDiff, ResultadoValidacion } from './catalog-diff.ts'
 
 const DEFAULT_RAW = 'raw-catalog.json'
 const DEFAULT_CATALOGO = 'public/data/catalogo.json'
+const DEFAULT_CAMBIOS = 'public/data/catalogo-cambios.json'
 const SCRIPT_DIR = import.meta.dirname
 
 interface Opciones {
   raw: string
   catalogo: string
   baseline: string | null
+  cambiosPrevios: string | null
   esperado: number | null
   json: boolean
 }
@@ -60,13 +76,18 @@ interface Opciones {
 const USAGE = `Uso: node scripts/refresh-catalog.ts [raw.json] [opciones]
 
 Valida la extracción cruda y, solo si pasa, corre normalize-catalog y
-generate-index; al final imprime el reporte del refresh.
+generate-index; al final escribe el artefacto de cambios e imprime el reporte
+del refresh.
 
 Opciones:
   --raw <path>        extracción cruda (default: ${DEFAULT_RAW}); también se acepta como primer argumento posicional
   --catalogo <path>   catálogo regenerado, destino de la escritura (default: ${DEFAULT_CATALOGO})
   --baseline <path>   catálogo contra el que se calcula el diff (default: el mismo que --catalogo).
                       Debe existir: si falta o no se puede leer, el CLI falla sin escribir nada
+  --cambios-previos <p>  artefacto de cambios previo para continuar la ventana rodante
+                      (default: hermano de --baseline, o ${DEFAULT_CAMBIOS}).
+                      Si falta, no se puede leer o no es un artefacto válido, la ventana
+                      arranca de nuevo con el día de hoy; nunca es fatal
   --esperado <N>      conteo del oráculo GET /api/productos-cuantos; si el raw difiere, exit 2
   --json              imprime el reporte como un único objeto JSON (la prosa del pipeline va a stderr)
   --help              muestra esta ayuda y no ejecuta nada
@@ -87,6 +108,7 @@ function parseArgs(argv: string[]): Opciones | { help: true } {
     raw: DEFAULT_RAW,
     catalogo: DEFAULT_CATALOGO,
     baseline: null,
+    cambiosPrevios: null,
     esperado: null,
     json: false,
   }
@@ -111,6 +133,10 @@ function parseArgs(argv: string[]): Opciones | { help: true } {
       const value = argv[++i]
       if (!value) fail(1, '--baseline necesita un path')
       opts.baseline = value
+    } else if (arg === '--cambios-previos') {
+      const value = argv[++i]
+      if (!value) fail(1, '--cambios-previos necesita un path')
+      opts.cambiosPrevios = value
     } else if (arg === '--esperado') {
       const value = argv[++i]
       const n = Number(value)
@@ -294,7 +320,43 @@ function fechasDeEjemplo(c: { actualizado?: string; precioCambiado?: string }): 
   return s
 }
 
-function imprimirReporte(r: ReporteDiff): void {
+/** Where the changes artifact ended up, and how the rolling window was continued. */
+interface EstadoCambios {
+  path: string
+  dias: number
+  ventanaDias: number
+  degraded: DegradationReason | null
+}
+
+/** Spanish phrasing for each degradation reason; the CLI reports, never hides. */
+const MOTIVOS_DEGRADACION: Record<DegradationReason, string> = {
+  'first-load': 'primer refresh: no había catálogo previo',
+  absent: 'no había artefacto previo',
+  'invalid-json': 'el artefacto previo no es JSON válido',
+  'invalid-shape': 'el artefacto previo tiene forma inválida',
+  'version-mismatch': 'el artefacto previo tiene otra version',
+}
+
+/** One prose line for the changes artifact: where it is and whether the window restarted. */
+function describirCambios(estado: EstadoCambios): string {
+  const estadoVentana =
+    estado.degraded === null
+      ? `ventana de ${estado.ventanaDias} días`
+      : `ventana reiniciada (${MOTIVOS_DEGRADACION[estado.degraded]})`
+  return `cambios: ${estadoVentana} · ${estado.dias} día(s) · ${estado.path}`
+}
+
+/** Writes the artifact next to the other published files. A write failure is loud. */
+function escribirCambios(path: string, artifact: ChangesArtifact): void {
+  try {
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, JSON.stringify(artifact))
+  } catch {
+    fail(3, `no se pudo escribir el artefacto de cambios: ${path}`)
+  }
+}
+
+function imprimirReporte(r: ReporteDiff, cambios: EstadoCambios): void {
   const lineas: string[] = []
   if (r.primeraCarga) {
     lineas.push('refresh-catalog: primer refresh (no había catálogo previo para comparar)')
@@ -352,6 +414,7 @@ function imprimirReporte(r: ReporteDiff): void {
     lineas.push(`  categorias nuevas: ${r.categoriasAltas.length ? r.categoriasAltas.join(', ') : '—'}`)
     lineas.push(`  categorias desaparecidas: ${r.categoriasBajas.length ? r.categoriasBajas.join(', ') : '—'}`)
   }
+  lineas.push(describirCambios(cambios))
   console.log(lineas.join('\n'))
 }
 
@@ -412,10 +475,73 @@ function main(): void {
   const next = leerProductosEscritos(catalogoPath)
   const reporte = compararCatalogos(prev, next, { fechas: fechasDelRaw(parsedRaw) })
 
+  // 6. The changes artifact (S2/S3/S6). It is written next to the other files
+  //    so H1's `public/data/*.json` glob publishes it, and its rolling window
+  //    continues from the previous artifact: the `--baseline` sibling when a
+  //    baseline was given, else the published default. A missing, unreadable,
+  //    corrupt or version-mismatched previous artifact is never fatal (R3):
+  //    the window restarts and the report says so.
+  const cambiosPath = resolve(join(dirname(catalogoPath), 'catalogo-cambios.json'))
+  const cambiosPreviosPath =
+    opts.cambiosPrevios !== null
+      ? resolve(opts.cambiosPrevios)
+      : opts.baseline === null
+        ? resolve(DEFAULT_CAMBIOS)
+        : resolve(join(dirname(baselinePath), 'catalogo-cambios.json'))
+  // The extraction moment the facets carry, so the artifact's `fecha` and the
+  // app's "data date" can never disagree. With no usable date in the raw there
+  // is nothing to agree with, and the clock is the only honest fallback.
+  const generatedAt = generada ?? new Date().toISOString()
+  if (generada === null) {
+    console.error(
+      'refresh-catalog: el raw no trae una fecha de extracción; el artefacto de cambios usa la fecha de hoy',
+    )
+  }
+  // Un artefacto anterior que EXISTE y no se puede leer bajo este contrato es una falla, no una
+  // primera corrida: degradar acá reiniciaría la ventana y tiraría hasta seis días de feed sin
+  // que nadie se entere. Es el mismo criterio que este CLI ya aplica a un `--baseline` explícito
+  // ilegible (exit 3). Solo la AUSENCIA degrada — y "no se puede leer" NO es ausencia: un
+  // directorio o un permiso denegado existen.
+  let cambiosPreviosTexto: string | null = null
+  if (existsSync(cambiosPreviosPath)) {
+    try {
+      cambiosPreviosTexto = readFileSync(cambiosPreviosPath, 'utf8')
+    } catch {
+      fail(
+        3,
+        `el artefacto de cambios anterior no se puede usar (ilegible): ${cambiosPreviosPath}`,
+      )
+    }
+  }
+  const cambiosPrevios = parseChangesArtifact(cambiosPreviosTexto)
+  if (cambiosPreviosTexto !== null && !cambiosPrevios.ok) {
+    fail(
+      3,
+      `el artefacto de cambios anterior no se puede usar (${cambiosPrevios.reason}): ${cambiosPreviosPath}`,
+    )
+  }
+
+  const cambios = buildChangesArtifact({
+    previous: prev,
+    current: next,
+    previousArtifact: cambiosPrevios,
+    generatedAt,
+  })
+  escribirCambios(cambiosPath, cambios.artifact)
+
+  const estadoCambios: EstadoCambios = {
+    path: cambiosPath,
+    dias: cambios.artifact.dias.length,
+    ventanaDias: cambios.artifact.ventanaDias,
+    degraded: cambios.degraded,
+  }
+
   if (opts.json) {
+    // The prose goes to stderr so stdout stays a single JSON object.
+    console.error(describirCambios(estadoCambios))
     console.log(JSON.stringify(reporte))
   } else {
-    imprimirReporte(reporte)
+    imprimirReporte(reporte, estadoCambios)
   }
 }
 

@@ -29,7 +29,7 @@ import {
   validarContenidos,
   verificarDatos,
 } from './fetch-data.ts'
-import type { RunnerGit, SalidaGit } from './fetch-data.ts'
+import type { LectorArchivo, RunnerGit, SalidaGit } from './fetch-data.ts'
 
 const SCRIPT = join(__dirname, 'fetch-data.ts')
 
@@ -46,6 +46,12 @@ const FACETS = JSON.stringify({
   categories: ['Bebidas'],
   brands: [],
   priceBounds: { min: 0, max: 100 },
+})
+const CAMBIOS = JSON.stringify({
+  version: 1,
+  ventanaDias: 7,
+  generado: '2026-10-15T12:00:00Z',
+  dias: [],
 })
 
 function bytes(s: string): Buffer {
@@ -66,6 +72,7 @@ function archivosDelBranch(over: Partial<Record<string, string>> = {}): Map<stri
     'public/data/catalogo.json': CATALOGO,
     'public/data/catalogo-index.json': INDEX,
     'public/data/catalogo-facets.json': FACETS,
+    'public/data/catalogo-cambios.json': CAMBIOS,
   }
   const m = new Map<string, Buffer>()
   for (const a of ARCHIVOS) {
@@ -162,6 +169,13 @@ function git(args: string[], cwd: string): void {
   }
 }
 
+function lectorDe(archivos: Map<string, Buffer>): LectorArchivo {
+  return (nombre) => {
+    const archivo = ARCHIVOS.find((a) => a.nombre === nombre)!
+    return archivos.get(archivo.ruta) ?? null
+  }
+}
+
 describe('scripts/fetch-data.ts — core', () => {
   it('fetches the branch, validates, creates the dest and writes the exact bytes', () => {
     const dest = join(tmp(), 'anidado', 'data')
@@ -177,6 +191,7 @@ describe('scripts/fetch-data.ts — core', () => {
     expect(res.commit).toBe(COMMIT)
     expect(res.products).toBe(1)
     expect(res.version).toBe('v-dataset-123')
+    expect(res.cambios).toBe(true)
 
     // `--depth=1` is part of the contract, not an optimisation detail: without
     // it every deploy would download the entire history of the data branch,
@@ -187,7 +202,25 @@ describe('scripts/fetch-data.ts — core', () => {
       `${COMMIT}:public/data/catalogo.json`,
       `${COMMIT}:public/data/catalogo-index.json`,
       `${COMMIT}:public/data/catalogo-facets.json`,
+      `${COMMIT}:public/data/catalogo-cambios.json`,
     ])
+  })
+
+  // H2/R6: the tip of `datos` does not carry the changes artifact until the
+  // first run that publishes it. Fetching the baseline must not fail on that.
+  it('fetches without the changes artifact, leaving it absent, when the branch has none yet', () => {
+    const dest = tmp()
+    const archivos = archivosDelBranch()
+    archivos.delete('public/data/catalogo-cambios.json')
+    const { run } = runnerFalso(archivos)
+
+    const res = descargarDatos(run, { branch: 'datos', dest, cwd: '/x' })
+
+    expect(res.cambios).toBe(false)
+    for (const nombre of ['catalogo.json', 'catalogo-index.json', 'catalogo-facets.json']) {
+      expect(existsSync(join(dest, nombre))).toBe(true)
+    }
+    expect(existsSync(join(dest, 'catalogo-cambios.json'))).toBe(false)
   })
 
   it('honours --branch: fetches origin <branch> and names it in the result', () => {
@@ -288,6 +321,38 @@ describe('scripts/fetch-data.ts — core', () => {
   it('validarContenidos reports a missing file by name', () => {
     expect(() => validarContenidos(() => null)).toThrow(/catalogo\.json/)
   })
+
+  // H2/R6: the artifact is optional in the baseline fetch (the tip of `datos`
+  // may predate it) and required in `--check` (the build guard).
+  it('accepts an absent changes artifact by default and requires it on demand', () => {
+    const archivos = archivosDelBranch()
+    archivos.delete('public/data/catalogo-cambios.json')
+    const leer = lectorDe(archivos)
+
+    expect(validarContenidos(leer).cambios).toBe(false)
+    expect(() => validarContenidos(leer, { requireOptional: true })).toThrow(/catalogo-cambios\.json/)
+  })
+
+  it('rejects a present changes artifact that is empty, not JSON or does not carry the version this build understands', () => {
+    const casos: Array<[Buffer, RegExp]> = [
+      [Buffer.alloc(0), /catalogo-cambios\.json/],
+      [bytes('{no soy JSON'), /catalogo-cambios\.json/],
+      [bytes(JSON.stringify({ ventanaDias: 7, dias: [] })), /version/],
+      [bytes(JSON.stringify({ version: '1', dias: [] })), /version/],
+      // A numeric version that is not the one this build reads is NOT "valid". The
+      // pipeline and the client ship in the same commit, so a v2 artifact on `datos`
+      // means the app cannot render what the branch serves: the build guard has to
+      // fail here, loudly, instead of passing and leaving the screen to reject it in
+      // silence.
+      [bytes(JSON.stringify({ version: 2, dias: [] })), /version/],
+    ]
+
+    for (const [contenido, esperado] of casos) {
+      const archivos = archivosDelBranch()
+      archivos.set('public/data/catalogo-cambios.json', contenido)
+      expect(() => validarContenidos(lectorDe(archivos))).toThrow(esperado)
+    }
+  })
 })
 
 describe('scripts/fetch-data.ts — --check', () => {
@@ -296,10 +361,22 @@ describe('scripts/fetch-data.ts — --check', () => {
     writeFileSync(join(dest, 'catalogo.json'), CATALOGO)
     writeFileSync(join(dest, 'catalogo-index.json'), INDEX)
     writeFileSync(join(dest, 'catalogo-facets.json'), FACETS)
+    writeFileSync(join(dest, 'catalogo-cambios.json'), CAMBIOS)
 
     const res = verificarDatos(dest)
 
-    expect(res).toEqual({ products: 1, version: 'v-dataset-123' })
+    expect(res).toEqual({ products: 1, version: 'v-dataset-123', cambios: true })
+  })
+
+  // The other half of the asymmetry: the build guard refuses a doc without the
+  // artifact, while the baseline fetch tolerates its absence.
+  it('rejects a build whose changes artifact is missing, naming it', () => {
+    const dest = tmp()
+    writeFileSync(join(dest, 'catalogo.json'), CATALOGO)
+    writeFileSync(join(dest, 'catalogo-index.json'), INDEX)
+    writeFileSync(join(dest, 'catalogo-facets.json'), FACETS)
+
+    expect(() => verificarDatos(dest)).toThrow(/catalogo-cambios\.json/)
   })
 
   it('fails on a missing file, naming it', () => {
@@ -321,10 +398,15 @@ describe('scripts/fetch-data.ts — --check', () => {
 
   it('does not modify the files it checks', () => {
     const dest = tmp()
+    const contenidoDe: Record<string, string> = {
+      'catalogo.json': CATALOGO,
+      'catalogo-index.json': INDEX,
+      'catalogo-facets.json': FACETS,
+      'catalogo-cambios.json': CAMBIOS,
+    }
     const antes = new Map<string, Buffer>()
     for (const a of ARCHIVOS) {
-      const contenido = a.nombre === 'catalogo.json' ? CATALOGO : a.nombre === 'catalogo-index.json' ? INDEX : FACETS
-      writeFileSync(join(dest, a.nombre), contenido)
+      writeFileSync(join(dest, a.nombre), contenidoDe[a.nombre])
       antes.set(a.nombre, readFileSync(join(dest, a.nombre)))
     }
 
@@ -370,6 +452,7 @@ describe('scripts/fetch-data.ts — CLI', () => {
     expect(r.out).toMatch(/--branch/)
     expect(r.out).toMatch(/--dest/)
     expect(r.out).toMatch(/--check/)
+    expect(r.out).toMatch(/catalogo-cambios/)
     expect(r.out).toMatch(/0[^\n]*ok/i)
     expect(r.out).toMatch(/1[^\n]*(argument|uso)/i)
     expect(r.out).toMatch(/2[^\n]*(datos|fetch|valid)/i)
@@ -387,6 +470,7 @@ describe('scripts/fetch-data.ts — CLI', () => {
     writeFileSync(join(dest, 'catalogo.json'), CATALOGO)
     writeFileSync(join(dest, 'catalogo-index.json'), INDEX)
     writeFileSync(join(dest, 'catalogo-facets.json'), FACETS)
+    writeFileSync(join(dest, 'catalogo-cambios.json'), CAMBIOS)
     const falso = gitFalso(tmp())
 
     const r = await correrCli(dest, ['--check', '--dest', '.'], { PATH: falso.binDir })
@@ -394,6 +478,23 @@ describe('scripts/fetch-data.ts — CLI', () => {
     expect(r.code).toBe(0)
     expect(r.out).toContain('1')
     expect(r.out).toContain('v-dataset-123')
+    expect(r.out).toContain('cambios')
+    expect(falso.invocado()).toBe(false)
+  })
+
+  // R6: the build guard must refuse to build a site whose feed artifact is not
+  // there, while the baseline fetch above tolerates its absence.
+  it('--check without the changes artifact exits 2, names it and never runs git', async () => {
+    const dest = tmp()
+    writeFileSync(join(dest, 'catalogo.json'), CATALOGO)
+    writeFileSync(join(dest, 'catalogo-index.json'), INDEX)
+    writeFileSync(join(dest, 'catalogo-facets.json'), FACETS)
+    const falso = gitFalso(tmp())
+
+    const r = await correrCli(dest, ['--check', '--dest', '.'], { PATH: falso.binDir })
+
+    expect(r.code).toBe(2)
+    expect(r.err).toMatch(/catalogo-cambios\.json/)
     expect(falso.invocado()).toBe(false)
   })
 
@@ -426,6 +527,7 @@ describe('scripts/fetch-data.ts — CLI', () => {
     writeFileSync(join(dest, 'catalogo.json'), JSON.stringify({ version: 'v', products: [] }))
     writeFileSync(join(dest, 'catalogo-index.json'), INDEX)
     writeFileSync(join(dest, 'catalogo-facets.json'), FACETS)
+    writeFileSync(join(dest, 'catalogo-cambios.json'), CAMBIOS)
 
     const r = await correrCli(dest, ['--check', '--dest', '.'])
 
@@ -472,6 +574,27 @@ describe('scripts/fetch-data.ts — real git, no network', () => {
         expect(ok.out).toContain('datos')
         expect(ok.out).toContain('v-dataset-123')
         expect(ok.out).toContain('1')
+
+        // The branch carries three files, not four: fetching the baseline must
+        // tolerate the missing artifact, or the first deploy after T2 breaks.
+        expect(existsSync(join(dest, 'catalogo-cambios.json'))).toBe(false)
+
+        // ...and `--check`, the build guard, refuses that same tree.
+        const guard = await correrCli(dest, ['--check', '--dest', '.'])
+        expect(guard.code).toBe(2)
+        expect(guard.err).toMatch(/catalogo-cambios\.json/)
+
+        // Once the branch carries the artifact, the fetch writes it too.
+        writeFileSync(join(seed, 'public', 'data', 'catalogo-cambios.json'), CAMBIOS)
+        git(['-C', seed, 'add', 'public/data/catalogo-cambios.json'], root)
+        git(['-C', seed, 'commit', '-m', 'cambios'], root)
+        git(['-C', seed, 'push', 'origin', 'datos'], root)
+
+        const conArtefacto = join(run, 'datos-con-artefacto')
+        const ok2 = await correrCli(run, ['--dest', conArtefacto])
+        expect(ok2.code).toBe(0)
+        expect(readFileSync(join(conArtefacto, 'catalogo-cambios.json'), 'utf8')).toBe(CAMBIOS)
+        expect(await correrCli(conArtefacto, ['--check', '--dest', '.'])).toMatchObject({ code: 0 })
 
         // A branch that does not exist is a loud exit 2 and writes nothing.
         const malo = await correrCli(run, ['--branch', 'no-existe', '--dest', join(run, 'otro')])
