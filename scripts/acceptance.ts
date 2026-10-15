@@ -61,6 +61,7 @@ import { existsSync } from 'node:fs'
 import { startServer, type GhPagesServer } from './ghpages-server.ts'
 import { elegirProductoDePrueba, separarEan } from './acceptance-fixtures.ts'
 import type { Catalog } from '../src/lib/types.ts'
+import type { ChangesArtifact } from '../src/lib/catalogChanges.ts'
 
 const EXTERNAL_BASE_URL = process.env.BASE_URL
 const SELF_SERVE_PORT = 4173
@@ -761,6 +762,51 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
     `bottom-nav label font sizes: ${
       navLabelSizes ? navLabelSizes.map((l) => `${l.label} ${l.size}px`).join(', ') : 'nav not found'
     }`,
+  )
+
+  /*
+   * The tab that used to be "Alertas" is now "Cambios", and both halves of that are part
+   * of the contract: the label a user reads and the href it points at. The old name
+   * promised notifications; the screen is a feed of what moved in the catalog, so a
+   * rename that updates one half and forgets the other is exactly what this row catches.
+   * The `Bell` icon went with the name — its pixels carry no meaning the label does not,
+   * so nothing here measures it.
+   */
+  const navCambios: Array<{ label: string; href: string }> | null = await noCamPage.evaluate(() => {
+    const nav = document.querySelector('nav[aria-label="Navegación principal"]')
+    if (!nav) return null
+    return Array.from(nav.querySelectorAll('a')).map((a) => {
+      const labelSpan = Array.from(a.querySelectorAll('span')).find(
+        (s) =>
+          !s.classList.contains('sr-only') &&
+          !s.hasAttribute('data-list-badge') &&
+          s.children.length === 0 &&
+          (s.textContent ?? '').trim() !== '',
+      )
+      return {
+        label: (labelSpan?.textContent ?? '').trim().replace(/\s+/g, ' '),
+        href: a.getAttribute('href') || '',
+      }
+    })
+  })
+  const cambiosTabs = navCambios?.filter((t) => t.label === 'Cambios') ?? []
+  record(
+    'NAV-cambios',
+    cambiosTabs.length === 1 && cambiosTabs[0]?.href.endsWith('/cambios') === true,
+    `bottom-nav "Cambios" tab: ${
+      navCambios ? navCambios.map((t) => `${t.label} -> ${t.href}`).join(', ') : 'nav not found'
+    }`,
+  )
+
+  // The tab is only honest if it lands somewhere. Home renders on an unknown path (the
+  // catch-all redirect), so asserting the heading is what separates "the route exists"
+  // from "we fell through to Home and nobody noticed".
+  await noCamPage.goto(`${baseUrl}cambios`, { waitUntil: 'domcontentloaded' })
+  const cambiosScreen = await waitForVisible(noCamPage.locator('h2', { hasText: 'Qué cambió' }))
+  record(
+    'DEEP-cambios',
+    cambiosScreen,
+    `hard GET /cambios -> ${cambiosScreen ? 'screen rendered' : 'screen did NOT render'}`,
   )
 
   await noCamBrowser.close()
@@ -1804,6 +1850,214 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
     'AC-11, logged-out half: opening the saved-lists page cannot touch ' +
       'precio-scanner:lupa:lista — saving is the only path to the cloud (FR-12.1)',
   )
+
+  // ------------------------------------------------------------ Cambios (feed del catálogo)
+  /*
+   * The catalog-changes feed at /cambios, driven by `data/catalogo-cambios.json` — the
+   * artifact the pipeline publishes.
+   *
+   * The expectations are **read from the served artifact**, never hardcoded: the same
+   * "derived, not hardcoded" rule the fixture product follows above, and for the same
+   * reason. The artifact carries an exact `conteo` per list plus `truncado`, so the row can
+   * require the DOM to agree with the file byte for byte even on a day where a list was
+   * capped.
+   */
+  const cambiosRes = await fetch(`${baseUrl}data/catalogo-cambios.json`, {
+    signal: AbortSignal.timeout(30000),
+  }).catch(() => null)
+  const cambios = cambiosRes?.ok ? ((await cambiosRes.json()) as ChangesArtifact) : null
+  const diaCambios = cambios?.dias?.[0] ?? null
+  /** Rows the artifact should render for one list: the exact count, or the cap when cut. */
+  const filasDe = (list: { conteo: number; truncado: boolean; valores: unknown[] }): number =>
+    list.truncado ? list.valores.length : list.conteo
+  const filasEsperadas = diaCambios
+    ? filasDe(diaCambios.bajaron) + filasDe(diaCambios.subieron) + filasDe(diaCambios.nuevos)
+    : -1
+  const sinEanEsperadas = diaCambios
+    ? !diaCambios.bajaron.truncado &&
+      !diaCambios.subieron.truncado &&
+      !diaCambios.nuevos.truncado
+      ? [
+          ...diaCambios.bajaron.valores,
+          ...diaCambios.subieron.valores,
+          ...diaCambios.nuevos.valores,
+        ].filter((v) => v.ean === null).length
+      : -1
+    : -1
+
+  await page.goto(`${baseUrl}cambios`, { waitUntil: 'domcontentloaded' })
+  const cambiosStateEl = page.locator('[data-changes-state]')
+  await waitForVisible(cambiosStateEl)
+  /*
+   * The container paints carrying `loading`, so reading the attribute as soon as the element
+   * is visible is a race: this row passed on one run (it caught `ready`) and failed on the next
+   * (it caught `loading`, with the day already rendered). Wait for the state to SETTLE — any
+   * terminal value — which is the contract-driven waiting the search rows use; a sleep would
+   * only move the race. A state that never settles is a FAIL row, not an aborted run.
+   */
+  let cambiosSettled = true
+  try {
+    await page.waitForFunction(
+      () => {
+        const el = document.querySelector('[data-changes-state]')
+        const valor = el ? el.getAttribute('data-changes-state') : ''
+        return !!valor && valor !== 'loading'
+      },
+      undefined,
+      { timeout: 30000 },
+    )
+  } catch {
+    cambiosSettled = false
+  }
+  const cambiosState = cambiosSettled
+    ? await cambiosStateEl.first().getAttribute('data-changes-state')
+    : 'loading'
+  const diasRenderizados = await page.locator('[data-changes-day]').count()
+  const cambiosTexto = (
+    (await page.locator('[data-changes-state]').first().innerText().catch(() => '')) ?? ''
+  )
+    .replace(/\s+/g, ' ')
+    .trim()
+  record(
+    'CAMBIOS-screen',
+    cambiosSettled &&
+      !!diaCambios &&
+      (cambiosState === 'ready' || cambiosState === 'cached') &&
+      diasRenderizados === cambios?.dias.length &&
+      diasRenderizados > 0,
+    `GET /cambios -> data-changes-state="${cambiosState}", ${diasRenderizados} day section(s); ` +
+      `artifact ${cambios ? `ventanaDias=${cambios.ventanaDias}, ${cambios.dias.length} day(s)` : 'NOT SERVED'}`,
+    `the screen renders what the pipeline published, and its own window: "${cambiosTexto.slice(0, 90)}"`,
+  )
+
+  /*
+   * The frozen order inside a day is part of the contract (`bajaron` -> `subieron` ->
+   * `nuevos`): it is what keeps a cap from ever cutting the section a user needs most,
+   * and the counts printed must be the artifact's exact ones — including a `truncado`
+   * list, which must say it is capped instead of passing a partial list off as complete.
+   */
+  const seccionesRenderizadas: Array<{
+    kind: string
+    count: number
+    truncated: boolean
+  }> | null = await page.evaluate(() => {
+    const day = document.querySelector('[data-changes-day]')
+    if (!day) return null
+    return Array.from(day.querySelectorAll('[data-changes-section]')).map((s) => ({
+      kind: s.getAttribute('data-changes-section') ?? '',
+      count: Number(s.getAttribute('data-changes-count') ?? '-1'),
+      truncated: s.getAttribute('data-changes-truncated') === 'true',
+    }))
+  })
+  const seccionesEsperadas = diaCambios
+    ? ([
+        ['bajaron', diaCambios.bajaron],
+        ['subieron', diaCambios.subieron],
+        ['nuevos', diaCambios.nuevos],
+      ] as const).map(([kind, list]) => ({ kind, count: list.conteo, truncated: list.truncado }))
+    : null
+  record(
+    'CAMBIOS-sections',
+    !!seccionesEsperadas &&
+      !!seccionesRenderizadas &&
+      seccionesRenderizadas.length === seccionesEsperadas.length &&
+      seccionesRenderizadas.every((s, i) => {
+        const esperada = seccionesEsperadas[i]
+        return !!esperada && s.kind === esperada.kind && s.count === esperada.count &&
+          s.truncated === esperada.truncated
+      }),
+    `sections: ${
+      seccionesRenderizadas
+        ? seccionesRenderizadas.map((s) => `${s.kind}=${s.count}${s.truncated ? '(truncado)' : ''}`).join(', ')
+        : 'none'
+    }`,
+    `artifact says bajaron=${diaCambios?.bajaron.conteo} subieron=${diaCambios?.subieron.conteo} ` +
+      `nuevos=${diaCambios?.nuevos.conteo}, in that order`,
+  )
+
+  /*
+   * Identity is the EAN, never the name (the real catalog has name duplicates with
+   * different barcodes), and a row without a usable EAN must render **without a link**
+   * rather than point at a product page that cannot resolve. So every row is either an
+   * `<a>` carrying its `data-ean`, or a non-anchor with none.
+   */
+  const lecturaFilas = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('[data-changes-row]'))
+    return {
+      total: rows.length,
+      conEnlace: rows.filter((r) => !!r.querySelector('a[href*="/producto/"]')).length,
+      sinEnlace: rows.filter((r) => !r.querySelector('a')).length,
+      sinEanDeclarado: rows.filter((r) => !r.hasAttribute('data-ean')).length,
+      enlacesInvalidos: rows.filter((r) => {
+        const a = r.querySelector('a')
+        if (!a) return false
+        // The app is served under a base path (`/precio-scanner/`), so the rendered href is
+        // `/precio-scanner/producto/<ean>`: assert the RESOLVED path's tail, never its start.
+        // (The first version of this row anchored at `^/producto/` and failed 151 correct
+        // links — a harness bug that the evidence named precisely.)
+        const path = a instanceof HTMLAnchorElement ? new URL(a.href).pathname : ''
+        return !/\/producto\/\d{6,}$/.test(path)
+      }).length,
+    }
+  })
+  const sinEanEnDom = lecturaFilas.sinEnlace
+  const conteoDeclarado = lecturaFilas.sinEanDeclarado
+  record(
+    'CAMBIOS-rows',
+    !!diaCambios &&
+      lecturaFilas.total === filasEsperadas &&
+      lecturaFilas.total > 0 &&
+      lecturaFilas.enlacesInvalidos === 0 &&
+      sinEanEnDom === conteoDeclarado &&
+      (sinEanEsperadas === -1 || sinEanEnDom === sinEanEsperadas),
+    `${lecturaFilas.total}/${filasEsperadas} row(s), ${lecturaFilas.conEnlace} with a product link, ` +
+      `${sinEanEnDom} with no link (${conteoDeclarado} without a declared EAN), ` +
+      `${lecturaFilas.enlacesInvalidos} malformed link(s)`,
+    `the artifact has ${sinEanEsperadas} row(s) without a usable EAN; every link must be ` +
+      `"/producto/<ean with 6+ digits>" and a link-less row must not declare one`,
+  )
+
+  /*
+   * The other half of "never simulate data" (S5): with the artifact unpublishable the screen
+   * must SAY so and render nothing — no spinner as the final state and no invented rows.
+   *
+   * A fresh context is what makes the assertion truthful: no service worker and an empty
+   * Cache API, so a cached copy cannot answer instead. And it answers a **404 with HTML**,
+   * which is what GitHub Pages really returns for a missing file — aborting the request
+   * would be a different condition ("no network", classified `offline`), and the loader
+   * keeps those two apart on purpose.
+   */
+  const cambiosAusenteBrowser = await chromium.launch({ ...baseLaunch })
+  const cambiosAusenteContext = await cambiosAusenteBrowser.newContext({
+    viewport: { width: 390, height: 844 },
+  })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await cambiosAusenteContext.route(/catalogo-cambios\.json/, (route: any) =>
+    void route.fulfill({
+      status: 404,
+      contentType: 'text/html',
+      body: '<html><body>404</body></html>',
+    }),
+  )
+  const cambiosAusentePage = await cambiosAusenteContext.newPage()
+  await cambiosAusentePage.goto(`${baseUrl}cambios`, { waitUntil: 'domcontentloaded' })
+  const ausenteShown = await waitForVisible(
+    cambiosAusentePage.locator('[data-changes-state="absent"]'),
+  )
+  const ausenteFilas = await cambiosAusentePage.locator('[data-changes-row]').count()
+  const ausenteTexto = ausenteShown
+    ? ((await cambiosAusentePage.locator('[data-changes-state]').first().innerText()) ?? '')
+        .replace(/\s+/g, ' ')
+        .trim()
+    : ''
+  record(
+    'CAMBIOS-absent',
+    ausenteShown && ausenteFilas === 0,
+    `missing artifact (HTTP 404 + HTML, Pages semantics) -> data-changes-state="absent" ` +
+      `${ausenteShown ? 'reached' : 'NOT reached'}, ${ausenteFilas} row(s) rendered`,
+    `the screen names the cause instead of faking data: "${ausenteTexto.slice(0, 90)}"`,
+  )
+  await cambiosAusenteBrowser.close()
 
   /*
    * Offline boot (FR-11.2 / AC-9, WU9.4).
