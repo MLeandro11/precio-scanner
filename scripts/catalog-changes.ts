@@ -133,10 +133,21 @@ function dayNumber(fecha: string): number | null {
 
 function isValidList(value: unknown): value is BoundedList<Record<string, unknown>> {
   if (!isPlainObject(value)) return false
-  if (typeof value.conteo !== 'number' || !Number.isFinite(value.conteo)) return false
-  if (typeof value.truncado !== 'boolean') return false
-  if (!Array.isArray(value.valores)) return false
-  return value.valores.every(isPlainObject)
+  const conteo = value.conteo
+  const truncado = value.truncado
+  const valores = value.valores
+  if (typeof conteo !== 'number' || !Number.isInteger(conteo) || conteo < 0) return false
+  if (typeof truncado !== 'boolean') return false
+  if (!Array.isArray(valores)) return false
+  if (!valores.every(isPlainObject)) return false
+  // A carried-forward day is unverified input, and the screen prints `conteo` as "En total: N"
+  // right beside those rows: a list that disagrees with itself is a count nobody can check.
+  //
+  // The law is deliberately the honesty property, and NOT `valores.length === min(conteo, CAP_DAY)`.
+  // That stronger form couples validity to the current cap, so the day the cap changes every
+  // artifact already published becomes unusable: exit 3 on every run, forever, until someone
+  // deletes the branch. How deep the cap is stays the builder's business.
+  return valores.length <= conteo && truncado === (valores.length < conteo)
 }
 
 function isValidDay(value: unknown): value is ChangeDay {

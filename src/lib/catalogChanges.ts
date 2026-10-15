@@ -158,10 +158,17 @@ function isBoundedList<T>(
   isItem: (item: unknown) => item is T,
 ): value is BoundedList<T> {
   if (!isPlainObject(value)) return false
-  if (!isFiniteNumber(value.conteo) || value.conteo < 0) return false
-  if (typeof value.truncado !== 'boolean') return false
-  if (!Array.isArray(value.valores)) return false
-  return value.valores.every(isItem)
+  const conteo = value.conteo
+  const truncado = value.truncado
+  const valores = value.valores
+  if (!isFiniteNumber(conteo) || conteo < 0) return false
+  if (typeof truncado !== 'boolean') return false
+  if (!Array.isArray(valores)) return false
+  if (!valores.every(isItem)) return false
+  // The screen prints `conteo` as "En total: N" beside these very rows, so a list that disagrees
+  // with itself is a number nobody can check: `truncado` has to MEAN "there are fewer rows here
+  // than the count says". How deep the pipeline's cap is belongs to the pipeline, not to us.
+  return valores.length <= conteo && truncado === (valores.length < conteo)
 }
 
 function isChangeDay(value: unknown): value is ChangeDay {

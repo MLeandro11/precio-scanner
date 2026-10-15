@@ -47,7 +47,7 @@ function artifact(): ChangesArtifact {
         },
         bajaron: {
           conteo: 20,
-          truncado: false,
+          truncado: true,
           valores: [{ ean: '7790895000430', nombre: 'YERBA', antes: 1290, ahora: 1150, pct: -10.85 }],
         },
         subieron: {
@@ -110,6 +110,19 @@ function withCache(cache: CacheLike | null): CacheStore | undefined {
 }
 
 describe('loadCatalogChanges', () => {
+  it('rejects a list whose count does not match its rows', async () => {
+    // `conteo` is what the screen prints as "En total: N" beside these very rows, so a list that
+    // disagrees with itself is a number nobody can check. The artifact is unverified input:
+    // `truncado` has to MEAN "there are fewer rows here than the count says".
+    const bad = artifact()
+    bad.dias[0].bajaron = { conteo: 5, truncado: false, valores: [] }
+    const { fetchFn } = makeFetch(() => raw(bad))
+
+    const result = await loadCatalogChanges({ fetchFn, baseUrl: BASE })
+
+    expect(result).toEqual({ status: 'invalid' })
+  })
+
   it('loads network-first from the exact path, stores the copy and never uses ?v=', async () => {
     const cache = fakeCache()
     const { fetchFn, calls } = makeFetch(() => jsonResponse(artifact()))

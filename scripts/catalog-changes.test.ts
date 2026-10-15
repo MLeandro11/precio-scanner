@@ -189,7 +189,7 @@ describe('buildChangesArtifact', () => {
   })
 
   it('accumulates the previous days inside the window', () => {
-    const keepA = day('2026-10-14', { bajaron: { conteo: 2, truncado: false, valores: [] } })
+    const keepA = day('2026-10-14', { bajaron: { conteo: 2, truncado: true, valores: [] } })
     const keepB = day('2026-10-10')
     const keepC = day('2026-10-09')
     const drop = day('2026-10-08')
@@ -210,7 +210,7 @@ describe('buildChangesArtifact', () => {
 
   it("replaces today's entry instead of duplicating it", () => {
     const staleToday = day('2026-10-15', {
-      subieron: { conteo: 999, truncado: false, valores: [] },
+      subieron: { conteo: 999, truncado: true, valores: [] },
     })
     const previous = [prod({ id: 'p1', precio: 100 })]
     const current = [prod({ id: 'p1', precio: 150 })]
@@ -278,5 +278,46 @@ describe('parseChangesArtifact', () => {
     const badList = artifactText([day('2026-10-14')])
       .replace('"conteo":0', '"conteo":"cero"')
     expect(parseChangesArtifact(badList)).toEqual({ ok: false, reason: 'invalid-shape' })
+  })
+
+  it('rejects a carried-forward list whose count disagrees with its values', () => {
+    // The screen prints `conteo` as "En total: N" right beside the rows it took from `valores`,
+    // so a day that contradicts itself is a number nobody can check. The builder always writes
+    // `valores.length === min(conteo, CAP_DAY)` and `truncado === conteo > CAP_DAY`, which makes
+    // any other combination unverified input — and R3 says unverified input fails loudly instead
+    // of being carried forward into the next window.
+    const lying = artifactText([day('2026-10-14', { bajaron: { conteo: 5, truncado: false, valores: [] } })])
+    expect(parseChangesArtifact(lying)).toEqual({ ok: false, reason: 'invalid-shape' })
+
+    const notTruncatedButShort = artifactText([
+      day('2026-10-14', {
+        subieron: {
+          conteo: 3,
+          truncado: false,
+          valores: [{ ean: null, nombre: 'a', antes: 1, ahora: 2, pct: 100 }],
+        },
+      }),
+    ])
+    expect(parseChangesArtifact(notTruncatedButShort)).toEqual({ ok: false, reason: 'invalid-shape' })
+  })
+
+  it('accepts a legitimately capped list, which is what makes the cap honest', () => {
+    const capped = artifactText([
+      day('2026-10-14', {
+        subieron: {
+          conteo: 250,
+          truncado: true,
+          valores: Array.from({ length: CAP_DAY }, (_, i) => ({
+            ean: null,
+            nombre: `P${i}`,
+            antes: 1,
+            ahora: 2,
+            pct: 100,
+          })),
+        },
+      }),
+    ])
+
+    expect(parseChangesArtifact(capped).ok).toBe(true)
   })
 })
