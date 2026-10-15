@@ -65,9 +65,11 @@ recorded deviations, including the additions that the rebrand introduced (WU8+).
 Open work: **WU7.1** — the Fuse threshold tuning run over the user's own personal list
 of tricky searches (current value `0.35` is recorded in `03-design.md` and passes
 AC-2/AC-3). **2.7 (partial) / 2.8** — CI still runs only `build` + deploy, so no test,
-typecheck, normalizer or acceptance pass is verified on push. The multi-store comparison /
-price history / alerts remain **modelled, not implemented**: there is a single store of data
-today, and the artifacts are explicit that nothing here simulates data that does not exist.
+typecheck, normalizer or acceptance pass is verified on push. The multi-store comparison and the
+alerts remain **modelled, not implemented**: there is a single store of data today. Price history
+is different — every catalog refresh commits a real daily snapshot, and `/cambios` shows the
+movement of the last seven days; what no screen reads yet is a per-EAN curve. The artifacts are
+explicit that nothing here simulates data that does not exist.
 
 Acceptance evidence: `05-acceptance-report.md` (reproduce with `npm run build && npm run
 preview && npm run acceptance`).

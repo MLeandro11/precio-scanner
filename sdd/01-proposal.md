@@ -58,8 +58,8 @@ a static page.
 ### Delivered on top of Phase 1 (rebrand, `c34d0e7`)
 - **TypeScript strict** migration of app, scripts, worker, and tests.
 - **React Router v7** routed pages: Home `/`, Search `/buscar`, Scan `/escanear`,
-  Product `/producto/:ean`, History `/historial/:ean`, List `/lista`, placeholders for
-  `/alertas` and `/perfil`.
+  Product `/producto/:ean`, History `/historial/:ean`, List `/lista`, the catalog-changes feed
+  `/cambios`, and a placeholder for `/perfil`.
 - **Shopping list by EAN** (`lib/lupa/list.ts`, `useList`, storage key `lupa:lista`):
   quantities, price alert flag, "barcode image" view.
 - **Camera scanner** (`useBarcodeScanner` + `lib/lupa/scan.ts`) with manual EAN fallback.
@@ -81,8 +81,8 @@ a static page.
   unit math).
 - No backend server, no accounts, no auth.
 - No multi-store price comparison in Phase 1 (modelled, not simulated; needs real data).
-- No fabricated price history or simulated alerts — the current single-store dataset
-  cannot source them.
+- No fabricated price history or simulated alerts. Alerts have no source at all; price history
+  is real, and comes only from the single store's own daily snapshots — nothing is invented.
 - No scraping of per-product pages; a single daily bulk extraction only.
 - No mobile native app.
 

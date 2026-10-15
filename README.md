@@ -15,12 +15,13 @@ Home (/) ──▶ /buscar (resultados, por nombre o EAN)
   │            │
   ├──▶ /escanear (escaneo por cámara ZXing + EAN manual)
   ├──▶ /producto/:ean (detalle + "agregar a lista")
-  ├──▶ /historial/:ean (pendiente de datos de histórico)
+  ├──▶ /historial/:ean (el dato existe; la pantalla todavía no lo lee)
   ├──▶ /lista (la lista, con vista de códigos de barras)
-  ├──▶ /alertas y /perfil (placeholders honestos)
+  ├──▶ /cambios (qué se movió en el catálogo: nuevos, subas y bajas de los últimos 7 días)
+  ├──▶ /perfil (placeholder honesto)
 ```
 
-Navegación inferior: **Inicio · Alertas · [Escanear] · Lista · Perfil** (bar flotante outline).
+Navegación inferior: **Inicio · Cambios · [Escanear] · Lista · Perfil** (bar flotante outline).
 
 ## Estado por feature
 
@@ -33,7 +34,9 @@ Navegación inferior: **Inicio · Alertas · [Escanear] · Lista · Perfil** (ba
 | Vista "códigos de barras" en la lista | ✅ |
 | Escaneo con cámara (ZXing, cualquier dispositivo) | ✅ |
 | Dark mode (sigue al sistema + toggle manual en Perfil) | ✅ |
-| Comparación entre almacenes / historial / alertas | ⏳ **modelado**, sin datos (1 tienda) |
+| Cambios del catálogo (feed de los últimos 7 días) | ✅ (artefacto `catalogo-cambios.json` del refresh diario) |
+| Comparación entre almacenes / alertas | ⏳ **modelado**, sin datos (1 tienda) |
+| Historial de precios | ✅ **el dato existe** (un snapshot por corrida, 1 tienda) · ⏳ sin pantalla |
 
 ## Stack
 

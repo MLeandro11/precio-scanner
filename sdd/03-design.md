@@ -121,7 +121,8 @@ responsiveness requirement with zero extra dependencies.
 
 `react-router-dom` v7 with `basename = import.meta.env.BASE_URL` (`/precio-scanner/`).
 Routes: Home `/`, Search `/buscar`, Scan `/escanear`, Product `/producto/:ean`, History
-`/historial/:ean`, List `/lista`, placeholders `/alertas` and `/perfil`, redirect fallback.
+`/historial/:ean`, List `/lista`, the catalog-changes feed `/cambios`, a placeholder `/perfil`,
+redirect fallback.
 
 `App.tsx` boots the catalog once into the worker and exposes `CatalogContext` (the worker
 client + small facets) to every route. `CatalogContext` never holds the product array.
@@ -410,7 +411,8 @@ rules are live" are different claims, and only the first one is automatic.
 | GH Pages base-path mistakes | `base` set on day one; router `basename` follows `BASE_URL`; deploy verified live |
 | Scanner is Chromium-only | Replaced with a single pure-JS decoder (ZXing) that works on any device with `getUserMedia`; manual EAN entry remains as the always-available fallback (FR-9.2) |
 | Persisted EANs drift from catalog | `useResolveEans` resolves lazily through the worker; barcode-less products fall back to id |
-| Multi-store / history / alerts have no data | Modelled (`AlmacenPrecio`, `HistorialPrecio`) but never simulated; placeholders are honest |
+| Multi-store prices and alerts have no data | Modelled (`AlmacenPrecio`, `HistorialPrecio`) but never simulated; placeholders are honest |
+| Price history has data and no screen reads it | Every catalog refresh commits a full daily snapshot of the (single) store to the `datos` branch, so the price series is real data — `/historial/:ean` is an honest placeholder because no per-EAN curve reaches the app, not because the data is missing |
 | Service worker serves a stale shell | `registerType: 'autoUpdate'` plus Workbox's versioned precache and `cleanupOutdatedCaches`, so the previous cache is dropped when the new worker activates (FR-11.3) |
 | A service worker hides a routing bug | It sits between the deploy and the user, and it did: no row asserted an HTTP status, and `clientsClaim` means the `DEEP-*` rows may be answered by the worker rather than the host. `HOST-404` closes it from Node, bypassing the worker by construction |
 | First visit happens offline, nothing cached | `catalogLoader` fails with a message naming the condition rather than rendering a broken shell (FR-11.4) |

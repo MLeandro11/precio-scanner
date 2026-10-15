@@ -77,9 +77,10 @@
   (`/precio-scanner/`) so it works from the GH Pages path.
 - FR-6.2: Routes: Home `/`, Search `/buscar` (accepts `?q=`), Scan `/escanear`,
   Product `/producto/:ean`, History `/historial/:ean`, List `/lista`, Saved lists
-  `/guardadas` (reached from the list page, not the bottom nav — FR-12.8), placeholders
-  for `/alertas` and `/perfil`, and a catch-all redirect to `/`.
-- FR-6.3: A bottom navigation (floating outline bar) exposes **Inicio · Alertas ·
+  `/guardadas` (reached from the list page, not the bottom nav — FR-12.8), the catalog-changes
+  feed `/cambios` (the last seven days of catalog movement, served from the pipeline's
+  `catalogo-cambios.json` artifact), a placeholder for `/perfil`, and a catch-all redirect to `/`.
+- FR-6.3: A bottom navigation (floating outline bar) exposes **Inicio · Cambios ·
   [Escanear] · Lista · Perfil**.
 - FR-6.4: Home is search-first: a search box deep-links to `/buscar?q=…`, and a "Mi
   lista" summary resolves the persisted EAN list through the worker.

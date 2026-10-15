@@ -460,7 +460,7 @@ without checking every card that relies on it.
 ### Navigation
 
 A fixed, floating pill: `shelf` background, `rounded-3xl`, 1px edge, Floating shadow, five slots
-— Inicio · Alertas · [Escanear] · Lista · Perfil. Each tab is pinned to a **44×44px** minimum with
+— Inicio · Cambios · [Escanear] · Lista · Perfil. Each tab is pinned to a **44×44px** minimum with
 an 11px label (`caption`); inactive tabs are `label-muted` (--text-secondary), the active tab is `price-green`. The centre scan
 slot is the one accent-filled, `shadow-md` tile in the chrome, and it is the only raised
 affordance there. The list count badge is an accent pill, `aria-hidden`, paired with an `sr-only`
