@@ -76,7 +76,7 @@ jobs:
       - run: npm ci
       # `public/data` is generated and lives on the `datos` branch: a build with no
       # catalog publishes an app with no data (D7). `npm run fetch-data` validates
-      # the three files before writing them and exits non-zero if it cannot fetch;
+      # the data files before writing them and exits non-zero if it cannot fetch;
       # the step must fail loudly rather than build an empty catalog.
       - name: Fetch the catalog from the datos branch
         run: |
@@ -87,6 +87,18 @@ jobs:
             echo "::error::no se pudo bajar public/data del branch datos: un build sin catálogo publicaría una app sin datos. Se cancela el deploy."
             exit 1
           fi
+      # The three catalog files are enough to *boot*; the changes artifact is what makes
+      # `/cambios` show anything. Leaving it optional past this point would mean a pipeline that
+      # stopped publishing it goes unnoticed for as long as it wants: the site keeps deploying and
+      # the screen keeps saying "todavía no hay cambios publicados", which reads like a quiet week
+      # rather than like a fault. `--check` re-validates what is already on disk — no network, no
+      # git — and requires the artifact, so a dataset without it fails the deploy loudly.
+      #
+      # This step can only exist once the artifact IS published: before that it would fail every
+      # deploy until the `datos` branch caught up. That is why it was wired after a data run, and
+      # not together with the code that emits the artifact.
+      - name: Verify the fetched data, changes artifact included
+        run: npm run --silent fetch-data -- --check
       # The Firebase web config reaches the build here and nowhere else. `verify` does not
       # need it: typecheck and the tests do not depend on it, and the app is written to
       # degrade to "no auth configured" when the values are absent — which is also what
