@@ -377,3 +377,36 @@ Esto es lo que el cliente (T4/T5) puede dar por cierto **sin adivinar**:
   sobre el historial. Observación para más adelante, sin cambiar: `PRODUCT.md:22` fija "~20,331 items"
   y el catálogo ya va por 20.797 — es la misma clase de conteo vivo que T11 des-hardcodeó del harness;
   toca decidir si un número que deriva cada día debe vivir en la prosa del producto.
+
+- **L21** (cierre de los advisories, 2026-10-15): los dos advisories que la verificación dejó
+  abiertos quedaron cerrados **con RED observado**, y el primero obligó a corregir la ley del propio
+  orquestador.
+
+  (a) **Conteo que no cerraba con las filas.** Los dos parsers ahora exigen la propiedad de
+  honestidad —`valores.length <= conteo` y `truncado ⟺ hay menos filas que el conteo`—, que es la que
+  impide que la pantalla imprima "En total: N" por encima de menos filas. **RED**: 2 failed |
+  32 passed. La primera versión de la ley era la salida exacta del builder
+  (`valores.length === min(conteo, CAP_DAY)`), y **la suite completa la refutó**: atar la validez al
+  cap actual hace que el día que el cap cambie **todo artefacto ya publicado quede
+  presente-pero-inutilizable** — o sea exit 3 en cada corrida y un issue por día, para siempre, hasta
+  que alguien borre el branch a mano. La ley débil **no afloja la cobertura**: sigue rechazando los
+  mismos dos casos mentirosos, que también fallan con ella. El cap queda como asunto del builder.
+  Los dos parsers aplican la misma ley **a propósito**, y el del cliente no conoce `CAP_DAY`:
+  importarlo del pipeline sería la misma deriva que se acaba de arreglar con `CACHE_NAME`.
+  Tres fixtures existentes declaraban conteo sin filas y `truncado: false`; se corrigieron a
+  `truncado: true`. Estaban mal: no era un caso legítimo que la ley estuviera rechazando.
+
+  (b) **`"0 %"` con flecha.** `formatPct` devuelve `<0,01 %` cuando el movimiento es real pero
+  redondea a cero a dos decimales (el borde del propio formateador), porque la flecha ya dice la
+  dirección y un `0 %` afirmaría que no pasó nada. **RED**: 1 failed | 23 passed, revirtiendo **solo**
+  esa función y restaurándola byte a byte (`cmp`).
+
+  **Verificación**: typecheck limpio · focales **58/58** · suite **37 archivos / 564 tests** (eran 560).
+
+- **L22** (docs del tramo, 2026-10-15): `PRODUCT.md:22` dejó de fijar un conteo viejo (decía ~20.331
+  items y 98,8% cuando la punta real tiene **20.797 y 98,7%**) y ahora lleva el número **medido y
+  fechado** (2026-10-15), que es el idioma que este repo usa para un dato que deriva (como el
+  "verified 2026-02" de `images.ts`). Y `sdd/02` ganó **FR-6.5**, que especifica el feed con sus leyes
+  visibles: orden congelado, conteo exacto y aviso de truncado, enlace solo con EAN usable, y estado
+  ausente que dice la verdad. Con eso **se deja de diferir la decisión editorial**: el feed ya tiene
+  número de requisito, y salió de la sección de rutas (FR-6) en vez de inventar una sección nueva.
