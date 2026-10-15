@@ -1,0 +1,402 @@
+import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { TrendingDown, TrendingUp } from 'lucide-react'
+import Brand from '../components/Brand'
+import Button from '../components/ui/Button'
+import { formatPrice } from '../components/ProductCard'
+import { usableEan } from '../lib/images'
+import { loadCatalogChanges } from '../lib/catalogChanges'
+import type {
+  ChangeDay,
+  ChangesArtifact,
+  ChangesLoadResult,
+  NewProduct,
+  PriceMove,
+} from '../lib/catalogChanges'
+
+/**
+ * `/cambios` — the global catalog-changes feed.
+ *
+ * The pipeline computes the diff and publishes `data/catalogo-cambios.json`; this
+ * screen only shows what the artifact contains and never simulates a row (S5,
+ * FR-8.4). The loader is injected for tests and is NEVER part of the boot path:
+ * the artifact is fetched only when this screen mounts (H3), so the three boot
+ * downloads and the 5.5 MB cache math are untouched.
+ *
+ * Frozen ordering: by day, newest first, and inside each day `bajaron` →
+ * `subieron` → `nuevos`. The window length comes from the artifact's
+ * `ventanaDias`, never a hardcoded 7. Identity is the EAN (R5): a row links to
+ * `/producto/<ean>` only when `ean` is usable, and nothing is ever grouped or
+ * deduplicated by name. Big changes enter as-is, with no mark and no warning
+ * (S7: the repo's own R7 investigation found them to be real POS corrections).
+ *
+ * Every state is honest (S5): loading, absent (pipeline not published yet),
+ * invalid (unreadable artifact), offline with a stored copy, offline with
+ * nothing, and a server error. A failed load never becomes an endless spinner
+ * and never invents rows or dates.
+ *
+ * Stable hooks (the acceptance harness keys on these):
+ *   - container: `data-changes-state` = loading | ready | cached | absent |
+ *     invalid | offline | error
+ *   - each day: `data-changes-day="YYYY-MM-DD"`
+ *   - each section: `data-changes-section="bajaron|subieron|nuevos"`, plus
+ *     `data-changes-count` and `data-changes-truncated`
+ *   - each row: `data-changes-row="bajaron|subieron|nuevos"`, plus `data-ean`
+ *     only when the EAN is usable
+ */
+
+interface CambiosPageProps {
+  /** Injectable loader (defaults to the real network-first one). */
+  loadFn?: () => Promise<ChangesLoadResult>
+}
+
+/** Every user-facing string in one place, so copy cannot drift between states. */
+const COPY = {
+  titulo: 'Qué cambió',
+  ventana: (dias: number) =>
+    dias === 1
+      ? 'Cambios en el catálogo del último día.'
+      : `Cambios en el catálogo de los últimos ${dias} días.`,
+  loading: 'Cargando cambios…',
+  emptyWindow: 'No hay cambios en esta ventana.',
+  absent: 'Todavía no hay cambios publicados.',
+  absentHint:
+    'El catálogo se actualiza solo, todos los días. Cuando termine la próxima corrida, esta pantalla se llena sola.',
+  invalid: 'No pudimos leer los cambios publicados.',
+  invalidHint: 'El archivo llegó dañado o en un formato que esta versión no entiende.',
+  offline: 'Sin conexión y todavía no hay una copia guardada.',
+  offlineHint: 'Conectate una vez para bajar los últimos cambios.',
+  cached: 'Sin conexión. Mostrando la última copia guardada.',
+  error: 'No pudimos traer los cambios ahora.',
+  errorHint: 'Revisá tu conexión y probá de nuevo.',
+  reintentar: 'Reintentar',
+  sinCambiosDia: 'Sin cambios este día.',
+  bajaron: 'Bajaron de precio',
+  subieron: 'Subieron de precio',
+  nuevos: 'Se agregaron',
+} as const
+
+type SectionKind = 'bajaron' | 'subieron' | 'nuevos'
+
+type ScreenState =
+  | { phase: 'loading' }
+  | { phase: 'ready'; artifact: ChangesArtifact; source: 'network' | 'cache' }
+  | { phase: 'absent' }
+  | { phase: 'invalid' }
+  | { phase: 'offline' }
+  | { phase: 'error' }
+
+/** `YYYY-MM-DD` in the artifact's own timezone (UTC), never shifted by the device. */
+function formatDay(fecha: string): string {
+  const date = new Date(`${fecha}T00:00:00Z`)
+  if (Number.isNaN(date.getTime())) return fecha
+  const label = date.toLocaleDateString('es-AR', {
+    timeZone: 'UTC',
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  })
+  return label.charAt(0).toUpperCase() + label.slice(1)
+}
+
+/** Signed percentage; `useGrouping: false` keeps "1108,33 %" readable, not "1.108,33 %". */
+function formatPct(pct: number): string {
+  const value = pct.toLocaleString('es-AR', { maximumFractionDigits: 2, useGrouping: false })
+  return `${pct > 0 ? '+' : ''}${value} %`
+}
+
+function countLine(
+  list: { conteo: number; truncado: boolean; valores: unknown[] },
+  unit: 'precio' | 'producto',
+): string {
+  const total = `${list.conteo.toLocaleString('es-AR')} ${unit}${list.conteo === 1 ? '' : 's'}`
+  return list.truncado
+    ? `Se muestran los primeros ${list.valores.length} de ${total}.`
+    : `En total: ${total}.`
+}
+
+function MoveRow({ move, kind }: { move: PriceMove; kind: 'bajaron' | 'subieron' }) {
+  const down = kind === 'bajaron'
+  // The link cut is the same usable-EAN rule the rest of the app uses (>=6
+  // digits, H5): a row without a resolvable EAN renders without a link.
+  const ean = usableEan(move.ean ?? undefined)
+  const content = (
+    <>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-text-primary">{move.nombre}</span>
+        <span className="tnum mt-0.5 block text-xs text-text-secondary">
+          {formatPrice(move.antes)} → {formatPrice(move.ahora)}
+        </span>
+      </span>
+      <span
+        className={`tnum inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+          down ? 'bg-accent/10 text-accent' : 'bg-surface text-text-secondary'
+        }`}
+      >
+        {down ? (
+          <TrendingDown size={12} aria-hidden="true" />
+        ) : (
+          <TrendingUp size={12} aria-hidden="true" />
+        )}
+        {formatPct(move.pct)}
+      </span>
+    </>
+  )
+
+  return (
+    <li
+      data-changes-row={kind}
+      data-ean={move.ean ?? undefined}
+      className="border-t border-border first:border-t-0"
+    >
+      {ean ? (
+        <Link
+          to={`/producto/${ean}`}
+          className="flex min-h-11 items-center gap-3 py-2"
+          aria-label={`Ver ${move.nombre}`}
+        >
+          {content}
+        </Link>
+      ) : (
+        <div className="flex min-h-11 items-center gap-3 py-2">{content}</div>
+      )}
+    </li>
+  )
+}
+
+function NewRow({ product }: { product: NewProduct }) {
+  const ean = usableEan(product.ean ?? undefined)
+  const content = (
+    <>
+      <span className="min-w-0 flex-1 truncate text-sm font-medium text-text-primary">
+        {product.nombre}
+      </span>
+      <span className="tnum shrink-0 text-sm font-bold text-text-primary">
+        {formatPrice(product.precio)}
+      </span>
+    </>
+  )
+
+  return (
+    <li
+      data-changes-row="nuevos"
+      data-ean={product.ean ?? undefined}
+      className="border-t border-border first:border-t-0"
+    >
+      {ean ? (
+        <Link
+          to={`/producto/${ean}`}
+          className="flex min-h-11 items-center gap-3 py-2"
+          aria-label={`Ver ${product.nombre}`}
+        >
+          {content}
+        </Link>
+      ) : (
+        <div className="flex min-h-11 items-center gap-3 py-2">{content}</div>
+      )}
+    </li>
+  )
+}
+
+/** One ordered section, rendered only when the artifact reports it has rows. */
+function SectionBlock({
+  kind,
+  list,
+  unit,
+  children,
+}: {
+  kind: SectionKind
+  list: { conteo: number; truncado: boolean; valores: unknown[] }
+  unit: 'precio' | 'producto'
+  children: React.ReactNode
+}) {
+  if (list.conteo === 0) return null
+  return (
+    <section
+      data-changes-section={kind}
+      data-changes-count={list.conteo}
+      data-changes-truncated={list.truncado ? 'true' : 'false'}
+      className="mt-5"
+    >
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
+        {kind === 'bajaron' ? COPY.bajaron : kind === 'subieron' ? COPY.subieron : COPY.nuevos}
+      </h4>
+      <p className="tnum mt-0.5 text-xs text-text-muted">{countLine(list, unit)}</p>
+      <ul className="mt-1">{children}</ul>
+    </section>
+  )
+}
+
+function DayBlock({ day, showDate }: { day: ChangeDay; showDate: boolean }) {
+  const empty =
+    day.bajaron.conteo === 0 && day.subieron.conteo === 0 && day.nuevos.conteo === 0
+
+  return (
+    <section data-changes-day={day.fecha} className="mt-6">
+      {showDate ? (
+        <h3 className="text-sm font-semibold text-text-primary">{formatDay(day.fecha)}</h3>
+      ) : null}
+      {empty ? (
+        <p className="mt-2 text-sm text-text-secondary">{COPY.sinCambiosDia}</p>
+      ) : (
+        <>
+          <SectionBlock kind="bajaron" list={day.bajaron} unit="precio">
+            {day.bajaron.valores.map((move: PriceMove, i: number) => (
+              <MoveRow key={`bajaron-${i}`} move={move} kind="bajaron" />
+            ))}
+          </SectionBlock>
+          <SectionBlock kind="subieron" list={day.subieron} unit="precio">
+            {day.subieron.valores.map((move: PriceMove, i: number) => (
+              <MoveRow key={`subieron-${i}`} move={move} kind="subieron" />
+            ))}
+          </SectionBlock>
+          <SectionBlock kind="nuevos" list={day.nuevos} unit="producto">
+            {day.nuevos.valores.map((product: NewProduct, i: number) => (
+              <NewRow key={`nuevos-${i}`} product={product} />
+            ))}
+          </SectionBlock>
+        </>
+      )}
+    </section>
+  )
+}
+
+function LoadingView() {
+  return (
+    <div role="status" aria-live="polite">
+      {/* The visible line is the announcement: the skeleton below is decorative. */}
+      <p className="mt-4 text-sm text-text-secondary">{COPY.loading}</p>
+      <div className="mt-4 space-y-2" aria-hidden="true">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="skeleton h-16 w-full rounded-2xl" />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The window summary plus every day, newest first. The day list is sorted here
+ * rather than trusting the artifact's order: the UI contract says newest first,
+ * so the UI is the one that guarantees it.
+ */
+function ReadyView({
+  artifact,
+  source,
+}: {
+  artifact: ChangesArtifact
+  source: 'network' | 'cache'
+}) {
+  const dias = [...artifact.dias].sort((a, b) => b.fecha.localeCompare(a.fecha))
+  const showDate = dias.length > 1
+
+  return (
+    <>
+      <p className="mt-1 text-sm text-text-secondary">{COPY.ventana(artifact.ventanaDias)}</p>
+      {source === 'cache' ? (
+        <p
+          role="status"
+          aria-live="polite"
+          className="mt-3 rounded-xl border border-border bg-surface-raised px-4 py-3 text-xs text-text-secondary"
+        >
+          {COPY.cached}
+        </p>
+      ) : null}
+      {dias.length === 0 ? (
+        <p className="mt-6 text-sm text-text-secondary">{COPY.emptyWindow}</p>
+      ) : (
+        dias.map((day) => <DayBlock key={day.fecha} day={day} showDate={showDate} />)
+      )}
+    </>
+  )
+}
+
+function NoticeView({
+  title,
+  hint,
+  onRetry,
+  alert = false,
+}: {
+  title: string
+  hint?: string
+  onRetry?: () => void
+  alert?: boolean
+}) {
+  return (
+    <div
+      role={alert ? 'alert' : 'status'}
+      aria-live={alert ? 'assertive' : 'polite'}
+      className="mt-6 rounded-2xl border border-border bg-surface-raised px-5 py-8 text-center"
+    >
+      <p className="text-sm font-semibold text-text-primary">{title}</p>
+      {hint ? <p className="mx-auto mt-1 max-w-xs text-sm text-text-secondary">{hint}</p> : null}
+      {onRetry ? (
+        <Button variant="secondary" className="mt-4" onClick={onRetry}>
+          {COPY.reintentar}
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
+export default function CambiosPage({ loadFn = loadCatalogChanges }: CambiosPageProps) {
+  const [state, setState] = useState<ScreenState>({ phase: 'loading' })
+  const [attempt, setAttempt] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    setState({ phase: 'loading' })
+    // The loader returns a discriminated result and never throws; the catch is
+    // the last guard so a bug can never leave the spinner as the final state.
+    Promise.resolve()
+      .then(loadFn)
+      .then((result) => {
+        if (cancelled) return
+        if (result.status === 'ready') {
+          setState({ phase: 'ready', artifact: result.artifact, source: result.source })
+        } else {
+          setState({ phase: result.status })
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setState({ phase: 'error' })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [loadFn, attempt])
+
+  const retry = () => setAttempt((n) => n + 1)
+
+  // The DOM state is explicit per honest outcome: `ready` (fresh) and `cached`
+  // (offline fallback) are the same loader status with different truths.
+  const stateAttr =
+    state.phase === 'ready' && state.source === 'cache' ? 'cached' : state.phase
+
+  return (
+    <main
+      className="safe-top mx-auto w-full max-w-lg px-4 pb-8"
+      data-changes-state={stateAttr}
+    >
+      <Brand />
+      <h2 className="mt-6 text-lg font-semibold text-text-primary">{COPY.titulo}</h2>
+
+      {state.phase === 'loading' ? <LoadingView /> : null}
+      {state.phase === 'ready' ? (
+        <ReadyView artifact={state.artifact} source={state.source} />
+      ) : null}
+      {state.phase === 'absent' ? (
+        <NoticeView title={COPY.absent} hint={COPY.absentHint} />
+      ) : null}
+      {state.phase === 'invalid' ? (
+        <NoticeView title={COPY.invalid} hint={COPY.invalidHint} />
+      ) : null}
+      {state.phase === 'offline' ? (
+        <NoticeView title={COPY.offline} hint={COPY.offlineHint} onRetry={retry} />
+      ) : null}
+      {state.phase === 'error' ? (
+        <NoticeView title={COPY.error} hint={COPY.errorHint} onRetry={retry} alert />
+      ) : null}
+    </main>
+  )
+}

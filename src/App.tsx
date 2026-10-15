@@ -1,5 +1,4 @@
 import { createContext, lazy, Suspense, useContext, useEffect, useState } from 'react'
-import { Bell } from 'lucide-react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { loadCatalog } from './lib/catalogLoader'
 import { createWorkerClient } from './lib/workerClient'
@@ -18,7 +17,7 @@ const SavedListDetailPage = lazy(() => import('./pages/SavedListDetailPage'))
 import ProductPage from './pages/ProductPage'
 import HistoryPage from './pages/HistoryPage'
 import ListPage from './pages/ListPage'
-import PlaceholderPage from './pages/PlaceholderPage'
+import CambiosPage from './pages/CambiosPage'
 import SettingsPage from './pages/SettingsPage'
 import Brand from './components/Brand'
 import Button from './components/ui/Button'
@@ -100,16 +99,7 @@ function AppRoutes() {
           <Route path="/lista" element={<ListPage />} />
           <Route path="/guardadas" element={<SavedListsPage />} />
           <Route path="/guardadas/:listId" element={<SavedListDetailPage />} />
-          <Route
-            path="/alertas"
-            element={
-              <PlaceholderPage
-                title="Alertas"
-                description="Acá vas a recibir avisos cuando un producto baje de precio. Requiere datos de historial/multi-tienda que hoy no tenemos; modelo listo para cuando lleguen."
-                icon={<Bell size={40} strokeWidth={1.5} aria-hidden="true" />}
-              />
-            }
-          />
+          <Route path="/cambios" element={<CambiosPage />} />
           <Route path="/perfil" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

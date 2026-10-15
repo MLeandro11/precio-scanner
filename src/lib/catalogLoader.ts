@@ -27,7 +27,13 @@
  */
 import type { Catalog, CatalogIndex, Facets, Producto } from './types'
 
-const CACHE_NAME = 'precio-scanner-data-v1'
+/**
+ * The data cache, shared with `catalogChanges.ts`: the changes artifact lives in the same
+ * cache as the catalog but follows the facets strategy (network-first, no `?v=` key), so the
+ * pruning below never touches it. Exported so a rename here cannot silently orphan that
+ * fallback — two hardcoded copies of this name would drift.
+ */
+export const CACHE_NAME = 'precio-scanner-data-v1'
 const CACHEABLE = ['catalogo.json', 'catalogo-index.json']
 
 /** Minimal shape of a Cache entry the loader needs (injectable for tests). */

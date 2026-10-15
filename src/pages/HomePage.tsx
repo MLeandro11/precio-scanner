@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, ChevronRight, ScanBarcode, Search, Star } from 'lucide-react'
+import { ArrowUpDown, ChevronRight, ScanBarcode, Search, Star } from 'lucide-react'
 import Brand from '../components/Brand'
 import Input from '../components/ui/Input'
 import { useCatalog } from '../App'
@@ -161,16 +161,16 @@ export default function HomePage() {
 
         <button
           type="button"
-          onClick={() => navigate('/alertas')}
+          onClick={() => navigate('/cambios')}
           className="flex min-h-14 items-center gap-4 rounded-2xl border border-border bg-surface-raised px-5 text-left transition hover:bg-surface"
         >
           <span className="flex h-11 w-11 items-center justify-center rounded-xl border border-border text-text-secondary">
-            <Bell size={20} strokeWidth={1.8} aria-hidden="true" />
+            <ArrowUpDown size={20} strokeWidth={1.8} aria-hidden="true" />
           </span>
           <span>
-            <span className="block text-sm font-semibold text-text-primary">Alertas de precio</span>
+            <span className="block text-sm font-semibold text-text-primary">Cambios del catálogo</span>
             <span className="block text-xs text-text-secondary">
-              Cuando tengamos historial de precios, te avisamos
+              Se actualiza solo, todos los días
             </span>
           </span>
         </button>

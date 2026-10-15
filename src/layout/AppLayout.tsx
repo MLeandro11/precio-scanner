@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { Bell, ClipboardList, Home, ScanBarcode, User } from 'lucide-react'
+import { ArrowUpDown, ClipboardList, Home, ScanBarcode, User } from 'lucide-react'
 import { useList } from '../hooks/useList'
 
 // min-h-11/min-w-11 pin every tab to the 44×44 minimum touch target (§7) while the
@@ -57,7 +57,7 @@ function Tab({
 /**
  * App layout: page content + the Lupa bottom navigation (outline style).
  *
- * Inicio · Alertas · [Escanear] · Lista · Perfil. Escanear is the primary
+ * Inicio · Cambios · [Escanear] · Lista · Perfil. Escanear is the primary
  * action: a filled green tile sits in the center of a floating rounded bar,
  * mirroring the product mockup.
  *
@@ -81,9 +81,9 @@ export default function AppLayout() {
         <div className="mx-auto flex w-full max-w-md items-center justify-between rounded-3xl border border-border bg-surface-raised px-1.5 py-1.5 shadow-lg">
           <Tab to="/" label="Inicio" icon={<Home size={18} strokeWidth={1.8} aria-hidden="true" />} />
           <Tab
-            to="/alertas"
-            label="Alertas"
-            icon={<Bell size={18} strokeWidth={1.8} aria-hidden="true" />}
+            to="/cambios"
+            label="Cambios"
+            icon={<ArrowUpDown size={18} strokeWidth={1.8} aria-hidden="true" />}
           />
           <NavLink
             to="/escanear"
