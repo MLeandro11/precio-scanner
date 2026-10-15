@@ -20,8 +20,8 @@ primary device; a wide desktop layout is not a target.
 
 Lupa answers three confirmed jobs, on a phone, in a store:
 
-1. **Find a product fast** in a large catalog (~20,331 items, 98.8% with a barcode) when the shelf
-   or the store's own search does not help.
+1. **Find a product fast** in a large catalog (20,797 items, 98.7% with a barcode — measured
+   2026-10-15) when the shelf or the store's own search does not help.
 2. **Build the shopping list** and keep it at hand while shopping.
 3. **Follow whether a price changed** since last time. This is the product's stated future
    identity, and it now has data behind it: every catalog refresh stores a daily snapshot, and
