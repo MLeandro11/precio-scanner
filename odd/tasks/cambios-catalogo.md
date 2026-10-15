@@ -1,0 +1,379 @@
+# Feature: feed de cambios del catálogo en `/cambios` (`cambios-catalogo`)
+
+**Status:** **T1 (rename + copy honesta) hecho y verificado**; T2-T8 pendientes, con dos decisiones
+de producto abiertas (S6, S7) que bloquean el diseño del artefacto. **Started:** 2026-10-15
+**Branch:** `main` (convención del repo: se commitea sobre `main`, no se crea feature branch)
+**Origen:** pedido del usuario en la sesión del 2026-10-09, retomado el 2026-10-15.
+
+## Specs
+
+- **S1.** La ruta `/alertas` pasa a `/cambios`; el tab del nav dice **`Cambios`** y el título de la
+  pantalla **`Qué cambió`**. El icono deja de ser `Bell` (el usuario eligió el nombre del
+  selector, no una frase suelta).
+- **S2.** La pantalla es un **feed global de lo que se movió en el catálogo**: qué se agregó, qué
+  subió y qué bajó de precio. **No es vigilancia personal**: no requiere que el usuario marque nada,
+  y es la misma información para todos.
+- **S3.** El diff lo calcula el **pipeline**, no el cliente: el cliente solo muestra lo que el
+  pipeline publicó. (Descartado difear en el cliente: T9 borra a propósito las claves `?v=` viejas,
+  así que no hay material contra el cual comparar.)
+- **S4.** El artefacto de cambios se publica en el branch `datos` junto a los otros tres archivos, y
+  el cliente lo baja con `fetch-data`.
+- **S5.** **No se simula ningún dato.** Lo que la pantalla muestre tiene que estar en el artefacto
+  publicado. Es el principio rector del repo, `sdd/02-spec.md` FR-8.4: *"nothing simulates data that
+  does not exist."*
+- **S6.** La ventana es **rodante de 7 días**. En cada corrida el artefacto se reconstruye como
+  `[hoy] + los días anteriores del artefacto previo`, descartando lo que quede fuera de la ventana y
+  reemplazando el día de hoy si ya estaba (idempotente por fecha, no por corrida). Quien abre la app
+  cada tres días no pierde cambios.
+- **S7.** Los cambios grandes (umbral `UMBRAL_GRANDE = 50` %) **entran tal cual, sin marca y sin
+  filtro**. No se los anota como sospechosos y no se los esconde: un dato real no se desmiente ni se
+  oculta. Ver L12, donde la decisión del usuario corrige la recomendación del orquestador.
+- **S8.** Se elimina la afirmación falsa *"no tenemos historial de precios"* de **todos** los lugares
+  donde vive. Aparecieron **9**, no 3: los dos del tramo del rename (`src/App.tsx:108` en el
+  placeholder y `src/pages/HomePage.tsx:173` en la tarjeta de Home), `src/pages/HistoryPage.tsx:15`
+  (+ el comentario de `:6-9`), `PRODUCT.md:77` y `PRODUCT.md:26-27` (la identidad del producto, la más
+  punzante porque es exactamente lo que esta feature construye), `README.md:36`,
+  `sdd/01-proposal.md:83-84`, `sdd/03-design.md:413` y `sdd/README.md:69-71`. Queda **una** mención
+  deliberada: `sdd/04-tasks.md:526`, un registro con fecha del 2026-09-29 que no se reescribe.
+
+## Contrato congelado del artefacto (diseño del orquestador, 2026-10-15)
+
+**Nombre y ubicación**: `public/data/catalogo-cambios.json` — la convención del directorio es el
+prefijo `catalogo-` (`catalogo.json`, `catalogo-index.json`, `catalogo-facets.json`). Escribirlo en
+`public/data/` es todo lo que hace falta para que viaje al branch `datos` (H1).
+
+**Esquema**:
+
+```json
+{
+  "version": 1,
+  "ventanaDias": 7,
+  "generado": "2026-10-15T12:28:27Z",
+  "dias": [
+    {
+      "fecha": "2026-10-15",
+      "nuevos":   { "conteo": 13,  "truncado": false,
+                    "valores": [ { "ean": "7798479600021", "nombre": "ALFAJOR DAMAS GRATIS 80G", "precio": 3450 } ] },
+      "bajaron":  { "conteo": 20,  "truncado": false,
+                    "valores": [ { "ean": "7798…", "nombre": "…", "antes": 1290, "ahora": 1150, "pct": -10.85 } ] },
+      "subieron": { "conteo": 121, "truncado": false,
+                    "valores": [ { "ean": null,    "nombre": "…", "antes": 240,  "ahora": 2900, "pct": 1108.33 } ] }
+    }
+  ]
+}
+```
+
+**Reglas del contrato** — cada una existe por algo ya establecido en este repo:
+
+1. **`conteo` exacto y lista acotada**: el idioma de `ListaAcotada` / `MAX_LISTA` de
+   `scripts/catalog-diff.ts`. `CAP_DIA = 200` por lista y por día. Un día normal trae ~141 cambios y
+   entra entero; una operación masiva de precios (el raw ya mostró una: `precioCambiado` marcó 1.091
+   registros) no puede inflar el artefacto. `truncado: true` es lo que la UI tiene que decir en voz
+   alta.
+2. **`bajaron` y `subieron` son listas separadas**, no una sola con `pct` firmado: así un truncado
+   nunca puede cortar la sección que más le sirve al usuario.
+3. **`ean` puede ser `null`.** La identidad del producto en la app es el EAN y el barcode **no es
+   confiable en las altas** (H5: un barcode de 11 dígitos y duplicados de nombre). La UI enlaza al
+   detalle **solo** si el EAN resuelve (≥6 dígitos, el mismo corte que `SucursalesSection`), y
+   **nunca** agrupa ni desduplica por nombre (R5).
+4. **Hay que unir por `id`.** `compararCatalogos` **no emite `barcode`** en `CambioDePrecio`
+   (`scripts/catalog-diff.ts:88-96`: solo `id`, `nombre`, `precioPrev`, `precioNext`, `pct`), así que
+   el constructor del artefacto tiene que resolver el EAN contra el catálogo normalizado.
+5. **`version: 1` es la puerta de salida**: un artefacto previo con otra `version` se descarta y la
+   ventana arranca de nuevo, sin romper la corrida (R3).
+6. **Nada del raw.** Se deriva de los catálogos **normalizados** (6 claves, cero `costo`/`margen`,
+   H4). Está prohibido leer el raw para armarlo.
+7. **El artefacto no es parte del boot.** Se carga **solo al abrir `/cambios`**, con la estrategia de
+   `catalogo-facets.json` (network-first `cache: 'no-cache'` + la última copia como fallback
+   offline), nunca con `?v=` (H3) y nunca sumado a las 3 descargas de arranque: así no se mueve el
+   cálculo de la caché de 5,5 MB ni las filas de acceptance que ya existen.
+
+**Orden de las filas en la UI (T5)**: por día, el más nuevo primero, y **dentro de cada día las
+bajadas primero** (`bajaron` → `subieron` → `nuevos`). La cabecera resume la ventana entera; cada
+fila lleva su fecha cuando la ventana tiene más de un día.
+
+### Refinamientos del contrato tal como quedó implementado (T2/T3, 2026-10-15)
+
+Esto es lo que el cliente (T4/T5) puede dar por cierto **sin adivinar**:
+
+- **Constantes exportadas** desde `scripts/catalog-changes.ts`: `CHANGES_VERSION = 1`,
+  `WINDOW_DAYS = 7`, `CAP_DAY = 200`.
+- **Builder puro**: `buildChangesArtifact({ previous, current, previousArtifact, generatedAt,
+  windowDays? })` → `{ artifact, degraded }`. `previous` es `null` en una primera corrida.
+- **`previousArtifact`** es `parseChangesArtifact(texto | null)` → `{ ok: true, artifact }` o
+  `{ ok: false, reason }`, con `reason ∈ { absent, invalid-json, invalid-shape, version-mismatch }`.
+  `degraded` repite ese `reason`, más `first-load` cuando no hubo `--baseline`.
+- **`pct` se redondea a 2 decimales** (el ejemplo congelado muestra `-10.85` y `1108.33`).
+- **`ean` es el string de solo dígitos que pasa `usableEan`** (≥6 dígitos — la **misma** función que
+  la UI usa para decidir si hay foto), o `null`. Ojo: por eso un barcode de 11 dígitos **sí** cuenta
+  como usable (H5); el corte es 6, no 13.
+- **CLI de `refresh-catalog.ts`**: `--cambios-previos <path>` (default: hermano de `--baseline`; sin
+  baseline, `public/data/catalogo-cambios.json`), y la **salida** es hermana de `--catalogo`
+  (`public/data/catalogo-cambios.json` por default). `--json` sigue siendo **un solo objeto** en
+  stdout (la prosa va a stderr).
+- **`version` en el gate de `fetch-data`**: debe ser **exactamente `CHANGES_VERSION`**, no "un número".
+  Un v2 en `datos` falla el guard de build con exit 2 en vez de llegar en silencio a la pantalla.
+- **`fecha` y `generado`** salen del **mismo** origen que la fecha que ya viaja en `facets`
+  (`raw.generada`), así no pueden discrepar. Si el raw no trae fecha, el CLI cae al reloj **y lo dice
+  por stderr** — y en ese caso `facets` tampoco tiene fecha, así que la UI **no puede** inventar una.
+- **Peso medido**: **15,6 KB** para un día real (20.797 productos, 154 filas). Con 7 días queda muy por
+  debajo del techo de R4 (<1 MB).
+- **Enlace al detalle**: en un día real, **151 de 154 filas tienen EAN usable**; las 3 sin EAN son el
+  caso que la UI tiene que renderizar sin enlace y sin inventar uno.
+
+## Tasks
+
+| ID | Spec | Tarea | Ruta | Commit |
+|----|------|-------|------|--------|
+| **T1** | S1 | Rename de superficie a `Cambios` / `Qué cambió` / `/cambios` + matar las 2 promesas falsas de la pantalla | inline | **pendiente** |
+| **T2** | S2,S3,S5 | Pipeline: `refresh-catalog.ts` emite el artefacto de cambios en `public/data/` (módulo puro + tests) | | |
+| **T3** | S4 | `fetch-data.ts`: el 4º archivo en `ARCHIVOS`, **opcional al bajar el baseline** y **requerido en `--check`** (ver H2, es una trampa) | | |
+| **T4** | S2,S4 | Cliente: tipos + loader del artefacto, patrón `facets` (network-first + fallback offline), **nunca** `?v=` (ver H3) | | |
+| **T5** | S2 | UI: la pantalla real en `/cambios`, reemplaza el `PlaceholderPage` | | |
+| **T6** | S1,S2 | Harness: filas de acceptance sobre el artefacto real (la pantalla renderiza, las secciones existen) | | |
+| **T7** | S5,S8 | Docs: `PRODUCT.md`, `README.md`, `DESIGN.md`, `sdd/` + la frase única de S8 | | |
+| **T8** | todas | Verificación independiente (`verify`): la feature toca la entrega (pipeline) y la caché del cliente | | |
+
+**T1 está hecho y verificado** (RED 53/55 → GREEN 55/55, 493 tests, typecheck limpio; ver Log).
+
+## Hallazgos que fijan el diseño (verificados, no supuestos)
+
+- **H1 — El workflow publica el 4º archivo sin cambios.** `.github/workflows/actualizar-catalogo.yml`
+  arma el branch con un glob: `DATA_FILES=("$GITHUB_WORKSPACE"/public/data/*.json)`, y por cada
+  archivo hace `git hash-object -w` + `git update-index --add --cacheinfo`. Cualquier `*.json` que
+  `refresh` escriba en `public/data/` viaja al branch `datos` por sí solo. **No hay que tocar el
+  workflow** para publicar el artefacto.
+- **H2 — La trampa de `fetch-data`.** `scripts/fetch-data.ts:50-54` tiene una lista explícita
+  `ARCHIVOS` con los 3 nombres, y la validación exige que **todos** existan, no estén vacíos y sean
+  JSON. Si el artefacto se agrega como requerido, **la primera corrida falla**: el tip de `datos`
+  tiene solo 3 archivos y el artefacto todavía no existe. Tiene que ser **opcional al bajar el
+  baseline** y **requerido en `--check`** (el guard de build, donde un doc sin artefacto sí debe
+  fallar).
+  - De regalo: `fetch-data --dest "$RUNNER_TEMP/baseline"` baja **todos** los `ARCHIVOS` al
+    temporal, así que agregarlo ahí le da al pipeline **la fuente para acumular** (S6, ventana
+    rodante) sin plomería nueva.
+- **H3 — Dónde vive el artefacto en la caché del cliente.** `src/lib/catalogLoader.ts` tiene
+  `CACHEABLE = ['catalogo.json', 'catalogo-index.json']` (los pesados) bajo claves `path?v=<version>`
+  donde `version` es el sha256 de `catalogo.json`, y `catalogo-facets.json` con otra estrategia:
+  network-first con `cache: 'no-cache'` + la última copia conocida como fallback offline. El
+  artefacto de cambios es **chico**, así que va con el **patrón de facets**. Si se lo mete en el
+  camino `?v=`, el prune de T9 lo borra y lo vuelve a bajar todos los días.
+- **H4 — El artefacto no puede filtrar el dato de costo, por construcción.** Verificado sobre los
+  20.797 productos del 2026-10-15: un producto normalizado tiene exactamente 6 claves —
+  `barcode, categoria, id, marca, nombre, precio` — y **cero** `costo`/`margen`. Todo artefacto
+  derivado de los catálogos normalizados hereda la regla de higiene del repo sin trabajo extra.
+- **H5 — El diff diario, medido.** Medición real del 2026-10-14 → 2026-10-15 (detalle en Engram,
+  `precio-scanner/diff-diario-medido`): **13 altas, 141 cambios de precio** (121 subieron, 20
+  bajaron, 20.643 iguales), mediana **+5,4%**, máximo **+1.108%**, **4 cambios >50%**, 0 EANs
+  desaparecidos, 0 categorías nuevas. El feed de un día son ~154 filas ⇒ un artefacto de un día es
+  **chico**; uno de 30 días sigue siendo chico (≈4.600 filas).
+- **H6 — El cron está vivo.** `origin/datos` tiene commits del 10-12, 10-13, 10-14 y 10-15, todos
+  entre 12:30 y 16:30 UTC. El pipeline corre solo y nadie lo estaba mirando.
+
+## Riesgos
+
+- **R1 — Exposición.** El artefacto se publica en un branch público. Contiene nombre, precio,
+  barcode e id de productos: exactamente los datos que el sitio ya sirve. No agrega exposición.
+  Queda **prohibido** que el artefacto derive del raw (que sí trae `costo` y `margen`) — ver H4.
+- **R2 — R7 expuesto al usuario.** Los ~4 cambios >50% por día pueden ser precios mal cargados en el
+  POS. Publicarlos es ponerlos frente al usuario. **Depende de S7.**
+- **R3 — Estado en el pipeline (la ventana acumula, S6).** Acumular obliga a leer la propia salida
+  anterior. **Regla reconciliada el 2026-10-15 y escrita como quedó implementada** — quién grita en
+  cada capa:
+  - **AUSENTE** (o `--baseline` sin artefacto hermano): **degradar**. La ventana arranca de cero y el
+    reporte lo dice en prosa (`cambios: ventana reiniciada`). **Nunca es fatal**: es el estado
+    legítimo de la primera corrida.
+  - **PRESENTE pero inutilizable** (no es JSON, vacío, forma inválida, o `version` que esta build no
+    lee): **FATAL, exit 3**, y el artefacto previo **no se pisa**. Es el mismo criterio que el CLI ya
+    aplicaba a un `--baseline` explícito ilegible (`refresh-catalog.test.ts`: *"an unreadable
+    baseline (a directory) fails (exit 3) before anything is written"*). Degradar acá reiniciaría la
+    ventana y **tiraría hasta 6 días de feed sin que nadie se entere**. **Borde corregido el
+    2026-10-15, y lo encontró la verificación independiente, no un test**: un **directorio** o una
+    **lectura denegada** en ese path caía en `absent` porque el helper se tragaba cualquier error de
+    lectura en el mismo `null` que "no está"; ahora el CLI distingue *no está* de *no se puede leer*
+    (`existsSync` + `try/catch`, exit 3 en los dos casos de falla) y el helper se borró junto con su
+    comentario, que afirmaba lo contrario (*"Absent or unreadable is `null`, never a failure"*).
+  - **La capa de red**: `fetch-data` corta con **exit 2** un artefacto presente que no es JSON o que
+    no trae la `version` que esta build entiende; **solo tolera su ausencia** al bajar el baseline.
+    En el workflow, exit 2 o exit 3 = el job falla y **abre un issue**: un artefacto roto es una
+    falla de publicación y tiene que llegar a un humano, no degradarse.
+  - **Dónde vive cada validación, a propósito**: la validación **profunda de la forma** está en
+    `parseChangesArtifact` (una sola autoridad sobre la forma del artefacto, testeada aparte) y el
+    gate de red se queda **barato** (JSON + versión). Un v1 con forma rota atraviesa el gate y muere
+    en el CLI con exit 3.
+  - **Corrección de esta regla**: su primera versión decía "un artefacto corrupto no debe romper la
+    corrida". Era mal consejo: tolerar la corrupción no era resiliencia, era una **pérdida
+    silenciosa** de hasta 6 días. Se implementó en consecuencia, con RED observado (1 failed | 23
+    passed) antes del cambio.
+- **R4 — Peso del artefacto.** El cliente ya cachea 5,5 MB. El artefacto tiene que quedarse chico
+  (<1 MB); con la ventana de S6 se acota por construcción.
+- **R5 — Nombres de producto como clave.** El feed muestra nombres, pero **la identidad es el EAN**
+  (principio de identidad del repo). Las 13 altas del 15-10 incluyen duplicados de nombre con
+  barcodes distintos y un barcode de 11 dígitos: el feed **no puede** agrupar ni desduplicar por
+  nombre.
+- **R6 — La secuencia de publicación importa (trampa de arranque).** Si `--check` (el guard de build)
+  exige el artefacto desde el primer día, cualquier deploy que corra **entre** que aterrice T2 y la
+  primera corrida que lo publique **falla**, y el sitio deja de actualizarse. Orden obligatorio:
+  T2 aterriza → se dispara el workflow de datos a mano (`workflow_dispatch`) y se confirma que
+  `catalogo-cambios.json` está en la punta de `datos` → recién ahí `--check` lo exige. La
+  alternativa (dejarlo opcional para siempre) se descarta: un pipeline roto dejaría de publicar sin
+  que nada avise.
+
+## Allowed edit surfaces (de la feature)
+
+`scripts/catalog-diff.ts`, `scripts/refresh-catalog.ts`, `scripts/fetch-data.ts`,
+`src/lib/catalogLoader.ts`, `src/lib/types.ts`, `src/pages/CambiosPage.tsx` (nuevo),
+`src/App.tsx`, `scripts/acceptance.ts`, `PRODUCT.md`, `README.md`, `DESIGN.md`, `sdd/`,
+`src/pages/HistoryPage.tsx` (solo S8).
+
+## Log
+
+- **L1** (usuario, 2026-10-09 18:41, verbatim, origen de la feature):
+  > si, pero espera. quiro hablar de posibles cosas para agregar. como por ejemplo, saber que
+  > producto se agregaron nuevo o cambiaron de precios y que se vean en la pantalla de alertas.
+  > despues otra cosa ...
+
+- **L2** (usuario, 2026-10-15, verbatim): *"no, para ser sincero no me interesa mucho a que hora se
+  actualiza, prefieron modificarlo mas tarde. sigamos charlando el punto 1"* ⇒ **R9 (el cron corre
+  ~7 h tarde) queda explícitamente diferido por el usuario**: no es parte de esta feature.
+
+- **L3** (usuario, 2026-10-15, verbatim): *"por lo que dice tu analisis, podriamos cambiar de
+  \"alerta\" a un nombre mas adecuado como \"novedades\""* ⇒ propuso "Novedades"; el orquestador
+  empujó "Cambios" con la medición de H5 (13 altas vs 141 cambios: "Novedades" describe el 8%).
+
+- **L4** (decisión del usuario, 2026-10-15, del selector): **`Feed de novedades del catálogo`**
+  ("Qué entró y qué cambió de precio. Global, sin suscribirte a nada.") ⇒ **S2 y S3**.
+
+- **L5** (decisión del usuario, 2026-10-15, del selector): **tab `Cambios`** (preview: título de
+  pantalla `Qué cambió`, `Datos del 15 de octubre`) ⇒ **S1**.
+
+- **L6** (usuario, 2026-10-15, verbatim): *"arranquemos nomas, olvida lo de \"despues otra cosa...\""*
+  ⇒ autoriza arrancar con el tramo chico; la "otra cosa" que iba a mencionar **se retira**.
+
+- **L7** (usuario, 2026-10-15, verbatim): *"vamos con todo"* ⇒ autoriza la feature completa (no solo
+  el rename). Antes de este mensaje el orquestador había cerrado T1 y dejado abiertas las
+  decisiones S6 y S7.
+
+- **L8** (evidencia, T1): `npm run typecheck` limpio · **RED observado**: con los 3 archivos de
+  `src/` revertidos a mano (backup en `/tmp`, `git checkout --`), build + `npm run acceptance` =
+  **53/55**, `FAILED: NAV-cambios, DEEP-cambios`, ninguna otra fila rota. **GREEN**: restaurado,
+  **55/55**, con `Cambios -> /precio-scanner/cambios` y `hard GET /cambios -> screen rendered`.
+  `npm test` = **493 passed / 34 archivos**. Diff: **10 archivos, +68 −23** (45 líneas son las 2
+  filas nuevas del harness).
+
+- **L9** (evidencia, T1, barrido final): quedan menciones a "Alertas" solo en registros con fecha,
+  que **no se reescriben**: `sdd/04-tasks.md:526`, `.impeccable/critique/2026-09-28T02-16-17Z__….md`
+  (líneas 84 y 141) y `odd/tasks/copy-ean.md:90`. Reescribir historia es peor que un string viejo.
+
+- **L10** (lección del orquestador, 2026-10-15): **se grepó la superficie, no la afirmación.** Al
+  buscar `alertas` (el string que se renombraba) no apareció la misma frase falsa en
+  `HistoryPage.tsx` / `PRODUCT.md` / `README.md`, que no usan esa palabra. Se mataron 2 de 5
+  instancias. **Regla: para eliminar una afirmación falsa, grepear la afirmación ("no tenemos",
+  "sin datos", "todavía no existe"), no el nombre de la cosa.** De ahí sale **S8**.
+
+- **L11** (decisión del usuario, 2026-10-15, del selector): **`Ventana rodante de 7 días`** ⇒ **S6**.
+
+- **L12** (decisión del usuario, 2026-10-15, del selector): **`Entran tal cual, sin marca`** ⇒ **S7**.
+  El orquestador venía recomendando marcarlos ("precio a verificar") y **la decisión del usuario
+  está mejor fundada que esa recomendación**: la propia investigación de R7 (T12, cerrada el
+  2026-10-07) concluyó que los cambios grandes son **correcciones reales hechas en el POS** y que los
+  precios mal cargados eran los viejos. Marcar esa clase como sospechosa habría afirmado una duda que
+  la evidencia del repo no sostiene — un defecto de honestidad disfrazado de prudencia. Sin marca y
+  sin filtro: un dato real no se desmiente ni se esconde.
+
+- **L13** (diseño del orquestador, 2026-10-15): **contrato del artefacto congelado** (ver la sección
+  de arriba: nombre, esquema, 7 reglas, orden de filas). Es lo que desbloquea T2, T4 y T5 en
+  paralelo: los tres escriben contra una interfaz fija y no se esperan entre sí.
+
+- **L14** (evidencia, T2/T3, 2026-10-15): el writer tocó **exactamente las 6 superficies**
+  permitidas (verificado con `git status`), `npm run typecheck` limpio y **35 archivos / 521 tests**
+  (línea base **34/493** ⇒ +28). **Prueba con datos reales** (que el writer no podía hacer: no bajó
+  el branch): corrí `buildChangesArtifact` sobre los dos catálogos normalizados reales del branch
+  `datos` (10-14 → 10-15, 20.784 → 20.797 productos) y **cruzó exacto contra mi medición
+  independiente**: 13 nuevos / 20 bajaron / 121 subieron = **141 cambios**. Idempotencia por fecha
+  verificada (re-run del mismo día → **1 día**, `degraded: null`, sin duplicar), **15,6 KB**, y
+  **151/154 filas con EAN usable**.
+
+- **L15** (evidencia, cierre de T3, 2026-10-15): encontrado por el orquestador y arreglado
+  test-first: `--check` exigía **un `version` numérico**, no **el que esta build entiende**, así que un
+  artefacto v2 de `datos` habría pasado el guard de build y el rechazo quedaba librado al cliente, en
+  silencio. **RED**: `1 failed | 30 passed` (el caso `version: 2` no levantaba error) → código
+  comparando contra `CHANGES_VERSION` → **31/31**, más los dos textos de `fetch-data.ts` que decían
+  "version numérico". Suite completa en verde: **35 archivos / 521 tests**.
+
+- **L16** (evidencia y corrección de R3, 2026-10-15): la primera versión de R3 pedía degradar ante un
+  artefacto corrupto; **implementado, era peor consejo** — perdía hasta 6 días de ventana en
+  silencio. Regla final: **ausente degrada, presente-inutilizable es fatal (exit 3)**. **RED
+  observado** en el test reescrito (`1 failed | 23 passed`: hoy sale con 0 y pisa el artefacto) →
+  implementado en `scripts/refresh-catalog.ts` → **24/24** en el archivo.
+
+- **L17** (cierre documental de T7, 2026-10-15): los docs que enumeraban `/cambios` como placeholder
+  quedaron verdaderos: `PRODUCT.md` (una frase que el propio orquestador había escrito **hoy** y ya
+  era falsa), `README.md` (el árbol de rutas y la tabla de features, con una fila nueva para el feed),
+  `sdd/01-proposal.md`, `sdd/02-spec.md` (FR-6.2) y `sdd/03-design.md`. **Lección repetida**: el
+  primer grep fue **por línea** y se perdió `sdd/01` y `sdd/02`, donde la palabra "placeholders" cae en
+  la línea anterior a `cambios`; hubo que grepear **con contexto**. **Decisión editorial diferida al
+  usuario**: el feed **no** tiene un `FR` numerado en `sdd/02-spec.md` — agregarlo es una decisión
+  sobre el conjunto SDD, no del implementador, así que la ruta quedó descrita en prosa y sin número
+  inventado.
+
+- **L18** (evidencia de T6, 2026-10-15): el harness ganó 4 filas, y las corridas enseñaron dónde
+  estaba el error **del orquestador, no de la app**. **RED** (artefacto fuera de `dist/`): **56/59**,
+  con `CAMBIOS-screen`/`-sections`/`-rows` en FAIL y `CAMBIOS-absent` en PASS — las filas no son
+  vacuas, y la pantalla sin dato dice *"Todavía no hay cambios publicados. El catálogo se actualiza
+  solo, todos los días."* **GREEN parcial**: `CAMBIOS-sections` en verde con **los números reales**
+  (`bajaron=20, subieron=121, nuevos=13`, leídos del artefacto servido) y `CAMBIOS-rows` fallando con
+  151 enlaces que estaban **bien**: el regex estaba anclado en `^/producto/` y la app se sirve bajo el
+  base path **`/precio-scanner/`**. Corregido a la ruta resuelta (`new URL(a.href).pathname`) →
+  `154/154` filas, `151` con enlace, `3` sin enlace = `3` sin EAN, **0 malformados**. Y la corrida
+  siguiente dejó la carrera al desnudo: `CAMBIOS-screen` leyó `data-changes-state` cuando el
+  contenedor **ya estaba visible pero todavía decía `loading`**. Arreglado esperando a que el estado
+  **asiente** (`waitForFunction`, el mismo idioma que las filas de búsqueda) en vez de leer el
+  atributo apenas aparece.
+
+- **L19** (verificación independiente, T8, 2026-10-15): delegada a `gentle-ai-verify` con mandato de
+  **falsificación** y 12 propiedades numeradas. Baseline propio, medido por el verificador:
+  typecheck limpio, **37 archivos / 559 tests**, **59/59 de acceptance**. **Sostuvo, con sondas
+  propias**: la ventana (borde exacto, descarte del día viejo y del futuro, reemplazo del mismo día
+  e idempotencia byte a byte), el cap con `conteo` exacto incluso con 1000 entradas, las listas
+  separadas y el orden del DOM, las reglas del EAN (unión contra el catálogo **vigente**, `null`
+  para 5 dígitos y para cadena vacía, cero EAN inválidos entre los 154 reales, y ningún agrupamiento
+  por nombre), **la no-fuga de `costo`/`margen` probada inyectando un input sucio**, el gate exacto
+  de `version`, los cinco estados del loader (incluido HTML-200 → `absent`), que el artefacto **no**
+  entra al boot ni lleva `?v=` (corrió el prune real y confirmó que la clave sin versión sobrevive),
+  la honestidad de **todos** los estados, y **H1** replicando el loop del glob del workflow (4
+  archivos en el tree). **8 mutaciones** probaron que los tests nuevos pueden fallar.
+
+  **Y rompió tres cosas.** (1) **R3 tenía un agujero en su propio borde** (ver R3): un directorio o
+  una lectura denegada daba `absent` y exit 0, perdiendo hasta 6 días de ventana en silencio —
+  mientras que `--baseline` con un directorio **sí** falla, o sea las capas se contradecían entre sí.
+  **Corregido con RED observado** (`1 failed | 24 passed`) → focal **25/25** y suite **37/560**.
+  (2) **`--check` es inerte**: no lo llama ningún workflow, y `deploy.yml` baja los datos en modo
+  descarga (artefacto opcional), así que una punta de `datos` sin artefacto publica un sitio que dice
+  "Todavía no hay cambios publicados" para siempre sin que nada avise. **Queda como decisión del
+  usuario**: cambia la entrega y arrastra la secuencia de R6. (3) **S8 seguía incompleto**: la misma
+  afirmación falsa vivía en `sdd/01-proposal.md:83-84` y `sdd/README.md:69-71` (7ª y 8ª instancia).
+  El verificador las llamó notas con fecha y **discrepé** tras leerlas: la primera es la lista de
+  no-goals viva y la segunda la sección *Open work*. Corregidas.
+
+  **Advisories ACEPTADOS sin arreglar, con su razón** (ninguno es alcanzable desde la salida normal
+  del pipeline): (a) `isValidList` valida los días acarreados de forma laxa (`conteo` cualquier número
+  finito, `valores` cualquier objeto), así que un artefacto previo **editado a mano** con `conteo: 5,
+  valores: []` se acarrearía y se mostraría "En total: 5" con 0 filas; (b) `formatPct` redondea a 2
+  decimales, así que un cambio real mínimo muestra `0 %` con flecha (alcanzable con un cambio de 1
+  peso en un producto caro). Se registran en vez de arreglarse para no seguir agrandando el cambio.
+
+  **El verificador no pudo probar** que las 4 filas nuevas de acceptance van a RED (se autoimpuso una
+  sola corrida), pero esa evidencia existe en el padre: la corrida sin el artefacto dio **56/59**, con
+  `CAMBIOS-screen`, `CAMBIOS-sections` y `CAMBIOS-rows` en FAIL y `CAMBIOS-absent` en PASS.
+
+- **L20** (cierre de S8, 2026-10-15): el barrido por la **afirmación** (esta vez con contexto y
+  incluyendo `sdd/README.md`, que nunca se había grepeado) dio **una novena instancia** que ningún
+  grep anterior había visto, porque el archivo usa otras palabras: `PRODUCT.md:26-27` afirmaba que la
+  identidad del producto —*"seguir si un precio cambió"*— "currently has no data behind it". Es
+  exactamente lo que esta feature construye, así que además de falsa era la más incómoda. Corregida.
+  De las once coincidencias que quedan en los docs, **diez son ciertas**: hablan de **alertas** o de
+  **comparación multi-almacén** (que siguen sin datos) o son principios de diseño, no afirmaciones
+  sobre el historial. Observación para más adelante, sin cambiar: `PRODUCT.md:22` fija "~20,331 items"
+  y el catálogo ya va por 20.797 — es la misma clase de conteo vivo que T11 des-hardcodeó del harness;
+  toca decidir si un número que deriva cada día debe vivir en la prosa del producto.
