@@ -173,6 +173,31 @@ describe('CambiosPage honest states', () => {
     expect(rows().length).toBeGreaterThan(0)
   })
 
+  it('a real move too small to show at two decimals never reads as 0 %', async () => {
+    // 2.123.750 -> 2.123.749 is -0,00005 %: a real move that rounds to zero at two decimals.
+    // Printing "0 %" next to a down arrow would assert that nothing happened while showing that
+    // it did — the failure the rest of the app avoids by never presenting absence as data.
+    await render(async () => ({
+      status: 'ready',
+      source: 'network',
+      artifact: artifact({
+        dias: [
+          day('2026-10-15', {
+            bajaron: moves([
+              { ean: '7790895000430', nombre: 'CARO', antes: 2_123_750, ahora: 2_123_749, pct: -0.00005 },
+            ]),
+          }),
+        ],
+      }),
+    }))
+
+    const row = rows().find((r) => (r.textContent ?? '').includes('CARO'))
+    expect(row).toBeTruthy()
+    expect(row?.textContent).toContain('<0,01 %')
+    expect(row?.textContent).not.toContain('+0 %')
+    expect(row?.textContent).not.toContain('-0 %')
+  })
+
   it('absent: says the pipeline has not published it, and blames nobody', async () => {
     await render(async () => ({ status: 'absent' }))
 

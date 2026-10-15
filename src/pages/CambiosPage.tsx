@@ -101,6 +101,10 @@ function formatDay(fecha: string): string {
 
 /** Signed percentage; `useGrouping: false` keeps "1108,33 %" readable, not "1.108,33 %". */
 function formatPct(pct: number): string {
+  // A real move that rounds to zero must not read as "0 %": the arrow already carries the
+  // direction, so the number says the move is smaller than the precision it can show. The
+  // boundary is the formatter's own — two decimals.
+  if (pct !== 0 && Math.abs(pct) < 0.005) return '<0,01 %'
   const value = pct.toLocaleString('es-AR', { maximumFractionDigits: 2, useGrouping: false })
   return `${pct > 0 ? '+' : ''}${value} %`
 }
