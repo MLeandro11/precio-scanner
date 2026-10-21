@@ -1,8 +1,9 @@
 # Feature: feed de cambios del catálogo en `/cambios` (`cambios-catalogo`)
 
-**Status:** **T1–T9 hechos, verificados y revisados**; la feature está en producción y el feed se ve
+**Status:** **T1–T10 hechos, verificados y revisados**; la feature está en producción y el feed se ve
 **un día a la vez**. Las dos decisiones de producto que estaban abiertas (S6, S7) se resolvieron el
-2026-10-15 (L11, L12) y el stepper de días se agregó el 2026-10-21 (S9, L23). El header de este
+2026-10-15 (L11, L12), el stepper de días se agregó el 2026-10-21 (S9, L23) y ese mismo día cada
+fila ganó su botón para agregar el producto a la lista (S10, L24). El header de este
 documento había quedado congelado en el estado de la mañana del 2026-10-15 mientras el `## Log`
 ya registraba el cierre de T2–T8: corregido el 2026-10-21 junto con la tabla.
 **Started:** 2026-10-15 · **Closed:** 2026-10-21
@@ -47,6 +48,13 @@ ya registraba el cierre de T2–T8: corregido el 2026-10-21 junto con la tabla.
   `Hoy`/`Ayer` **solo si es cierto**, y si no nombra la fecha ("Adaptativa"); **(c)** las flechas
   avanzan **un día de calendario** y un día sin entrada en el artefacto se muestra como tal
   ("Paso calendario, el hueco se muestra honesto").
+
+- **S10.** Cada fila del feed **agrega su producto a la lista** sin salir de la pantalla. Pedido
+  textual del usuario, 2026-10-21: *"ahora quiero en la misma pantalla poder agregar cada item a la
+  lista"*. Tres decisiones suyas: **(a)** el botón **siempre suma 1** (si ya está, incrementa) y el
+  toast lo dice; **(b)** las filas **sin EAN usable no llevan botón** — la lista se indexa por EAN, no
+  hay con qué guardar el ítem; **(c)** el toast de confirmación ofrece **`Deshacer`**, que devuelve el
+  estado exacto que el ítem tenía antes del toque.
 
 ## Contrato congelado del artefacto (diseño del orquestador, 2026-10-15)
 
@@ -151,6 +159,7 @@ Esto es lo que el cliente (T4/T5) puede dar por cierto **sin adivinar**:
 | **T7** | S5,S8 | Docs: `PRODUCT.md`, `README.md`, `DESIGN.md`, `sdd/` + la frase única de S8 | | `a637bda` · `d562dbb` · `fcc1b59` |
 | **T8** | todas | Verificación independiente (`verify`): la feature toca la entrega (pipeline) y la caché del cliente | verify | sin commit propio: evidencia en L19 |
 | **T9** | **S9** | Header de días en `/cambios`: un día a la vez, etiqueta honesta, huecos nombrados, fila nueva `CAMBIOS-day-nav` | inline | `92b0d5d` |
+| **T10** | **S10** | Agregar a la lista desde la fila: `useList()` (la misma lista del detalle), botón 44×44 solo con EAN usable, toast con `Deshacer` que restaura el estado previo, fila nueva `CAMBIOS-add` | inline | `3abf9c8` |
 
 **Cerrada el 2026-10-21.** Review nativo RDD `approved` con autoridad quemada (lineage
 `review-1aee2dbb637b7e06`, tier high, 3 lentes) — el detalle y su límite real están en L19 y en la
@@ -476,3 +485,38 @@ harness contra producción.
   **Un falso positivo, medido y descartado**: el screenshot a 2x hacía ver los chevrons invisibles;
   `getComputedStyle` dio `rgb(15, 23, 42)`, opacity 1, svg 18×18, botón 44×44, y a 3x se ven nítidos.
   Era el reescalado de la imagen. **No se arregla un problema que no se midió.**
+
+- **L24** (usuario, 2026-10-21, verbatim, abre **S10**): *"ahora quiero en la misma pantalla poder
+  agregar cada item a la lista"*. Del selector, tres decisiones suyas: *"Un + por fila que siempre
+  suma 1"* · *"Sin botón (3 de las 154 filas reales)"* para las filas sin EAN usable · *"Sí, toast con
+  Deshacer"*.
+
+  **Primero se leyó cómo funciona la lista hoy, en vez de inventar una**: `useList()` es **la** lista
+  de compras (`localStorage`, `precio-scanner:lupa:lista`) y es la misma que escribe el detalle del
+  producto; las "listas guardadas" son snapshots opcionales de esa lista en Firestore. O sea que
+  agregar desde el feed **no** es una operación nueva: es la misma, y por eso el badge del nav
+  (`AppLayout`, layout route que nunca se desmonta) tiene que seguirla sin recargar.
+
+  **El costo real de la decisión, dicho antes de aceptarla**: el botón de 44×44px (la ley de touch
+  del repo) se come **~50px de ancho del nombre** — las filas truncan antes — y agrega **un stop de
+  tab por fila**; en el día más pesado del artefacto real (152 filas) eso son 304 stops de teclado.
+  Queda así porque el borde hace descubrible la acción y el target chico sería peor; queda anotado
+  como el punto a revisar si molesta. **Nada de esto se descubrió después de commitear: se midió en
+  el screenshot antes.**
+
+  **Detalle de implementación que no es cosmético**: el botón es **hermano** del `<a>`, nunca hijo
+  (`<button>` dentro de `<a>` es HTML inválido y vuelve impredecible el tap target), y su
+  `aria-label` lleva el nombre del producto porque "agregar" repetido 77 veces no identifica nada en
+  un lector de pantalla. El `Deshacer` restaura el estado **exacto** previo al toque: saca el ítem si
+  era nuevo, y repone la cantidad anterior si era un incremento — un "Deshacer" que se queda con el
+  ítem es un segundo cambio que nadie reportó.
+
+  **Evidencia**: **RED observado** (6 failed | 35 passed) → focales **41/41** · suite **581 tests /
+  37 archivos** (eran 575) · `typecheck` limpio · **acceptance 61/61**, con `CAMBIOS-add` haciendo el
+  viaje completo en el bundle real: lista `2 → 3` con el EAN presente, badge del nav en `"3"`
+  **sin recargar**, `Deshacer` → lista de vuelta en `2`.
+
+  **Lección de harness repetida en el mismo día**: la fila mide **relativo a lo que encuentra** y no
+  asume lista vacía. Cuando corrió, la lista ya tenía 2 ítems que habían dejado las filas de
+  `LIST-badge`; una fila que asumiera cero se habría puesto roja sobre código correcto — exactamente
+  el defecto que ya había aparecido con el artefacto de un solo día en `CAMBIOS-day-nav`.
