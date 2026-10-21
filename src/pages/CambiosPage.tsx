@@ -37,6 +37,11 @@ import type {
  * says it has no data — never "no changes", which is a different truth (a published day with
  * zero movements).
  *
+ * The screen carries **no title of its own**: the brand's `sr-only` h1 names the app, the day
+ * label says which day you are looking at, and the three section headings say what moved — a
+ * visible "Qué cambió" above them only repeated what the screen already says. The sections are
+ * the page's `h2`s for that reason, so the outline is brand → sections with no invented level.
+ *
  * Every row with a usable EAN also adds its product to the shopping list, through the SAME
  * `useList()` the product detail writes to: two screens, one list. A row without a usable EAN
  * gets no button, because `ListaItem` is keyed by the EAN and there is nothing to key it with —
@@ -69,7 +74,6 @@ interface CambiosPageProps {
 
 /** Every user-facing string in one place, so copy cannot drift between states. */
 const COPY = {
-  titulo: 'Qué cambió',
   hoy: 'Hoy',
   ayer: (fecha: string) => `Ayer, ${fecha}`,
   diaAnterior: 'Día anterior',
@@ -347,9 +351,9 @@ function SectionBlock({
       data-changes-truncated={list.truncado ? 'true' : 'false'}
       className="mt-5"
     >
-      <h4 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
+      <h2 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
         {kind === 'bajaron' ? COPY.bajaron : kind === 'subieron' ? COPY.subieron : COPY.nuevos}
-      </h4>
+      </h2>
       <p className="tnum mt-0.5 text-xs text-text-muted">{countLine(list, unit)}</p>
       <ul className="mt-1">{children}</ul>
     </section>
@@ -437,7 +441,7 @@ function DayNav({
     'flex h-11 w-11 items-center justify-center rounded-full border border-border text-text-primary ' +
     'transition-colors disabled:opacity-30 disabled:cursor-not-allowed enabled:active:bg-surface'
   return (
-    <div className="mt-4 flex items-center justify-between gap-2">
+    <div className="mt-6 flex items-center justify-between gap-2">
       <button
         type="button"
         data-changes-nav="prev"
@@ -640,7 +644,6 @@ export default function CambiosPage({
       data-changes-state={stateAttr}
     >
       <Brand />
-      <h2 className="mt-6 text-lg font-semibold text-text-primary">{COPY.titulo}</h2>
 
       {state.phase === 'loading' ? <LoadingView /> : null}
       {state.phase === 'ready' ? (

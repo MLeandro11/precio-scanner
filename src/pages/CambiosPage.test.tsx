@@ -213,13 +213,37 @@ afterEach(async () => {
 // ---------------------------------------------------------------------------
 
 describe('CambiosPage honest states', () => {
-  it('loading: shows a status and the screen title, never a bare spinner as the end state', async () => {
+  it('loading: shows a status, never a bare spinner as the end state', async () => {
     await render(() => new Promise<ChangesLoadResult>(() => {}))
 
     expect(state()).toBe('loading')
-    expect(container.querySelector('h2')?.textContent).toContain('Qué cambió')
     expect(text()).toContain('Cargando cambios')
     expect(rows()).toHaveLength(0)
+    // No title is invented while loading either: the page never grows a heading the ready
+    // screen does not have.
+    expect(container.querySelector('h2')).toBeNull()
+  })
+
+  it('carries no title of its own: the brand heading and the three sections are the outline', async () => {
+    await render(async () => READY)
+
+    // A visible "Qué cambió" only repeated what the day label and the sections already say.
+    expect(text()).not.toContain('Qué cambió')
+
+    const outline = Array.from(container.querySelectorAll('h1, h2, h3, h4')).map((h) =>
+      (h.textContent ?? '').trim(),
+    )
+    // Brand's sr-only h1 is the only heading above the sections; nothing in between.
+    expect(outline).toEqual([
+      'Lupa',
+      'Bajaron de precio',
+      'Subieron de precio',
+      'Se agregaron',
+    ])
+    // And the sections sit directly under it: no level was skipped or invented.
+    expect(
+      Array.from(container.querySelectorAll('h2')).map((h) => (h.textContent ?? '').trim()),
+    ).toEqual(['Bajaron de precio', 'Subieron de precio', 'Se agregaron'])
   })
 
   it('ready: renders the day feed from the artifact', async () => {

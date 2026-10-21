@@ -799,10 +799,12 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
   )
 
   // The tab is only honest if it lands somewhere. Home renders on an unknown path (the
-  // catch-all redirect), so asserting the heading is what separates "the route exists"
-  // from "we fell through to Home and nobody noticed".
+  // catch-all redirect), so asserting the screen's own state hook is what separates "the route
+  // exists" from "we fell through to Home and nobody noticed". It keyed on the screen's heading
+  // until the screen dropped its title: a copy string is a weaker anchor than the hook the rest
+  // of these rows already contract on.
   await noCamPage.goto(`${baseUrl}cambios`, { waitUntil: 'domcontentloaded' })
-  const cambiosScreen = await waitForVisible(noCamPage.locator('h2', { hasText: 'Qué cambió' }))
+  const cambiosScreen = await waitForVisible(noCamPage.locator('[data-changes-state]'))
   record(
     'DEEP-cambios',
     cambiosScreen,

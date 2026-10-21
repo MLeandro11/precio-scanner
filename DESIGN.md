@@ -483,6 +483,13 @@ the stepper, one 11px `text-muted` line carries the artifact's real generation m
 clock (never `p. m.`, which then collides with the sentence's own full stop). When that value
 is unreadable the line says so instead of printing it raw, and it is never replaced by a guess.
 
+`/cambios` carries **no title of its own** — the only screen in the app without one, and
+deliberately: the brand's `sr-only` h1 already names the app, the day label says which day you are
+looking at, and the three section headings say what moved. A visible "Qué cambió" above them only
+repeated the screen. For that reason the sections are the page's `h2`s, sitting directly under the
+brand heading with no invented level between them, and no state (loading, absent, error) grows a
+heading the ready screen does not have.
+
 ### Feed row
 
 The dense row of the changes feed, and the only place in the app where a product row carries an
