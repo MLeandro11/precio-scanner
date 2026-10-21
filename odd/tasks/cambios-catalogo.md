@@ -12,9 +12,13 @@ ya registraba el cierre de T2–T8: corregido el 2026-10-21 junto con la tabla.
 
 ## Specs
 
-- **S1.** La ruta `/alertas` pasa a `/cambios`; el tab del nav dice **`Cambios`** y el título de la
-  pantalla **`Qué cambió`**. El icono deja de ser `Bell` (el usuario eligió el nombre del
-  selector, no una frase suelta).
+- **S1.** La ruta `/alertas` pasa a `/cambios` y el tab del nav dice **`Cambios`**. El icono deja de
+  ser `Bell` (el usuario eligió el nombre del selector, no una frase suelta). **Reescrita el
+  2026-10-21 (L26): la pantalla no lleva título visible.** Decisión del usuario: *"saca el titulo
+  'Qué cambió' me parece innecesario, ya la pantalla por si sola te dice lo q hace"*. Lo que la
+  identifica sin él: el `h1` `sr-only` de `Brand` ("Lupa"), la etiqueta del día en el stepper y las
+  tres cabeceras de sección. Esas tres pasan a ser los `h2` de la página, así el outline es
+  marca → secciones **sin un nivel inventado en el medio**.
 - **S2.** La pantalla es un **feed global de lo que se movió en el catálogo**: qué se agregó, qué
   subió y qué bajó de precio. **No es vigilancia personal**: no requiere que el usuario marque nada,
   y es la misma información para todos.
@@ -539,3 +543,35 @@ harness contra producción.
   agregar/deshacer en Chromium real · **screenshot 390×844 a 2x** para confirmar que el `+` apagado
   **no se lee como un control deshabilitado** (la duda real de esta variante, y por eso se miró en
   píxeles en vez de suponerla).
+
+- **L26** (usuario, 2026-10-21, verbatim, reescribe **S1**): *"saca el titulo 'Qué cambió' me parece
+  innecesario, ya la pantalla por si sola te dice lo q hace"*. El usuario tiene razón y el argumento
+  es verificable en la pantalla: la marca nombra la app, la etiqueta del stepper dice qué día se está
+  mirando y las tres cabeceras dicen qué se movió. El título era la cuarta vez que se decía lo mismo,
+  y ocupaba ~80px arriba del fold — en una pantalla de 390px, casi una fila entera de datos.
+
+  **Lo que se verificó ANTES de borrar, porque era el riesgo real de la decisión**: si ese `h2` era el
+  único encabezado de la página, sacarlo dejaba la pantalla sin título para lectores de pantalla.
+  **No lo era**: `Brand` ya renderiza un `h1` `sr-only` ("Lupa") en todas las pantallas. Así que las
+  tres cabeceras de sección se promovieron de `h4` a **`h2`** y el outline quedó marca → secciones,
+  **sin un nivel inventado en el medio** (antes saltaba `h2` → `h4`). Ningún estado (loading, absent,
+  error) crece un encabezado que la pantalla lista no tiene: eso lo pinnea el test de `loading`.
+
+  **Una fila del harness se apoyaba en la copy que se borró**: `DEEP-cambios` probaba que el GET duro
+  a `/cambios` había caído en esta pantalla esperando el `h2` con el texto "Qué cambió". Ahora espera
+  `[data-changes-state]`, el hook con el que ya contrata el resto de las filas de esta pantalla.
+  Anclar una aserción de ruta a un string que la pantalla puede dejar de imprimir era la mitad débil
+  de esa fila, y el cambio la destapó.
+
+  **Evidencia**: **RED observado** revirtiendo **solo el componente** (2 failed | 40 passed: el test
+  de `loading` cazó el `h2` y el test de outline cazó el texto del título) → focales **42/42** ·
+  `typecheck` limpio · **acceptance 61/61** con `DEEP-cambios` verde · screenshot 390×844 a 2x
+  (el contenido subió ~80px y entran más filas).
+
+  **Hallazgo aparte, no causado por este cambio**: la suite completa es **intermitentemente flaky**
+  bajo su propio paralelismo de 37 workers. Tres corridas seguidas dieron **582/582**, después **5
+  fallas en archivos CLI no relacionados** (`extract-catalog`, `fetch-data`, `generate-index`), y
+  después **582/582** otra vez; cada archivo afectado pasa aislado. Queda registrado acá en vez de
+  tapado: es un problema de la suite (probablemente contención de CPU con `execFileSync` spawneando
+  node adentro de 37 workers), no de este commit, y no se arregla sin decidir antes cómo se corre la
+  suite.
