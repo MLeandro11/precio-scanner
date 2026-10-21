@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { act, createElement } from 'react'
+import { act, createElement, Fragment } from 'react'
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter } from 'react-router-dom'
+import { Toaster } from 'sonner'
 import CambiosPage, { dayLabel } from './CambiosPage'
 import type {
   BoundedList,
@@ -100,9 +101,16 @@ async function render(
   await act(async () => {
     root.render(
       createElement(
-        MemoryRouter,
+        Fragment,
         null,
-        createElement(CambiosPage, { loadFn: loader, now }),
+        createElement(
+          MemoryRouter,
+          null,
+          createElement(CambiosPage, { loadFn: loader, now }),
+        ),
+        // The confirmation is a real toast with a real action, so the harness mounts the same
+        // Toaster the app mounts: asserting a `toast()` call never happened would be a guess.
+        createElement(Toaster),
       ),
     )
   })
@@ -114,6 +122,25 @@ async function click(el: HTMLButtonElement): Promise<void> {
     el.click()
   })
   await flush()
+}
+
+/** Toasts live in a portal on `document.body` and mount on a timer, so they need a real settle. */
+async function settle(ms = 10): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, ms))
+  })
+  await flush()
+}
+
+async function waitForToastButton(label: string): Promise<HTMLButtonElement | null> {
+  for (let i = 0; i < 40; i += 1) {
+    const found = Array.from(document.querySelectorAll('button')).find(
+      (b) => (b.textContent ?? '').trim() === label,
+    )
+    if (found) return found as HTMLButtonElement
+    await settle()
+  }
+  return null
 }
 
 function nav(direction: 'prev' | 'next'): HTMLButtonElement {
@@ -160,6 +187,10 @@ function buttons(): HTMLButtonElement[] {
 
 beforeEach(() => {
   mounted = false
+  // The list is real localStorage state: a leftover item would make the add tests pass on
+  // their own garbage, and `document.body` keeps the portal a previous test left behind.
+  localStorage.clear()
+  document.body.innerHTML = ''
   ;(
     globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
   ).IS_REACT_ACT_ENVIRONMENT = true
@@ -622,5 +653,101 @@ describe('CambiosPage rows', () => {
     expect(sameName).toHaveLength(2)
     expect(sameName[0].querySelector('a')?.getAttribute('href')).toBe('/producto/111111')
     expect(sameName[1].querySelector('a')?.getAttribute('href')).toBe('/producto/222222')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Add to list: the same shopping list the detail screen writes to
+// ---------------------------------------------------------------------------
+
+/**
+ * The list is the app's own (localStorage under `precio-scanner:lupa:lista`), so these tests read
+ * the exact bytes the rest of the app reads, not a stub: adding from the feed and adding from the
+ * product detail have to be the same operation or the two screens disagree about the same list.
+ */
+function storedList(): Array<{ ean: string; cantidad: number; nombre?: string }> {
+  const raw = localStorage.getItem('precio-scanner:lupa:lista')
+  return raw === null ? [] : (JSON.parse(raw) as Array<{ ean: string; cantidad: number; nombre?: string }>)
+}
+
+function addButtonFor(nombre: string): HTMLButtonElement | null {
+  const buttons = Array.from(container.querySelectorAll('button'))
+  return (
+    (buttons.find((b) => (b.getAttribute('aria-label') ?? '').includes(nombre)) as
+      | HTMLButtonElement
+      | undefined) ?? null
+  )
+}
+
+describe('CambiosPage add to list', () => {
+  it('offers a 44px add button on a row whose EAN is usable, and none on a row without one', async () => {
+    // READY carries one `bajaron` with an EAN and one `subieron` with `ean: null`.
+    await render(async () => READY)
+
+    const conEan = container.querySelector('[data-changes-row="bajaron"]')
+    const sinEan = container.querySelector('[data-changes-row="subieron"]')
+    const boton = conEan?.querySelector('button')
+
+    expect(boton).toBeTruthy()
+    expect(boton?.getAttribute('aria-label')).toMatch(/agregar.+a (mi|tu) lista/i)
+    expect(boton?.className).toContain('h-11')
+    // No identity, no action: the row still shows what it knows, and nothing pretends otherwise.
+    expect(sinEan?.querySelector('button')).toBeNull()
+  })
+
+  it('keeps the product link usable: the add button lives outside the anchor, never inside it', async () => {
+    await render(async () => READY)
+
+    const row = container.querySelector('[data-changes-row="bajaron"]')
+    const link = row?.querySelector('a')
+    const boton = row?.querySelector('button')
+
+    expect(link?.getAttribute('href')).toBe('/producto/7790895000430')
+    // A button inside an anchor is invalid HTML and a tap target nobody can predict.
+    expect(link?.querySelector('button')).toBeNull()
+    expect(boton?.contains(link ?? null)).toBe(false)
+  })
+
+  it('pressing it saves the product in the shopping list, with its name and quantity 1', async () => {
+    await render(async () => READY)
+
+    await click(addButtonFor('YERBA MATE') as HTMLButtonElement)
+
+    expect(storedList()).toEqual([
+      { ean: '7790895000430', cantidad: 1, alerta: false, nombre: 'YERBA MATE' },
+    ])
+  })
+
+  it('pressing it again increments the quantity instead of duplicating the row', async () => {
+    await render(async () => READY)
+
+    await click(addButtonFor('YERBA MATE') as HTMLButtonElement)
+    await click(addButtonFor('YERBA MATE') as HTMLButtonElement)
+
+    expect(storedList()).toHaveLength(1)
+    expect(storedList()[0].cantidad).toBe(2)
+  })
+
+  it('a newly added item can be undone from the confirmation', async () => {
+    await render(async () => READY)
+
+    await click(addButtonFor('YERBA MATE') as HTMLButtonElement)
+    const deshacer = await waitForToastButton('Deshacer')
+    expect(deshacer).toBeTruthy()
+    await click(deshacer as HTMLButtonElement)
+
+    expect(storedList()).toEqual([])
+  })
+
+  it('undoing an increment puts the previous quantity back instead of dropping the item', async () => {
+    await render(async () => READY)
+
+    await click(addButtonFor('YERBA MATE') as HTMLButtonElement)
+    await click(addButtonFor('YERBA MATE') as HTMLButtonElement)
+    const deshacer = await waitForToastButton('Deshacer')
+    await click(deshacer as HTMLButtonElement)
+
+    expect(storedList()).toHaveLength(1)
+    expect(storedList()[0].cantidad).toBe(1)
   })
 })

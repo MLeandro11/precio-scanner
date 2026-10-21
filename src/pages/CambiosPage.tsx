@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { TrendingDown, TrendingUp, ChevronLeft, ChevronRight } from 'lucide-react'
+import { TrendingDown, TrendingUp, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
+import { toast } from 'sonner'
 import Brand from '../components/Brand'
 import Button from '../components/ui/Button'
 import { formatPrice } from '../components/ProductCard'
 import { usableEan } from '../lib/images'
 import { loadCatalogChanges } from '../lib/catalogChanges'
+import { useList } from '../hooks/useList'
 import type {
   ChangeDay,
   ChangesArtifact,
@@ -34,6 +36,11 @@ import type {
  * newest day is routinely yesterday. A day inside the range that the artifact does not carry
  * says it has no data — never "no changes", which is a different truth (a published day with
  * zero movements).
+ *
+ * Every row with a usable EAN also adds its product to the shopping list, through the SAME
+ * `useList()` the product detail writes to: two screens, one list. A row without a usable EAN
+ * gets no button, because `ListaItem` is keyed by the EAN and there is nothing to key it with —
+ * the row stays informational instead of offering an action that cannot be honored.
  *
  * Every state is honest (S5): loading, absent (pipeline not published yet),
  * invalid (unreadable artifact), offline with a stored copy, offline with
@@ -83,6 +90,10 @@ const COPY = {
   error: 'No pudimos traer los cambios ahora.',
   errorHint: 'Revisá tu conexión y probá de nuevo.',
   reintentar: 'Reintentar',
+  agregar: (nombre: string) => `Agregar ${nombre} a mi lista`,
+  agregado: 'Agregado a tu lista',
+  ahoraTenes: (cantidad: number) => `Ahora tenés ${cantidad}`,
+  deshacer: 'Deshacer',
   sinCambiosDia: 'Sin cambios este día.',
   sinDatosDia: 'No hay datos de este día.',
   sinDatosDiaHint:
@@ -190,10 +201,35 @@ function countLine(
     : `En total: ${total}.`
 }
 
-function MoveRow({ move, kind }: { move: PriceMove; kind: 'bajaron' | 'subieron' }) {
+/** The one add affordance, shared by both row kinds, so the two cannot drift apart. */
+function AddToListButton({ nombre, onAdd }: { nombre: string; onAdd: () => void }) {
+  return (
+    <Button
+      variant="secondary"
+      size="icon"
+      data-changes-add="true"
+      aria-label={COPY.agregar(nombre)}
+      onClick={onAdd}
+      className="shrink-0"
+    >
+      <Plus size={18} aria-hidden="true" />
+    </Button>
+  )
+}
+
+function MoveRow({
+  move,
+  kind,
+  onAdd,
+}: {
+  move: PriceMove
+  kind: 'bajaron' | 'subieron'
+  onAdd: (producto: { ean: string | null; nombre: string }) => void
+}) {
   const down = kind === 'bajaron'
   // The link cut is the same usable-EAN rule the rest of the app uses (>=6
-  // digits, H5): a row without a resolvable EAN renders without a link.
+  // digits, H5): a row without a resolvable EAN renders without a link — and,
+  // for the same reason, without an add button.
   const ean = usableEan(move.ean ?? undefined)
   const content = (
     <>
@@ -222,24 +258,33 @@ function MoveRow({ move, kind }: { move: PriceMove; kind: 'bajaron' | 'subieron'
     <li
       data-changes-row={kind}
       data-ean={move.ean ?? undefined}
-      className="border-t border-border first:border-t-0"
+      className="flex items-center gap-2 border-t border-border first:border-t-0"
     >
       {ean ? (
         <Link
           to={`/producto/${ean}`}
-          className="flex min-h-11 items-center gap-3 py-2"
+          className="flex min-h-11 min-w-0 flex-1 items-center gap-3 py-2"
           aria-label={`Ver ${move.nombre}`}
         >
           {content}
         </Link>
       ) : (
-        <div className="flex min-h-11 items-center gap-3 py-2">{content}</div>
+        <div className="flex min-h-11 min-w-0 flex-1 items-center gap-3 py-2">{content}</div>
       )}
+      {ean ? (
+        <AddToListButton nombre={move.nombre} onAdd={() => onAdd({ ean: move.ean, nombre: move.nombre })} />
+      ) : null}
     </li>
   )
 }
 
-function NewRow({ product }: { product: NewProduct }) {
+function NewRow({
+  product,
+  onAdd,
+}: {
+  product: NewProduct
+  onAdd: (producto: { ean: string | null; nombre: string }) => void
+}) {
   const ean = usableEan(product.ean ?? undefined)
   const content = (
     <>
@@ -256,19 +301,25 @@ function NewRow({ product }: { product: NewProduct }) {
     <li
       data-changes-row="nuevos"
       data-ean={product.ean ?? undefined}
-      className="border-t border-border first:border-t-0"
+      className="flex items-center gap-2 border-t border-border first:border-t-0"
     >
       {ean ? (
         <Link
           to={`/producto/${ean}`}
-          className="flex min-h-11 items-center gap-3 py-2"
+          className="flex min-h-11 min-w-0 flex-1 items-center gap-3 py-2"
           aria-label={`Ver ${product.nombre}`}
         >
           {content}
         </Link>
       ) : (
-        <div className="flex min-h-11 items-center gap-3 py-2">{content}</div>
+        <div className="flex min-h-11 min-w-0 flex-1 items-center gap-3 py-2">{content}</div>
       )}
+      {ean ? (
+        <AddToListButton
+          nombre={product.nombre}
+          onAdd={() => onAdd({ ean: product.ean, nombre: product.nombre })}
+        />
+      ) : null}
     </li>
   )
 }
@@ -307,7 +358,15 @@ function SectionBlock({
  * carries no entry for that date, so the screen says it has no data rather than showing an
  * empty day ("no se movió nada" is a different, and unproven, claim).
  */
-function DayBlock({ fecha, day }: { fecha: string; day: ChangeDay | null }) {
+function DayBlock({
+  fecha,
+  day,
+  onAdd,
+}: {
+  fecha: string
+  day: ChangeDay | null
+  onAdd: (producto: { ean: string | null; nombre: string }) => void
+}) {
   if (day === null) {
     return (
       <section
@@ -334,17 +393,17 @@ function DayBlock({ fecha, day }: { fecha: string; day: ChangeDay | null }) {
         <>
           <SectionBlock kind="bajaron" list={day.bajaron} unit="precio">
             {day.bajaron.valores.map((move: PriceMove, i: number) => (
-              <MoveRow key={`bajaron-${i}`} move={move} kind="bajaron" />
+              <MoveRow key={`bajaron-${i}`} move={move} kind="bajaron" onAdd={onAdd} />
             ))}
           </SectionBlock>
           <SectionBlock kind="subieron" list={day.subieron} unit="precio">
             {day.subieron.valores.map((move: PriceMove, i: number) => (
-              <MoveRow key={`subieron-${i}`} move={move} kind="subieron" />
+              <MoveRow key={`subieron-${i}`} move={move} kind="subieron" onAdd={onAdd} />
             ))}
           </SectionBlock>
           <SectionBlock kind="nuevos" list={day.nuevos} unit="producto">
             {day.nuevos.valores.map((product: NewProduct, i: number) => (
-              <NewRow key={`nuevos-${i}`} product={product} />
+              <NewRow key={`nuevos-${i}`} product={product} onAdd={onAdd} />
             ))}
           </SectionBlock>
         </>
@@ -430,10 +489,12 @@ function ReadyView({
   artifact,
   source,
   now,
+  onAdd,
 }: {
   artifact: ChangesArtifact
   source: 'network' | 'cache'
   now: () => Date
+  onAdd: (producto: { ean: string | null; nombre: string }) => void
 }) {
   const dias = [...artifact.dias].sort((a, b) => b.fecha.localeCompare(a.fecha))
   const masNuevo = dias[0]?.fecha ?? null
@@ -476,7 +537,7 @@ function ReadyView({
               {COPY.actualizado(momento)}
             </p>
           )}
-          <DayBlock fecha={fecha} day={porFecha.get(fecha) ?? null} />
+          <DayBlock fecha={fecha} day={porFecha.get(fecha) ?? null} onAdd={onAdd} />
         </>
       )}
     </>
@@ -515,6 +576,7 @@ export default function CambiosPage({
   loadFn = loadCatalogChanges,
   now = () => new Date(),
 }: CambiosPageProps) {
+  const lista = useList()
   const [state, setState] = useState<ScreenState>({ phase: 'loading' })
   const [attempt, setAttempt] = useState(0)
 
@@ -543,6 +605,27 @@ export default function CambiosPage({
 
   const retry = () => setAttempt((n) => n + 1)
 
+  /**
+   * Adds the product to the same list the detail screen writes to, then says what happened and
+   * offers the way back. Undo restores the state the item had BEFORE the press — removed if it
+   * was new, previous quantity if it was already there — because "Deshacer" that drops an item
+   * the user had before the press would be a second, unreported change.
+   */
+  const onAdd = (producto: { ean: string | null; nombre: string }) => {
+    const ean = usableEan(producto.ean ?? undefined)
+    if (!ean) return
+    const previo = lista.items.find((i) => i.ean === ean)
+    lista.add(ean, producto.nombre)
+    toast(previo ? COPY.ahoraTenes(previo.cantidad + 1) : COPY.agregado, {
+      description: producto.nombre,
+      action: {
+        label: COPY.deshacer,
+        onClick: () =>
+          previo ? lista.setCantidad(ean, previo.cantidad) : lista.remove(ean),
+      },
+    })
+  }
+
   // The DOM state is explicit per honest outcome: `ready` (fresh) and `cached`
   // (offline fallback) are the same loader status with different truths.
   const stateAttr =
@@ -558,7 +641,7 @@ export default function CambiosPage({
 
       {state.phase === 'loading' ? <LoadingView /> : null}
       {state.phase === 'ready' ? (
-        <ReadyView artifact={state.artifact} source={state.source} now={now} />
+        <ReadyView artifact={state.artifact} source={state.source} now={now} onAdd={onAdd} />
       ) : null}
       {state.phase === 'absent' ? (
         <NoticeView title={COPY.absent} hint={COPY.absentHint} />

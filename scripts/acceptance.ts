@@ -2152,6 +2152,78 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
   )
 
   /*
+   * Adding from the feed has to land in the SAME list the product detail writes to, and the nav
+   * badge — which lives in AppLayout, the layout route that never unmounts — has to follow
+   * without a reload. Undo has to put the list back exactly as it was: a "Deshacer" that keeps
+   * the item would be a second change nobody reported, and it would also poison the LIST-badge
+   * rows further down, which require an empty list to start from.
+   */
+  const listaAntesDelFeed = await listaRows()
+  const agregarEnFeed = page.locator('[data-changes-add]').first()
+  const filaDelBoton = await agregarEnFeed
+    .locator('xpath=ancestor::*[@data-changes-row]')
+    .getAttribute('data-ean')
+    .catch(() => null)
+  const agregarShown = await waitForVisible(agregarEnFeed)
+  if (agregarShown) await agregarEnFeed.click()
+  let badgeSiguioAlFeed = false
+  try {
+    await page.waitForFunction(
+      (want: number) => {
+        const raw = localStorage.getItem('precio-scanner:lupa:lista')
+        const parsed = raw ? JSON.parse(raw) : []
+        return Array.isArray(parsed) && parsed.length === want
+      },
+      listaAntesDelFeed + 1,
+      { timeout: 20000 },
+    )
+    badgeSiguioAlFeed = true
+  } catch {
+    badgeSiguioAlFeed = false
+  }
+  const listaTrasAgregar = await page.evaluate(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem('precio-scanner:lupa:lista') ?? '[]')
+      return Array.isArray(raw) ? raw.map((r: { ean?: string }) => r.ean ?? '') : []
+    } catch {
+      return []
+    }
+  })
+  const badgeTrasAgregar = await listaBadgeValue()
+  const deshacerToast = page.getByRole('button', { name: 'Deshacer' }).first()
+  const deshacerShown = await waitForVisible(deshacerToast)
+  if (deshacerShown) await deshacerToast.click()
+  let listaVolvio = false
+  try {
+    await page.waitForFunction(
+      (want: number) => {
+        const raw = localStorage.getItem('precio-scanner:lupa:lista')
+        const parsed = raw ? JSON.parse(raw) : []
+        return Array.isArray(parsed) && parsed.length === want
+      },
+      listaAntesDelFeed,
+      { timeout: 20000 },
+    )
+    listaVolvio = true
+  } catch {
+    listaVolvio = false
+  }
+  record(
+    'CAMBIOS-add',
+    agregarShown &&
+      !!filaDelBoton &&
+      badgeSiguioAlFeed &&
+      listaTrasAgregar.includes(filaDelBoton) &&
+      deshacerShown &&
+      listaVolvio,
+    `add from /cambios -> list ${listaAntesDelFeed} -> ${listaTrasAgregar.length} row(s) ` +
+      `(${filaDelBoton} present: ${listaTrasAgregar.includes(filaDelBoton ?? '')}), badge "${badgeTrasAgregar}"; ` +
+      `toast "Deshacer" ${deshacerShown ? 'clicked' : 'NOT FOUND'} -> ${listaVolvio ? 'list back to ' + listaAntesDelFeed : 'LIST NOT RESTORED'}`,
+    `the feed writes to the same list the detail screen does, through a useList() instance the ` +
+      `layout route is subscribed to, and the confirmation can undo exactly what it did`,
+  )
+
+  /*
    * The other half of "never simulate data" (S5): with the artifact unpublishable the screen
    * must SAY so and render nothing — no spinner as the final state and no invented rows.
    *

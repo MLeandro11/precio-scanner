@@ -94,8 +94,11 @@
   entry in the artifact says it has **no data**, which is a different truth from a published day
   with no movements. It prints each list's **exact** count and says so when a list was capped
   rather than passing a partial list off as complete; it links a row to `/producto/<ean>` **only**
-  when the artifact carries a usable EAN (never by name, which repeats in the real catalog); and
-  when the artifact has not been published it says that instead of rendering anything.
+  when the artifact carries a usable EAN (never by name, which repeats in the real catalog); every
+  such row also adds its product to **the shopping list** — the same one the product detail writes
+  to — and confirms with an undo that restores the exact previous state, while a row without a
+  usable EAN offers no such action, because the list is keyed by the EAN; and when the artifact has
+  not been published it says that instead of rendering anything.
 
 ### FR-7: Product detail *(added in the rebrand)*
 - FR-7.1: `/producto/:ean` resolves the EAN (or catalog id fallback for barcode-less

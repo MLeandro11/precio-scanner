@@ -25,7 +25,8 @@ Lupa answers three confirmed jobs, on a phone, in a store:
 2. **Build the shopping list** and keep it at hand while shopping.
 3. **Follow whether a price changed** since last time. This is the product's stated future
    identity, and it now has data behind it: every catalog refresh stores a daily snapshot, and
-   `/cambios` shows what moved, day by day, over the last seven days. What it still lacks is a per-EAN history
+   `/cambios` shows what moved, day by day, over the last seven days, and adds any of those products
+   to your list from the row itself. What it still lacks is a per-EAN history
    curve — see Capabilities and Constraints.
 
 Its engineering core is handling that whole catalog in the browser with no server
@@ -82,10 +83,11 @@ saved list, individually or all at once, one code per line; PWA install; offline
   snapshot of the (single) store to the `datos` branch, so the series exists. What does not exist is
   a per-EAN curve served to the app, multi-store prices, or any chart — so `/historial/:ean` stays an
   honest placeholder (`HistorialPrecio` remains a type only). `/cambios` is real: it shows what moved
-  in the catalog over the last seven days, one day at a time — what was added and what changed price — out of the
-  `catalogo-cambios.json` artifact the daily refresh already computes. The user
-  confirmed price-watching is a real job of the product, and the repo forbids the cheap way to
-  satisfy it — `sdd/02-spec.md` FR-8.4: **"nothing simulates data that does not exist."**
+  in the catalog over the last seven days, one day at a time — what was added and what changed price,
+  each row one tap away from the list — out of the `catalogo-cambios.json` artifact the daily refresh
+  already computes. The user confirmed price-watching is a real job of the product, and the repo
+  forbids the cheap way to satisfy it — `sdd/02-spec.md` FR-8.4: **"nothing simulates data that does
+  not exist."**
 - No multi-store comparison, no per-unit or price-per-unit comparison, no brand filter (the source
   carries no brand field), no **catalog total** in the UI, no native app. Result counts *are*
   shown, and they are real: the search line reports how many of the matches carry a price, and the

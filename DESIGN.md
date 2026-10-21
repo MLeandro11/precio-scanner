@@ -483,6 +483,22 @@ the stepper, one 11px `text-muted` line carries the artifact's real generation m
 clock (never `p. m.`, which then collides with the sentence's own full stop). When that value
 is unreadable the line says so instead of printing it raw, and it is never replaced by a guess.
 
+### Feed row
+
+The dense row of the changes feed, and the only place in the app where a product row carries an
+action. Layout: the link area (name, then `antes → ahora` and the delta pill) takes the flexible
+width with `min-h-11`, and a 44×44 `secondary` icon button (`Plus`) sits at the right as a
+**sibling of the anchor, never inside it** — nested interactive elements are invalid and make the
+tap target unpredictable. The button's accessible name carries the product (`Agregar <nombre> a
+mi lista`): "agregar" alone, repeated 77 times down a scroll, tells a screen reader nothing.
+
+A row whose artifact entry has no usable EAN gets **no button** rather than a disabled one: the
+list is keyed by the EAN, so there is nothing to add, and an affordance that cannot be honored is
+worse than its absence. The confirmation is the app's sonner toast with `Deshacer`, whose undo
+restores the exact previous state — removes an item that was new, restores the previous quantity
+when it was an increment — because an undo that quietly keeps the item is a second change nobody
+reported. A row with no EAN still shows everything it knows: it simply does not link or add.
+
 ### Sheet
 
 The bottom sheet owns the filter surface and any secondary flow: full-width, `max-w-lg`,
