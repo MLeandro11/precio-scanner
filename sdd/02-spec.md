@@ -85,12 +85,17 @@
 - FR-6.4: Home is search-first: a search box deep-links to `/buscar?q=…`, and a "Mi
   lista" summary resolves the persisted EAN list through the worker.
 - FR-6.5: `/cambios` renders the catalog-changes feed from `data/catalogo-cambios.json`, the
-  artifact the daily refresh publishes: the last seven days of catalog movement, newest day first,
-  and inside a day the drops before the rises before the additions. It prints each list's **exact**
-  count and says so when a list was capped rather than passing a partial list off as complete; it
-  links a row to `/producto/<ean>` **only** when the artifact carries a usable EAN (never by name,
-  which repeats in the real catalog); and when the artifact has not been published it says that
-  instead of rendering anything.
+  artifact the daily refresh publishes: the last seven days of catalog movement. It shows **one
+  day at a time**, opening on the newest, with a header that walks the days the artifact carries
+  — one calendar day per press, stopping at both ends instead of wrapping — and inside a day the
+  drops come before the rises before the additions. The day's label says `Hoy` or `Ayer` **only
+  when the reader's own calendar agrees** and otherwise names the date, because the refresh runs
+  a few hours late and the newest day is routinely yesterday; a day inside the range with no
+  entry in the artifact says it has **no data**, which is a different truth from a published day
+  with no movements. It prints each list's **exact** count and says so when a list was capped
+  rather than passing a partial list off as complete; it links a row to `/producto/<ean>` **only**
+  when the artifact carries a usable EAN (never by name, which repeats in the real catalog); and
+  when the artifact has not been published it says that instead of rendering anything.
 
 ### FR-7: Product detail *(added in the rebrand)*
 - FR-7.1: `/producto/:ean` resolves the EAN (or catalog id fallback for barcode-less

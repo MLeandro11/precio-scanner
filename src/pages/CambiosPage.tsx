@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { TrendingDown, TrendingUp } from 'lucide-react'
+import { TrendingDown, TrendingUp, ChevronLeft, ChevronRight } from 'lucide-react'
 import Brand from '../components/Brand'
 import Button from '../components/ui/Button'
 import { formatPrice } from '../components/ProductCard'
@@ -23,12 +23,17 @@ import type {
  * the artifact is fetched only when this screen mounts (H3), so the three boot
  * downloads and the 5.5 MB cache math are untouched.
  *
- * Frozen ordering: by day, newest first, and inside each day `bajaron` →
- * `subieron` → `nuevos`. The window length comes from the artifact's
- * `ventanaDias`, never a hardcoded 7. Identity is the EAN (R5): a row links to
- * `/producto/<ean>` only when `ean` is usable, and nothing is ever grouped or
- * deduplicated by name. Big changes enter as-is, with no mark and no warning
- * (S7: the repo's own R7 investigation found them to be real POS corrections).
+ * Frozen ordering: inside every day `bajaron` → `subieron` → `nuevos`. One day is shown at a
+ * time and a header walks the days the artifact carries, one calendar day per press of the
+ * arrow. Identity is the EAN (R5): a row links to `/producto/<ean>` only when `ean` is usable,
+ * and nothing is ever grouped or deduplicated by name. Big changes enter as-is, with no mark
+ * and no warning (S7: the repo's own R7 investigation found them to be real POS corrections).
+ *
+ * The header's label is its own honesty law: `Hoy` and `Ayer` are printed **only when they are
+ * true** in the reader's own calendar, because the pipeline runs a few hours late and the
+ * newest day is routinely yesterday. A day inside the range that the artifact does not carry
+ * says it has no data — never "no changes", which is a different truth (a published day with
+ * zero movements).
  *
  * Every state is honest (S5): loading, absent (pipeline not published yet),
  * invalid (unreadable artifact), offline with a stored copy, offline with
@@ -38,7 +43,10 @@ import type {
  * Stable hooks (the acceptance harness keys on these):
  *   - container: `data-changes-state` = loading | ready | cached | absent |
  *     invalid | offline | error
- *   - each day: `data-changes-day="YYYY-MM-DD"`
+ *   - the shown day: `data-changes-day="YYYY-MM-DD"`, plus `data-changes-missing="true"`
+ *     when the artifact carries no entry for it
+ *   - the header: `data-changes-label` (the day's own label), `data-changes-nav="prev"`
+ *     and `data-changes-nav="next"` (the arrows)
  *   - each section: `data-changes-section="bajaron|subieron|nuevos"`, plus
  *     `data-changes-count` and `data-changes-truncated`
  *   - each row: `data-changes-row="bajaron|subieron|nuevos"`, plus `data-ean`
@@ -48,15 +56,20 @@ import type {
 interface CambiosPageProps {
   /** Injectable loader (defaults to the real network-first one). */
   loadFn?: () => Promise<ChangesLoadResult>
+  /** Injectable clock (defaults to the real one), so `Hoy` is testable. */
+  now?: () => Date
 }
 
 /** Every user-facing string in one place, so copy cannot drift between states. */
 const COPY = {
   titulo: 'Qué cambió',
-  ventana: (dias: number) =>
-    dias === 1
-      ? 'Cambios en el catálogo del último día.'
-      : `Cambios en el catálogo de los últimos ${dias} días.`,
+  hoy: 'Hoy',
+  ayer: (fecha: string) => `Ayer, ${fecha}`,
+  diaAnterior: 'Día anterior',
+  diaSiguiente: 'Día siguiente',
+  actualizado: (momento: string) => `Última actualización: ${momento}`,
+  /** Shown when the artifact's `generado` cannot be read: the age is unknown, not "now". */
+  actualizadoDesconocido: 'Última actualización: sin fecha legible en el archivo de cambios.',
   loading: 'Cargando cambios…',
   emptyWindow: 'No hay cambios en esta ventana.',
   absent: 'Todavía no hay cambios publicados.',
@@ -71,6 +84,9 @@ const COPY = {
   errorHint: 'Revisá tu conexión y probá de nuevo.',
   reintentar: 'Reintentar',
   sinCambiosDia: 'Sin cambios este día.',
+  sinDatosDia: 'No hay datos de este día.',
+  sinDatosDiaHint:
+    'El catálogo se actualiza solo, todos los días. De este día no quedó registro publicado.',
   bajaron: 'Bajaron de precio',
   subieron: 'Subieron de precio',
   nuevos: 'Se agregaron',
@@ -97,6 +113,61 @@ function formatDay(fecha: string): string {
     month: 'long',
   })
   return label.charAt(0).toUpperCase() + label.slice(1)
+}
+
+/** The day without its weekday: the weekday is noise next to `Ayer`. */
+function formatDayShort(fecha: string): string {
+  const date = new Date(`${fecha}T00:00:00Z`)
+  if (Number.isNaN(date.getTime())) return fecha
+  return date.toLocaleDateString('es-AR', {
+    timeZone: 'UTC',
+    day: 'numeric',
+    month: 'long',
+  })
+}
+
+/**
+ * The reader's own calendar day as `YYYY-MM-DD`, from the LOCAL fields on purpose: "hoy" and
+ * "ayer" are words about the reader's calendar, not about the artifact's UTC bucket. Deriving
+ * them from `toISOString()` would print "Ayer" to someone whose date is still today.
+ */
+function localDay(now: Date): string {
+  const y = now.getFullYear()
+  const m = `${now.getMonth() + 1}`.padStart(2, '0')
+  const d = `${now.getDate()}`.padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+/** One calendar day of arithmetic, immune to DST because the anchor is UTC midnight. */
+function shiftDay(fecha: string, delta: number): string {
+  const ms = Date.parse(`${fecha}T00:00:00Z`)
+  if (Number.isNaN(ms)) return fecha
+  return new Date(ms + delta * 86_400_000).toISOString().slice(0, 10)
+}
+
+/**
+ * The label of the shown day, and the screen's honesty gate: `Hoy` and `Ayer` are printed only
+ * when the reader's own calendar agrees. Anything else is named by its date, so a stale
+ * artifact can never be passed off as today's news.
+ */
+export function dayLabel(fecha: string, now: Date): string {
+  const hoy = localDay(now)
+  if (fecha === hoy) return COPY.hoy
+  if (fecha === shiftDay(hoy, -1)) return COPY.ayer(formatDayShort(fecha))
+  return formatDay(fecha)
+}
+
+  /** The moment the artifact was generated, in the reader's own clock, or `null` if unreadable. */
+function formatMoment(generado: string): string | null {
+  const date = new Date(generado)
+  if (Number.isNaN(date.getTime())) return null
+  return date.toLocaleString('es-AR', {
+    day: 'numeric',
+    month: 'long',
+    hour: '2-digit',
+    hour12: false,
+    minute: '2-digit',
+  })
 }
 
 /** Signed percentage; `useGrouping: false` keeps "1108,33 %" readable, not "1.108,33 %". */
@@ -231,15 +302,32 @@ function SectionBlock({
   )
 }
 
-function DayBlock({ day, showDate }: { day: ChangeDay; showDate: boolean }) {
+/**
+ * The shown day. `day === null` is a gap inside the range the artifact covers: the artifact
+ * carries no entry for that date, so the screen says it has no data rather than showing an
+ * empty day ("no se movió nada" is a different, and unproven, claim).
+ */
+function DayBlock({ fecha, day }: { fecha: string; day: ChangeDay | null }) {
+  if (day === null) {
+    return (
+      <section
+        data-changes-day={fecha}
+        data-changes-missing="true"
+        className="mt-6 rounded-2xl border border-border bg-surface-raised px-5 py-8 text-center"
+      >
+        <p className="text-sm font-semibold text-text-primary">{COPY.sinDatosDia}</p>
+        <p className="mx-auto mt-1 max-w-xs text-sm text-text-secondary">
+          {COPY.sinDatosDiaHint}
+        </p>
+      </section>
+    )
+  }
+
   const empty =
     day.bajaron.conteo === 0 && day.subieron.conteo === 0 && day.nuevos.conteo === 0
 
   return (
     <section data-changes-day={day.fecha} className="mt-6">
-      {showDate ? (
-        <h3 className="text-sm font-semibold text-text-primary">{formatDay(day.fecha)}</h3>
-      ) : null}
       {empty ? (
         <p className="mt-2 text-sm text-text-secondary">{COPY.sinCambiosDia}</p>
       ) : (
@@ -265,6 +353,60 @@ function DayBlock({ day, showDate }: { day: ChangeDay; showDate: boolean }) {
   )
 }
 
+/**
+ * The header: one arrow each side of the shown day's own label. The arrows stop at the ends of
+ * the range the artifact covers instead of wrapping, because every day beyond it would be a
+ * claim this build cannot back with data.
+ */
+function DayNav({
+  label,
+  canPrev,
+  canNext,
+  onPrev,
+  onNext,
+}: {
+  label: string
+  canPrev: boolean
+  canNext: boolean
+  onPrev: () => void
+  onNext: () => void
+}) {
+  const arrow =
+    'flex h-11 w-11 items-center justify-center rounded-full border border-border text-text-primary ' +
+    'transition-colors disabled:opacity-30 disabled:cursor-not-allowed enabled:active:bg-surface'
+  return (
+    <div className="mt-4 flex items-center justify-between gap-2">
+      <button
+        type="button"
+        data-changes-nav="prev"
+        aria-label={COPY.diaAnterior}
+        onClick={onPrev}
+        disabled={!canPrev}
+        className={arrow}
+      >
+        <ChevronLeft size={18} aria-hidden="true" />
+      </button>
+      <p
+        data-changes-label
+        aria-live="polite"
+        className="min-w-0 flex-1 truncate text-center text-sm font-semibold text-text-primary"
+      >
+        {label}
+      </p>
+      <button
+        type="button"
+        data-changes-nav="next"
+        aria-label={COPY.diaSiguiente}
+        onClick={onNext}
+        disabled={!canNext}
+        className={arrow}
+      >
+        <ChevronRight size={18} aria-hidden="true" />
+      </button>
+    </div>
+  )
+}
+
 function LoadingView() {
   return (
     <div role="status" aria-live="polite">
@@ -280,23 +422,31 @@ function LoadingView() {
 }
 
 /**
- * The window summary plus every day, newest first. The day list is sorted here
- * rather than trusting the artifact's order: the UI contract says newest first,
+ * One day at a time, newest first by default, walking the days the artifact carries. The list
+ * is sorted here rather than trusting the artifact's order: the contract says newest first,
  * so the UI is the one that guarantees it.
  */
 function ReadyView({
   artifact,
   source,
+  now,
 }: {
   artifact: ChangesArtifact
   source: 'network' | 'cache'
+  now: () => Date
 }) {
   const dias = [...artifact.dias].sort((a, b) => b.fecha.localeCompare(a.fecha))
-  const showDate = dias.length > 1
+  const masNuevo = dias[0]?.fecha ?? null
+  const masViejo = dias[dias.length - 1]?.fecha ?? null
+  // Seeded from the artifact on mount: a retry remounts this view and lands back on the
+  // newest day instead of keeping a selection the new artifact may not carry.
+  const [elegido, setElegido] = useState<string | null>(masNuevo)
+  const fecha = elegido ?? masNuevo
+  const porFecha = new Map(dias.map((d) => [d.fecha, d]))
+  const momento = formatMoment(artifact.generado)
 
   return (
     <>
-      <p className="mt-1 text-sm text-text-secondary">{COPY.ventana(artifact.ventanaDias)}</p>
       {source === 'cache' ? (
         <p
           role="status"
@@ -306,10 +456,28 @@ function ReadyView({
           {COPY.cached}
         </p>
       ) : null}
-      {dias.length === 0 ? (
+      {fecha === null ? (
         <p className="mt-6 text-sm text-text-secondary">{COPY.emptyWindow}</p>
       ) : (
-        dias.map((day) => <DayBlock key={day.fecha} day={day} showDate={showDate} />)
+        <>
+          <DayNav
+            label={dayLabel(fecha, now())}
+            canPrev={masViejo !== null && fecha > masViejo}
+            canNext={masNuevo !== null && fecha < masNuevo}
+            onPrev={() => setElegido(shiftDay(fecha, -1))}
+            onNext={() => setElegido(shiftDay(fecha, 1))}
+          />
+          {momento === null ? (
+            <p className="mt-1 text-center text-[11px] text-text-muted">
+              {COPY.actualizadoDesconocido}
+            </p>
+          ) : (
+            <p className="mt-1 text-center text-[11px] text-text-muted">
+              {COPY.actualizado(momento)}
+            </p>
+          )}
+          <DayBlock fecha={fecha} day={porFecha.get(fecha) ?? null} />
+        </>
       )}
     </>
   )
@@ -343,7 +511,10 @@ function NoticeView({
   )
 }
 
-export default function CambiosPage({ loadFn = loadCatalogChanges }: CambiosPageProps) {
+export default function CambiosPage({
+  loadFn = loadCatalogChanges,
+  now = () => new Date(),
+}: CambiosPageProps) {
   const [state, setState] = useState<ScreenState>({ phase: 'loading' })
   const [attempt, setAttempt] = useState(0)
 
@@ -387,7 +558,7 @@ export default function CambiosPage({ loadFn = loadCatalogChanges }: CambiosPage
 
       {state.phase === 'loading' ? <LoadingView /> : null}
       {state.phase === 'ready' ? (
-        <ReadyView artifact={state.artifact} source={state.source} />
+        <ReadyView artifact={state.artifact} source={state.source} now={now} />
       ) : null}
       {state.phase === 'absent' ? (
         <NoticeView title={COPY.absent} hint={COPY.absentHint} />

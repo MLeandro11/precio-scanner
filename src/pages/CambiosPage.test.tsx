@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter } from 'react-router-dom'
-import CambiosPage from './CambiosPage'
+import CambiosPage, { dayLabel } from './CambiosPage'
 import type {
   BoundedList,
   ChangeDay,
@@ -86,18 +86,44 @@ async function flush(): Promise<void> {
   }
 }
 
-async function render(loader: () => Promise<ChangesLoadResult>): Promise<void> {
+/**
+ * A local-time instant, never a UTC string: "today" is what the reader's own calendar
+ * says, so a local constructor keeps every label assertion true in any timezone.
+ */
+const CLOCK = () => new Date(2026, 9, 21, 12, 0, 0)
+
+async function render(
+  loader: () => Promise<ChangesLoadResult>,
+  now: () => Date = CLOCK,
+): Promise<void> {
   mounted = true
   await act(async () => {
     root.render(
       createElement(
         MemoryRouter,
         null,
-        createElement(CambiosPage, { loadFn: loader }),
+        createElement(CambiosPage, { loadFn: loader, now }),
       ),
     )
   })
   await flush()
+}
+
+async function click(el: HTMLButtonElement): Promise<void> {
+  await act(async () => {
+    el.click()
+  })
+  await flush()
+}
+
+function nav(direction: 'prev' | 'next'): HTMLButtonElement {
+  const el = container.querySelector(`[data-changes-nav="${direction}"]`)
+  if (!(el instanceof HTMLButtonElement)) throw new Error(`no ${direction} button`)
+  return el
+}
+
+function label(): string {
+  return container.querySelector('[data-changes-label]')?.textContent ?? ''
 }
 
 function text(): string {
@@ -266,7 +292,7 @@ describe('CambiosPage honest states', () => {
 // ---------------------------------------------------------------------------
 
 describe('CambiosPage ordering', () => {
-  it('orders days newest first even when the artifact does not', async () => {
+  it('opens on the newest day even when the artifact does not order them', async () => {
     const older = day('2026-10-14', { bajaron: { conteo: 0, truncado: false, valores: [] } })
     const newer = day('2026-10-15')
     await render(async () => ({
@@ -275,7 +301,7 @@ describe('CambiosPage ordering', () => {
       artifact: artifact({ dias: [older, newer] }),
     }))
 
-    expect(days()).toEqual(['2026-10-15', '2026-10-14'])
+    expect(days()).toEqual(['2026-10-15'])
   })
 
   it('orders the sections inside a day bajaron -> subieron -> nuevos', async () => {
@@ -300,36 +326,169 @@ describe('CambiosPage ordering', () => {
     expect(names[1]).toContain('SEGUNDO')
   })
 
-  it('shows each day date when the window has more than one day', async () => {
-    await render(async () => ({
-      status: 'ready',
-      source: 'network',
-      artifact: artifact({
-        ventanaDias: 7,
-        dias: [day('2026-10-15'), day('2026-10-14')],
-      }),
-    }))
+})
 
-    expect(dayEls()[0].querySelector('h3')?.textContent).toContain('15 de octubre')
-    expect(dayEls()[1].querySelector('h3')?.textContent).toContain('14 de octubre')
+// ---------------------------------------------------------------------------
+// Day selector: one day at a time, honest labels, honest gaps
+// ---------------------------------------------------------------------------
+
+describe('CambiosPage day selector', () => {
+  /** A day whose only row names its own date, so a leak from another day is visible. */
+  const conMarca = (fecha: string): ChangeDay =>
+    day(fecha, {
+      bajaron: moves([
+        { ean: '111111', nombre: `BAJO ${fecha}`, antes: 100, ahora: 90, pct: -10 },
+      ]),
+      subieron: moves([]),
+      nuevos: nuevos([]),
+    })
+
+  const tresDias = (): ChangesArtifact =>
+    artifact({
+      generado: '2026-10-21T12:30:00Z',
+      dias: [conMarca('2026-10-21'), conMarca('2026-10-20'), conMarca('2026-10-19')],
+    })
+
+  const load = (a: ChangesArtifact) => async (): Promise<ChangesLoadResult> => ({
+    status: 'ready',
+    source: 'network',
+    artifact: a,
   })
 
-  it('does not repeat the date on every day when the window is a single day', async () => {
-    await render(async () => READY)
+  it('opens on the newest day and renders no other day at all', async () => {
+    await render(load(tresDias()))
 
-    expect(dayEls()).toHaveLength(1)
-    expect(dayEls()[0].querySelector('h3')).toBeNull()
+    expect(days()).toEqual(['2026-10-21'])
+    expect(text()).toContain('BAJO 2026-10-21')
+    expect(text()).not.toContain('BAJO 2026-10-20')
+    expect(text()).not.toContain('BAJO 2026-10-19')
   })
 
-  it('summarises the window from ventanaDias, never a hardcoded 7', async () => {
-    await render(async () => ({
-      status: 'ready',
-      source: 'network',
-      artifact: artifact({ ventanaDias: 3, dias: [day('2026-10-15')] }),
-    }))
+  it('says "hoy" only when the newest day is really today', async () => {
+    await render(load(tresDias()))
 
-    expect(text()).toContain('últimos 3 días')
-    expect(text()).not.toContain('últimos 7 días')
+    expect(label()).toBe('Hoy')
+  })
+
+  it('says "ayer" when the newest day really is yesterday, and names the date', async () => {
+    // The pipeline runs a few hours late, so the newest day is often yesterday. Calling that
+    // "hoy" would be the same defect the repo killed in the placeholder copy: a screen
+    // asserting something the data does not support.
+    await render(load(artifact({ dias: [conMarca('2026-10-20'), conMarca('2026-10-19')] })))
+
+    expect(label()).toBe('Ayer, 20 de octubre')
+  })
+
+  it('never calls an older day "hoy" or "ayer"', async () => {
+    await render(load(artifact({ dias: [conMarca('2026-10-18')] })))
+
+    expect(label()).toContain('18 de octubre')
+    expect(label()).not.toBe('Hoy')
+    expect(label()).not.toMatch(/ayer/i)
+  })
+
+  it('steps exactly one calendar day per arrow, forward and back', async () => {
+    await render(load(tresDias()))
+
+    await click(nav('prev'))
+    expect(days()).toEqual(['2026-10-20'])
+    expect(label()).toBe('Ayer, 20 de octubre')
+
+    await click(nav('prev'))
+    expect(days()).toEqual(['2026-10-19'])
+    expect(label()).toContain('19 de octubre')
+
+    await click(nav('next'))
+    expect(days()).toEqual(['2026-10-20'])
+  })
+
+  it('stops at both ends of the artifact instead of wrapping or inventing a day', async () => {
+    await render(load(tresDias()))
+
+    // The newest day is the end of the range: there is nothing newer to show.
+    expect(nav('next').disabled).toBe(true)
+    expect(nav('prev').disabled).toBe(false)
+
+    await click(nav('prev'))
+    await click(nav('prev'))
+    expect(days()).toEqual(['2026-10-19'])
+
+    // The oldest day the artifact carries is the other end: stepping past it would mean
+    // claiming something about a day this build has no data for.
+    expect(nav('prev').disabled).toBe(true)
+    expect(nav('next').disabled).toBe(false)
+  })
+
+  it('says a gap day has no data instead of showing it as a day without changes', async () => {
+    // 2026-10-16 is inside the range and missing from the artifact: a day the pipeline did
+    // not publish. That is NOT the same truth as a published day with zero movements.
+    await render(load(artifact({ dias: [conMarca('2026-10-17'), conMarca('2026-10-15')] })))
+
+    await click(nav('prev'))
+    expect(days()).toEqual(['2026-10-16'])
+    expect(rows()).toHaveLength(0)
+    expect(text()).toContain('No hay datos de este día')
+    expect(text()).not.toContain('Sin cambios este día')
+
+    // The range keeps going across the gap: the day before it still has data.
+    await click(nav('prev'))
+    expect(days()).toEqual(['2026-10-15'])
+    expect(text()).toContain('BAJO 2026-10-15')
+  })
+
+  it('shows when the artifact was generated, in the reader’s own clock', async () => {
+    const generado = '2026-10-20T12:32:55Z'
+    // Built from the same instant, so the assertion holds in any timezone.
+    const dia = new Date(generado).toLocaleDateString('es-AR', {
+      day: 'numeric',
+      month: 'long',
+    })
+    await render(load(artifact({ generado, dias: [conMarca('2026-10-20')] })))
+
+    expect(text()).toMatch(/última actualización/i)
+    expect(text()).toContain(dia)
+    expect(text()).toMatch(/\d{1,2}:\d{2}/)
+  })
+
+  it('names an unreadable update moment instead of printing it raw', async () => {
+    await render(load(artifact({ generado: 'no-es-una-fecha' })))
+
+    expect(state()).toBe('ready')
+    // Silence would read as "there is no age to show"; the screen says the age is unreadable,
+    // and never repeats the value it could not understand.
+    expect(text()).toMatch(/última actualización/i)
+    expect(text()).toContain('sin fecha legible')
+    expect(text()).not.toContain('no-es-una-fecha')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The label is its own law: it is what keeps the screen from asserting a false date
+// ---------------------------------------------------------------------------
+
+describe('dayLabel', () => {
+  const ahora = new Date(2026, 9, 21, 12, 0, 0)
+
+  it('calls the reader\'s own calendar day "hoy"', () => {
+    expect(dayLabel('2026-10-21', ahora)).toBe('Hoy')
+  })
+
+  it('calls the day before it "ayer" and still names the date', () => {
+    expect(dayLabel('2026-10-20', ahora)).toBe('Ayer, 20 de octubre')
+  })
+
+  it('names any older day by its own date', () => {
+    expect(dayLabel('2026-10-18', ahora)).toContain('18 de octubre')
+  })
+
+  it('never calls a future day "hoy", even one day ahead', () => {
+    const etiqueta = dayLabel('2026-10-22', ahora)
+    expect(etiqueta).not.toBe('Hoy')
+    expect(etiqueta).toContain('22 de octubre')
+  })
+
+  it('survives a month boundary: the 1st of a month has a "yesterday" in the previous one', () => {
+    expect(dayLabel('2026-09-30', new Date(2026, 9, 1, 0, 30, 0))).toBe('Ayer, 30 de septiembre')
   })
 })
 

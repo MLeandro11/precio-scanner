@@ -1866,7 +1866,19 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
     signal: AbortSignal.timeout(30000),
   }).catch(() => null)
   const cambios = cambiosRes?.ok ? ((await cambiosRes.json()) as ChangesArtifact) : null
-  const diaCambios = cambios?.dias?.[0] ?? null
+  /**
+   * The screen opens on the newest day, so the expectations are indexed by date, not by the
+   * artifact's own order — the row verifies the UI's sorting instead of inheriting it.
+   */
+  const diasCambios = [...(cambios?.dias ?? [])].sort((a, b) => b.fecha.localeCompare(a.fecha))
+  const diaCambios = diasCambios[0] ?? null
+  const correrDia = (fecha: string | null, delta: number): string | null =>
+    fecha === null
+      ? null
+      : new Date(Date.parse(`${fecha}T00:00:00Z`) + delta * 86_400_000).toISOString().slice(0, 10)
+  const diaAnteriorEsperado = correrDia(diaCambios?.fecha ?? null, -1)
+  const diaAnteriorEnArtefacto =
+    diasCambios.find((d) => d.fecha === diaAnteriorEsperado) ?? null
   /** Rows the artifact should render for one list: the exact count, or the cap when cut. */
   const filasDe = (list: { conteo: number; truncado: boolean; valores: unknown[] }): number =>
     list.truncado ? list.valores.length : list.conteo
@@ -1913,6 +1925,14 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
     ? await cambiosStateEl.first().getAttribute('data-changes-state')
     : 'loading'
   const diasRenderizados = await page.locator('[data-changes-day]').count()
+  const diaRenderizado = await page
+    .locator('[data-changes-day]')
+    .first()
+    .getAttribute('data-changes-day')
+    .catch(() => null)
+  const labelRenderizado = (
+    (await page.locator('[data-changes-label]').first().textContent().catch(() => '')) ?? ''
+  ).trim()
   const cambiosTexto = (
     (await page.locator('[data-changes-state]').first().innerText().catch(() => '')) ?? ''
   )
@@ -1923,11 +1943,13 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
     cambiosSettled &&
       !!diaCambios &&
       (cambiosState === 'ready' || cambiosState === 'cached') &&
-      diasRenderizados === cambios?.dias.length &&
-      diasRenderizados > 0,
-    `GET /cambios -> data-changes-state="${cambiosState}", ${diasRenderizados} day section(s); ` +
-      `artifact ${cambios ? `ventanaDias=${cambios.ventanaDias}, ${cambios.dias.length} day(s)` : 'NOT SERVED'}`,
-    `the screen renders what the pipeline published, and its own window: "${cambiosTexto.slice(0, 90)}"`,
+      // One day at a time: the header walks the days, the body shows exactly one.
+      diasRenderizados === 1 &&
+      diaRenderizado === diaCambios.fecha,
+    `GET /cambios -> data-changes-state="${cambiosState}", ${diasRenderizados} day section(s) ` +
+      `(showing ${diaRenderizado}, label "${labelRenderizado}"); ` +
+      `artifact ${cambios ? `ventanaDias=${cambios.ventanaDias}, ${cambios.dias.length} day(s), newest ${diaCambios?.fecha}` : 'NOT SERVED'}`,
+    `the screen opens on the artifact's newest day and renders that day alone: "${cambiosTexto.slice(0, 90)}"`,
   )
 
   /*
@@ -2015,6 +2037,118 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
       `${lecturaFilas.enlacesInvalidos} malformed link(s)`,
     `the artifact has ${sinEanEsperadas} row(s) without a usable EAN; every link must be ` +
       `"/producto/<ean with 6+ digits>" and a link-less row must not declare one`,
+  )
+
+  /*
+   * The header walks the days one calendar day per press and stops at the ends instead of
+   * wrapping. A day inside the range with no artifact entry has to SAY it has no data:
+   * "no hay datos de este día" and "sin cambios este día" are different truths, and a screen
+   * that merges them is asserting the day was quiet when nobody published it.
+   */
+  /** The day the header is showing, plus the state of both ends of the range. */
+  const leerDia = async (): Promise<{
+    fecha: string
+    faltante: boolean
+    filas: number
+    label: string
+    prevDisponible: boolean
+    nextDisponible: boolean
+  }> =>
+    page.evaluate(() => {
+      const day = document.querySelector('[data-changes-day]')
+      const prev = document.querySelector('[data-changes-nav="prev"]')
+      const next = document.querySelector('[data-changes-nav="next"]')
+      return {
+        fecha: day?.getAttribute('data-changes-day') ?? '',
+        faltante: day?.getAttribute('data-changes-missing') === 'true',
+        filas: day?.querySelectorAll('[data-changes-row]').length ?? 0,
+        label: (document.querySelector('[data-changes-label]')?.textContent ?? '').trim(),
+        prevDisponible: prev instanceof HTMLButtonElement && !prev.disabled,
+        nextDisponible: next instanceof HTMLButtonElement && !next.disabled,
+      }
+    })
+  /*
+   * The days the artifact can walk, derived from the file that was actually served: every
+   * calendar day between its newest and its oldest entry. A harness row must never fail
+   * because the data has one day instead of seven — that is the data's shape, not the app's
+   * behavior — so a single-day artifact is asserted as "both ends are the same day".
+   */
+  const masViejoCambios = diasCambios[diasCambios.length - 1]?.fecha ?? null
+  const rutaEsperada: string[] = []
+  if (!!diaCambios && masViejoCambios !== null) {
+    for (
+      let f: string | null = diaCambios.fecha;
+      f !== null && f >= masViejoCambios;
+      f = correrDia(f, -1)
+    ) {
+      rutaEsperada.push(f)
+    }
+  }
+  const filasDeFecha = (fecha: string): number => {
+    const d = diasCambios.find((x) => x.fecha === fecha)
+    if (!d) return -1
+    return filasDe(d.bajaron) + filasDe(d.subieron) + filasDe(d.nuevos)
+  }
+  const punta = await leerDia()
+  const recorrido: Awaited<ReturnType<typeof leerDia>>[] = [punta]
+  for (let paso = 1; paso < rutaEsperada.length; paso += 1) {
+    if (!recorrido[recorrido.length - 1].prevDisponible) break
+    await page.locator('[data-changes-nav="prev"]').click()
+    await page
+      .waitForFunction(
+        (esperado: string | null) =>
+          document.querySelector('[data-changes-day]')?.getAttribute('data-changes-day') === esperado,
+        rutaEsperada[paso],
+        { timeout: 30000 },
+      )
+      .catch(() => null)
+    recorrido.push(await leerDia())
+  }
+  // Back to the newest day, one press each, so the row proves both directions.
+  let vuelta = recorrido[recorrido.length - 1]
+  let pasosDeVuelta = 0
+  while (vuelta.nextDisponible && pasosDeVuelta < rutaEsperada.length + 1) {
+    await page.locator('[data-changes-nav="next"]').click()
+    await page
+      .waitForFunction(
+        (esperado: string | null) =>
+          document.querySelector('[data-changes-day]')?.getAttribute('data-changes-day') === esperado,
+        rutaEsperada[rutaEsperada.length - 2 - pasosDeVuelta] ?? diaCambios?.fecha ?? null,
+        { timeout: 30000 },
+      )
+      .catch(() => null)
+    vuelta = await leerDia()
+    pasosDeVuelta += 1
+  }
+  const pasosCorrectos =
+    recorrido.length === rutaEsperada.length &&
+    recorrido.every((estado, i) => {
+      const esperadaFecha = rutaEsperada[i]
+      if (esperadaFecha === undefined || estado.fecha !== esperadaFecha) return false
+      // The day before the newest one can never be labelled "Hoy": that word is exactly what
+      // a stale artifact must not be allowed to claim.
+      if (i > 0 && estado.label.startsWith('Hoy')) return false
+      const esperadas = filasDeFecha(esperadaFecha)
+      return esperadas === -1
+        ? estado.faltante && estado.filas === 0 // a gap: says it has no data, shows no row
+        : !estado.faltante && estado.filas === esperadas
+    }) &&
+    // The oldest day the artifact carries is the left end: no wrap, no invented day.
+    recorrido[recorrido.length - 1]?.prevDisponible === false &&
+    vuelta.fecha === diaCambios?.fecha &&
+    !vuelta.nextDisponible
+  record(
+    'CAMBIOS-day-nav',
+    !!diaCambios &&
+      pasosCorrectos &&
+      // The newest day is always the right end of the range.
+      !punta.nextDisponible &&
+      (rutaEsperada.length > 1 ? punta.prevDisponible : !punta.prevDisponible),
+    `${rutaEsperada.length} day(s) walked: ${recorrido.map((d) => `${d.fecha}${d.faltante ? '(sin datos)' : `[${d.filas}]`}`).join(' -> ')}; ` +
+      `back -> ${vuelta.fecha}; ends: prev ${punta.prevDisponible ? 'enabled' : 'disabled'}, next ${punta.nextDisponible ? 'ENABLED' : 'disabled'}; ` +
+      `label at the top "${punta.label}"`,
+    `one calendar day per press, no wrapping: the artifact carries ${diasCambios.length} day(s) ` +
+      `(${masViejoCambios}..${diaCambios?.fecha}), newest first, and a day with no entry must say it has no data`,
   )
 
   /*

@@ -469,6 +469,20 @@ sentence — the number is never announced twice.
 **Entry points are limited on purpose.** A sixth slot is not available: five 44px targets is what
 fits. New destinations are reached from a page, not from the nav.
 
+### Day stepper
+
+`/cambios`'s header, and the one place in the app that walks a date range. Two 44×44px arrows
+(`ChevronLeft`/`ChevronRight`, `rounded-full`, 1px edge, `text-primary`) flank the shown day's
+label: 14px semibold `text-primary`, centred, truncating before it ever wraps. One press moves
+exactly one calendar day, and at either end of the range the arrow is `disabled` at 30% opacity
+instead of wrapping — a day outside the range would be a claim with no data behind it.
+
+The label is also the announcement (`aria-live="polite"`), so a screen reader hears the new day
+without a second copy of it in the body, and the body itself carries only the shown day. Under
+the stepper, one 11px `text-muted` line carries the artifact's real generation moment, 24-hour
+clock (never `p. m.`, which then collides with the sentence's own full stop). When that value
+is unreadable the line says so instead of printing it raw, and it is never replaced by a guess.
+
 ### Sheet
 
 The bottom sheet owns the filter surface and any secondary flow: full-width, `max-w-lg`,
