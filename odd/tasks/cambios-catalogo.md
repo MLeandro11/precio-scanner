@@ -520,3 +520,22 @@ harness contra producción.
   asume lista vacía. Cuando corrió, la lista ya tenía 2 ítems que habían dejado las filas de
   `LIST-badge`; una fila que asumiera cero se habría puesto roja sobre código correcto — exactamente
   el defecto que ya había aparecido con el artefacto de un solo día en `CAMBIOS-day-nav`.
+
+- **L25** (usuario, 2026-10-21, verbatim): *"pasalo a variante silenciosa"* — a los pocos minutos de
+  L24, con el costo ya medido y aceptado. **No se reescribe L24**: ese registro queda como lo que era
+  en ese momento (la decisión de aceptar el borde y su costo), y la corrección se agrega acá, igual
+  que L16 corrigió R3 en su momento.
+
+  El botón pasó de `secondary` a **`ghost`** — la variante que el sistema de diseño ya define
+  (*"`label-muted` text, no border"*, DESIGN §Buttons), no una clase inventada. Lo que compra es
+  **silencio visual**: 77 cajas con borde competían con los precios que tienen al lado. Lo que **no**
+  compra es ancho: el target sigue siendo 44×44, el presupuesto de teclado y de pulgar quedan
+  idénticos y la columna del nombre no gana ni pierde un píxel. Los ~50px que el botón le quita al
+  nombre siguen ahí, y siguen anotados como el punto a revisar si alguna vez molesta.
+
+  **Verificación proporcional a un cambio visual** (no hay RED posible: no cambia ni un dato, ni un
+  texto, ni una estructura — solo clases): `typecheck` limpio · focales **41/41** · suite **581/581** ·
+  **acceptance 61/61**, con `CAMBIOS-add` volviendo a clickear el botón y completando el viaje
+  agregar/deshacer en Chromium real · **screenshot 390×844 a 2x** para confirmar que el `+` apagado
+  **no se lee como un control deshabilitado** (la duda real de esta variante, y por eso se miró en
+  píxeles en vez de suponerla).
