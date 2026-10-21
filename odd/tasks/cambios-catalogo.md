@@ -1,7 +1,11 @@
 # Feature: feed de cambios del catálogo en `/cambios` (`cambios-catalogo`)
 
-**Status:** **T1 (rename + copy honesta) hecho y verificado**; T2-T8 pendientes, con dos decisiones
-de producto abiertas (S6, S7) que bloquean el diseño del artefacto. **Started:** 2026-10-15
+**Status:** **T1–T9 hechos, verificados y revisados**; la feature está en producción y el feed se ve
+**un día a la vez**. Las dos decisiones de producto que estaban abiertas (S6, S7) se resolvieron el
+2026-10-15 (L11, L12) y el stepper de días se agregó el 2026-10-21 (S9, L23). El header de este
+documento había quedado congelado en el estado de la mañana del 2026-10-15 mientras el `## Log`
+ya registraba el cierre de T2–T8: corregido el 2026-10-21 junto con la tabla.
+**Started:** 2026-10-15 · **Closed:** 2026-10-21
 **Branch:** `main` (convención del repo: se commitea sobre `main`, no se crea feature branch)
 **Origen:** pedido del usuario en la sesión del 2026-10-09, retomado el 2026-10-15.
 
@@ -35,6 +39,14 @@ de producto abiertas (S6, S7) que bloquean el diseño del artefacto. **Started:*
   punzante porque es exactamente lo que esta feature construye), `README.md:36`,
   `sdd/01-proposal.md:83-84`, `sdd/03-design.md:413` y `sdd/README.md:69-71`. Queda **una** mención
   deliberada: `sdd/04-tasks.md:526`, un registro con fecha del 2026-09-29 que no se reescribe.
+
+- **S9.** El feed se ve **de a un día**: un header con flechas a los costados de la etiqueta del día
+  (`<  día  >`). Pedido textual del usuario, 2026-10-21: *"quiero que tenga un header donde se pueda
+  cambiar por dias, algo asi: <  hoy  >"*. Tres decisiones suyas, tomadas del selector ese mismo día:
+  **(a)** el stepper **reemplaza** el listado apilado ("Un día a la vez"); **(b)** la etiqueta dice
+  `Hoy`/`Ayer` **solo si es cierto**, y si no nombra la fecha ("Adaptativa"); **(c)** las flechas
+  avanzan **un día de calendario** y un día sin entrada en el artefacto se muestra como tal
+  ("Paso calendario, el hueco se muestra honesto").
 
 ## Contrato congelado del artefacto (diseño del orquestador, 2026-10-15)
 
@@ -88,9 +100,14 @@ prefijo `catalogo-` (`catalogo.json`, `catalogo-index.json`, `catalogo-facets.js
    offline), nunca con `?v=` (H3) y nunca sumado a las 3 descargas de arranque: así no se mueve el
    cálculo de la caché de 5,5 MB ni las filas de acceptance que ya existen.
 
-**Orden de las filas en la UI (T5)**: por día, el más nuevo primero, y **dentro de cada día las
-bajadas primero** (`bajaron` → `subieron` → `nuevos`). La cabecera resume la ventana entera; cada
-fila lleva su fecha cuando la ventana tiene más de un día.
+**Orden de las filas en la UI (T5, actualizado por S9 el 2026-10-21)**: se muestra **un día a la vez**
+(`92b0d5d`), abriendo en el más nuevo, y **dentro del día las bajadas primero** (`bajaron` →
+`subieron` → `nuevos`). El header camina los días que el artefacto trae, un día de calendario por
+toque, y **no da la vuelta** en los extremos: fuera de `[más viejo presente, más nuevo presente]` no
+hay nada que este build pueda afirmar. La etiqueta del día es ley propia —`Hoy`/`Ayer` solo si el
+calendario **local del lector** coincide; si no, la fecha— y un día dentro del rango sin entrada dice
+*"No hay datos de este día"*, que es distinto de *"Sin cambios este día"* (día publicado sin
+movimientos). La cabecera ya no resume la ventana: lleva el momento real de generación del artefacto.
 
 ### Refinamientos del contrato tal como quedó implementado (T2/T3, 2026-10-15)
 
@@ -125,16 +142,22 @@ Esto es lo que el cliente (T4/T5) puede dar por cierto **sin adivinar**:
 
 | ID | Spec | Tarea | Ruta | Commit |
 |----|------|-------|------|--------|
-| **T1** | S1 | Rename de superficie a `Cambios` / `Qué cambió` / `/cambios` + matar las 2 promesas falsas de la pantalla | inline | **pendiente** |
-| **T2** | S2,S3,S5 | Pipeline: `refresh-catalog.ts` emite el artefacto de cambios en `public/data/` (módulo puro + tests) | | |
-| **T3** | S4 | `fetch-data.ts`: el 4º archivo en `ARCHIVOS`, **opcional al bajar el baseline** y **requerido en `--check`** (ver H2, es una trampa) | | |
-| **T4** | S2,S4 | Cliente: tipos + loader del artefacto, patrón `facets` (network-first + fallback offline), **nunca** `?v=` (ver H3) | | |
-| **T5** | S2 | UI: la pantalla real en `/cambios`, reemplaza el `PlaceholderPage` | | |
-| **T6** | S1,S2 | Harness: filas de acceptance sobre el artefacto real (la pantalla renderiza, las secciones existen) | | |
-| **T7** | S5,S8 | Docs: `PRODUCT.md`, `README.md`, `DESIGN.md`, `sdd/` + la frase única de S8 | | |
-| **T8** | todas | Verificación independiente (`verify`): la feature toca la entrega (pipeline) y la caché del cliente | | |
+| **T1** | S1 | Rename de superficie a `Cambios` / `Qué cambió` / `/cambios` + matar las 2 promesas falsas de la pantalla | inline | `6509eb8` |
+| **T2** | S2,S3,S5 | Pipeline: `refresh-catalog.ts` emite el artefacto de cambios en `public/data/` (módulo puro + tests) | | `3399ccc` |
+| **T3** | S4 | `fetch-data.ts`: el 4º archivo en `ARCHIVOS`, **opcional al bajar el baseline** y **requerido en `--check`** (ver H2, es una trampa) | | `3399ccc` · gate `2b3025b` |
+| **T4** | S2,S4 | Cliente: tipos + loader del artefacto, patrón `facets` (network-first + fallback offline), **nunca** `?v=` (ver H3) | | `6509eb8` · ley `85dead8` |
+| **T5** | S2 | UI: la pantalla real en `/cambios`, reemplaza el `PlaceholderPage` | | `6509eb8` · `f0226e9` |
+| **T6** | S1,S2 | Harness: filas de acceptance sobre el artefacto real (la pantalla renderiza, las secciones existen) | | `1dbb029` |
+| **T7** | S5,S8 | Docs: `PRODUCT.md`, `README.md`, `DESIGN.md`, `sdd/` + la frase única de S8 | | `a637bda` · `d562dbb` · `fcc1b59` |
+| **T8** | todas | Verificación independiente (`verify`): la feature toca la entrega (pipeline) y la caché del cliente | verify | sin commit propio: evidencia en L19 |
+| **T9** | **S9** | Header de días en `/cambios`: un día a la vez, etiqueta honesta, huecos nombrados, fila nueva `CAMBIOS-day-nav` | inline | `92b0d5d` |
 
-**T1 está hecho y verificado** (RED 53/55 → GREEN 55/55, 493 tests, typecheck limpio; ver Log).
+**Cerrada el 2026-10-21.** Review nativo RDD `approved` con autoridad quemada (lineage
+`review-1aee2dbb637b7e06`, tier high, 3 lentes) — el detalle y su límite real están en L19 y en la
+observación de Engram `odd/cambios-catalogo/tasks`: el candidato revisado fue el **sufijo**
+`873b645..HEAD`, porque un cambio de 3.500 líneas excede el presupuesto de contexto de la propia
+herramienta; la cobertura del núcleo la dieron la verificación independiente y la corrida del
+harness contra producción.
 
 ## Hallazgos que fijan el diseño (verificados, no supuestos)
 
@@ -410,3 +433,46 @@ Esto es lo que el cliente (T4/T5) puede dar por cierto **sin adivinar**:
   visibles: orden congelado, conteo exacto y aviso de truncado, enlace solo con EAN usable, y estado
   ausente que dice la verdad. Con eso **se deja de diferir la decisión editorial**: el feed ya tiene
   número de requisito, y salió de la sección de rutas (FR-6) en vez de inventar una sección nueva.
+
+- **L23** (usuario, 2026-10-21, verbatim, abre **S9**): *"despues. quiero modificar las pantalla de
+  cambios. quiero que tenga un header donde se pueda cambiar por dias, algo asi: < hoy > me
+  entiendes?"* — el "despues" es la respuesta a la corrección del header de este documento, que
+  quedó **pendiente a propósito** hasta este tramo. Después, del selector: *"Un día a la vez
+  (reemplaza el listado)"* · *"Adaptativa: hoy/ayer solo si es cierto"* · *"Paso calendario, el
+  hueco se muestra honesto"*. Y *"sisi"* al final autoriza commitear y cerrar el ledger.
+
+  **Antes de diseñar se midió el artefacto que sirve producción**, y ese dato cambió el diseño:
+  `generado: 2026-10-20T12:32:55Z`, 6 días (10-15..10-20), y **a la 01:04 del 21**. O sea: un header
+  que diga "hoy" sobre el día más nuevo **estaba mintiendo en ese mismo momento**. El cron corre
+  12:30–16:30 UTC, así que la etiqueta tiene que sobrevivir a las dos situaciones, y por eso `Hoy`
+  y `Ayer` se imprimen solo cuando el calendario **local del lector** coincide (la `fecha` del
+  artefacto es el día UTC de `utcDay(generatedAt)`; "hoy" es una palabra sobre quien mira, no sobre
+  el bucket del archivo).
+
+  **Tres correcciones al diseño del orquestador, todas decididas por evidencia**:
+  (a) **wording del hueco**: el preview decía *"No hubo actualización este día"* y se implementó
+  *"No hay datos de este día"* — la ausencia puede ser que no corrió, que la corrida falló antes de
+  publicar, o que la ventana arrancó después, así que afirmar "no hubo actualización" es una claim
+  sobre el pipeline que el archivo no sostiene (misma ley que L10/L12);
+  (b) **rango** = `[día más viejo presente, más nuevo presente]`, no `nuevo − ventanaDias + 1`:
+  fuera de lo presente no sabemos nada, y un reset de ventana borra días que sí se corrieron;
+  (c) **línea de última actualización** en lugar de la línea de ventana: con un día a la vez la
+  pregunta que queda es "¿de cuándo es esto?", y un `generado` ilegible lo **dice** en vez de callarse
+  (el silencio se lee como "no hay edad que mostrar").
+
+  **Evidencia**: **RED observado** (14 failed | 21 passed; los 21 son estados, secciones y filas, que
+  siguen verdes sin cambios) → focales **35/35** · suite **575 tests / 37 archivos** (eran 564) ·
+  `typecheck` limpio · **acceptance 60/60** con la fila nueva `CAMBIOS-day-nav` caminando los 6 días
+  reales en ambas direcciones (`2026-10-20[77] → 19[42] → 18[85] → 17[152] → 16[2] → 15[97]`, vuelta
+  al 20, extremos deshabilitados) · pantalla verificada por screenshot a 390×844.
+
+  **Dos defectos que encontró la verificación, no el diseño**: `toLocaleString('es-AR')` con
+  `hour`/`minute` usa 12 h, así que la línea salía `12:28 p. m..` con doble punto (arreglado con
+  `hour12: false`); y la primera versión de la fila del harness **exigía más de un día** y se ponía
+  roja contra el artefacto local de un solo día **mientras la app hacía lo correcto** — una fila no
+  puede fallar por la forma del dato que sirve, así que ahora deriva la ruta del archivo servido y el
+  caso de un día se asserta como "los dos extremos son el mismo día".
+
+  **Un falso positivo, medido y descartado**: el screenshot a 2x hacía ver los chevrons invisibles;
+  `getComputedStyle` dio `rgb(15, 23, 42)`, opacity 1, svg 18×18, botón 44×44, y a 3x se ven nítidos.
+  Era el reescalado de la imagen. **No se arregla un problema que no se midió.**
