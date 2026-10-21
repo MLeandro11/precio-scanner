@@ -487,9 +487,11 @@ is unreadable the line says so instead of printing it raw, and it is never repla
 
 The dense row of the changes feed, and the only place in the app where a product row carries an
 action. Layout: the link area (name, then `antes → ahora` and the delta pill) takes the flexible
-width with `min-h-11`, and a 44×44 `secondary` icon button (`Plus`) sits at the right as a
+width with `min-h-11`, and a 44×44 **ghost** icon button (`Plus`) sits at the right as a
 **sibling of the anchor, never inside it** — nested interactive elements are invalid and make the
-tap target unpredictable. The button's accessible name carries the product (`Agregar <nombre> a
+tap target unpredictable. Ghost, not `secondary`: seventy-seven bordered boxes down one scroll
+compete with the data they sit beside, and the quiet variant costs nothing at the tap, because the
+target stays 44×44 either way. The button's accessible name carries the product (`Agregar <nombre> a
 mi lista`): "agregar" alone, repeated 77 times down a scroll, tells a screen reader nothing.
 
 A row whose artifact entry has no usable EAN gets **no button** rather than a disabled one: the

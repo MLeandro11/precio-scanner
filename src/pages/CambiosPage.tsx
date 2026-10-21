@@ -205,7 +205,10 @@ function countLine(
 function AddToListButton({ nombre, onAdd }: { nombre: string; onAdd: () => void }) {
   return (
     <Button
-      variant="secondary"
+      // Ghost (DESIGN §Buttons: "quiet action — label-muted text, no border"): 77 bordered
+      // boxes down a scroll would compete with the data they sit next to, and the 44x44
+      // target is unchanged, so nothing about the tap costs less.
+      variant="ghost"
       size="icon"
       data-changes-add="true"
       aria-label={COPY.agregar(nombre)}
