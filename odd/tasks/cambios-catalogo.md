@@ -575,3 +575,27 @@ harness contra producción.
   tapado: es un problema de la suite (probablemente contención de CPU con `execFileSync` spawneando
   node adentro de 37 workers), no de este commit, y no se arregla sin decidir antes cómo se corre la
   suite.
+
+- **L27** (usuario, 2026-10-23, verbatim, cierra **R9**): *"quiero que el cron corra despues de la
+  16hs si es posible"* — la mitigación de R9 (el cron atrasa horas) que L2 había diferido.
+
+  **Medición antes de decidir** (17 corridas programadas, 2026-10-07 → 2026-10-23, `gh run list`):
+  con el cron anterior `0 7 * * *` las corridas aterrizaron **11:22–16:29 UTC**, o sea **4 h 22 m – 9 h
+  29 m** de atraso sobre el horario pedido (mediana ~6 h). El atraso no es de minutos: se elige por el
+  **aterrizaje**, no por el pedido.
+
+  **Decisión del usuario** (selector, opción "Dato listo 16–19 ART"). **Corrección de un error mío en
+  la opción**: decía que `0 13` aterrizaría 11:25–16:30 ART, y eso estaba mal calculado (desplacé la
+  hora local en vez de la UTC). El valor real de `0 13` es **14:22–19:29 ART**, con la mitad de los
+  días **antes** de las 16. Se implementó **`0 14 * * *`** (11:00 ART): aterrizaje medido
+  **15:22–20:29 ART**, mediana **~17:17**, y **2 de esas 17** corridas caerían antes de las 16.
+
+  **Segundo borde, no pedido pero decidido por la misma evidencia**: `fecha` del artefacto de cambios
+  es el día **UTC** (`scripts/catalog-changes.ts`), así que una corrida entre 00:00 y 03:00 UTC
+  etiquetaría el día nuevo con la fecha de **mañana** para un lector en Argentina
+  (`dayLabel`, `CambiosPage.tsx`). `0 14` mantiene el aterrizaje holgado dentro del mismo día UTC.
+
+  **Verificación**: `git diff` = solo comentarios + un escalar `cron`. El parseo del YAML lo hace
+  GitHub al pushear (acá no hay parser local: ni `pyyaml`, ni `js-yaml`/`yaml` en `node_modules`, ni
+  `ruby`); el cron registrado se lee con `gh workflow view actualizar-catalogo.yml`, y el aterrizaje
+  real lo confirma la primera corrida programada.

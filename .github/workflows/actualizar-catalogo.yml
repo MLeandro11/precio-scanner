@@ -9,12 +9,29 @@
 # Referencia de decisiones: `odd/tasks/catalog-refresh.md` (T6; D2/D7; riesgo R3).
 #
 # --- Por qué el cron es así -------------------------------------------------
-# `0 7 * * *` son las 07:00 UTC, o sea las 04:00 en Argentina (UTC-3, sin
-# horario de verano). Cae antes de abrir el kiosco: los precios del día ya están
-# publicados a la mañana.
-# El scheduler de GitHub es best-effort: las corridas programadas se demoran
-# bajo carga y se desactivan tras 60 días sin actividad en el repo. No lo trates
-# como un reloj exacto ni te sorprenda una corrida tardía.
+# `0 14 * * *` son las 14:00 UTC, o sea las 11:00 en Argentina (UTC-3, sin
+# horario de verano). Se pide a las 11:00 para que el dato quede **servido a la
+# tarde**: el pedido no es la hora de llegada, es el piso de un atraso conocido.
+#
+# **El scheduler de GitHub es best-effort y acá atrasa horas, no minutos.**
+# Medido sobre las 17 corridas programadas del 2026-10-07 al 2026-10-23: con el
+# cron anterior (`0 7 * * *`) las corridas aterrizaron entre **11:22 y 16:29
+# UTC**, o sea entre **4 h 22 m y 9 h 29 m** después del horario pedido (mediana
+# ~6 h). Por eso el cron se elige por el aterrizaje y no por el pedido: con
+# `0 14` el aterrizaje medido es **15:22–20:29 ART** (mediana ~17:17), y solo 2
+# de esas 17 corridas habrían caído antes de las 16:00 ART.
+#
+# Los dos bordes que este horario evita a propósito:
+# - **No antes de las 16 ART** (decisión del usuario, 2026-10-23; ver
+#   `odd/tasks/cambios-catalogo.md`, L27): el dato de la tarde es el que se usa.
+# - **No cruzar la medianoche UTC**: `fecha` del artefacto de cambios es el día
+#   UTC (`scripts/catalog-changes.ts`), así que una corrida entre 00:00 y 03:00
+#   UTC etiquetaría el día nuevo con la fecha de **mañana** para un lector en
+#   Argentina hasta la medianoche local. Con `0 14` el aterrizaje queda holgado
+#   dentro del mismo día UTC.
+#
+# Se desactiva tras 60 días sin actividad en el repo. No lo trates como un reloj
+# exacto ni te sorprenda una corrida tardía.
 #
 # --- Higiene (el repositorio es PÚBLICO) ------------------------------------
 # `raw-catalog.json` trae `costo`, `margen`, `proveedorId` y `stockMinimo` del
@@ -52,9 +69,10 @@ name: Actualizar catálogo
 
 on:
   schedule:
-    # 07:00 UTC = 04:00 en Argentina. Ver arriba: GitHub puede demorar la
-    # corrida programada.
-    - cron: '0 7 * * *'
+    # 14:00 UTC = 11:00 en Argentina. Se pide a las 11:00 porque GitHub atrasa
+    # la corrida programada 4-9 h (medido): el aterrizaje real cae 15:22-20:29
+    # ART. Ver el comentario de arriba antes de cambiarlo.
+    - cron: '0 14 * * *'
   # Corrida manual. Es la que se mira la primera vez: si el login funciona
   # desde la IP del runner es el riesgo abierto R1.
   workflow_dispatch:
