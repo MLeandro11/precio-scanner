@@ -15,12 +15,15 @@ export default function Sheet({
   onClose,
   title,
   description,
+  closeLabel = 'Cerrar filtros',
   children,
 }: {
   open: boolean
   onClose?: () => void
   title?: string
   description?: string
+  /** Etiqueta del botón de cerrar: el panel puede no ser el de filtros. */
+  closeLabel?: string
   children: ReactNode
 }) {
   const titleId = useId()
@@ -131,7 +134,7 @@ export default function Sheet({
           <button
             type="button"
             onClick={() => onCloseRef.current?.()}
-            aria-label="Cerrar filtros"
+            aria-label={closeLabel}
             className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-text-secondary transition hover:bg-surface"
           >
             <X size={20} aria-hidden="true" />

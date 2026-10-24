@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import Brand from '../components/Brand'
 import LupaLockup from '../components/LupaLockup'
+import ScannedSheet from '../components/ScannedSheet'
 import Button from '../components/ui/Button'
 import Input from '../components/ui/Input'
 import { useCatalog } from '../App'
@@ -22,6 +23,9 @@ import { useBarcodeScanner, vibrate } from '../hooks/useBarcodeScanner'
 import ProductImage from '../components/ProductImage'
 import { toLookupDigits } from '../lib/lupa/scan'
 import { normalizeEan } from '../lib/lupa/list'
+import { addScanned, removeScanned, restoreScanned } from '../lib/lupa/scanned'
+import type { ScannedItem } from '../lib/lupa/scanned'
+import { toast } from 'sonner'
 import type { Producto } from '../lib/types'
 
 interface Detection {
@@ -46,6 +50,13 @@ interface Detection {
  * La raíz expone `data-scan-state` (el status del escáner) y, cuando hay una
  * detección, `data-scan-detected="1"`, para que la aceptación espere de forma
  * determinista en lugar de adivinar con sleeps.
+ *
+ * **Lo escaneado se acumula en la sesión.** Cada código que el catálogo resuelve
+ * entra al acumulado (`lib/lupa/scanned.ts`) y se abre en el bottom sheet desde
+ * el contador de la barra superior. El dock sigue mostrando **la última lectura**,
+ * no el historial: la cámara no se detiene y el dock tiene que caber en lo que
+ * queda libre abajo. El acumulado **no se persiste**: vive lo que vive la
+ * pantalla, y la copia del panel lo dice.
  */
 export default function ScanPage() {
   const navigate = useNavigate()
@@ -55,6 +66,8 @@ export default function ScanPage() {
   const [manualOpen, setManualOpen] = useState(false)
   const [detected, setDetected] = useState<Detection | null>(null)
   const [justAdded, setJustAdded] = useState<string | null>(null)
+  const [scanned, setScanned] = useState<ScannedItem[]>([])
+  const [scannedOpen, setScannedOpen] = useState(false)
 
   const onDetect = (code: string) => {
     setDetected({ code, loading: true })
@@ -80,6 +93,17 @@ export default function ScanPage() {
       const product = r.results.find(
         (p) => normalizeEan(p.barcode).replace(/\D/g, '') === digits,
       )
+      // Solo lo que el catálogo resuelve entra al acumulado: un código
+      // desconocido ya avisa en el dock y no tiene fila que mostrar.
+      if (product) {
+        setScanned((prev) =>
+          addScanned(prev, {
+            ean: normalizeEan(product.barcode || digits),
+            nombre: product.nombre,
+            precio: product.precio,
+          }),
+        )
+      }
       setDetected((d) => (d ? { ...d, product, loading: false } : d))
     })
     return () => {
@@ -101,6 +125,29 @@ export default function ScanPage() {
     const q = manual.trim()
     if (!q) return
     navigate(`/buscar?q=${encodeURIComponent(q)}`)
+  }
+
+  /** Agregar desde el panel: la misma lista del dock y del detalle. */
+  function addScannedItem(item: ScannedItem) {
+    add(item.ean, item.nombre)
+    vibrate(25)
+  }
+
+  /**
+   * Quitar del acumulado nunca bloquea: se quita y el toast ofrece `Deshacer`,
+   * que repone **la misma fila en la misma posición** (`restoreScanned`).
+   */
+  function removeScannedItem(item: ScannedItem) {
+    const { items, removed } = removeScanned(scanned, item.ean)
+    if (!removed) return
+    setScanned(items)
+    toast(`Quitamos ${removed.item.nombre}`, {
+      description: 'Escaneados',
+      action: {
+        label: 'Deshacer',
+        onClick: () => setScanned((prev) => restoreScanned(prev, removed.item, removed.index)),
+      },
+    })
   }
 
   const detectedKey = detected?.product ? detected.product.barcode || detected.product.id : null
@@ -229,6 +276,18 @@ export default function ScanPage() {
               <LupaLockup variant="lite" height={22} gap={7} className="text-white drop-shadow" />
             </div>
             <div className="flex items-center gap-2">
+              {scanned.length > 0 ? (
+                <button
+                  type="button"
+                  data-scan-scanned-count={scanned.length}
+                  onClick={() => setScannedOpen(true)}
+                  aria-label={`Ver los productos escaneados (${scanned.length})`}
+                  className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-full bg-black/40 px-3 text-sm font-semibold text-white backdrop-blur-sm"
+                >
+                  <ScanBarcode size={18} aria-hidden="true" />
+                  <span className="tnum">{scanned.length}</span>
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => navigate('/lista')}
@@ -386,6 +445,18 @@ export default function ScanPage() {
           </div>
         </>
       )}
+
+      {/* El panel vive fuera de las dos ramas: si la cámara se cae con el panel
+          abierto, lo escaneado se sigue pudiendo leer y agregar. */}
+      <ScannedSheet
+        open={scannedOpen}
+        items={scanned}
+        onClose={() => setScannedOpen(false)}
+        onAdd={addScannedItem}
+        onRemove={removeScannedItem}
+        onOpenProduct={(ean) => navigate(`/producto/${encodeURIComponent(ean)}`)}
+        cantidadEnLista={(ean) => items.find((i) => i.ean === ean)?.cantidad ?? 0}
+      />
     </main>
   )
 }

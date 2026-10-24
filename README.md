@@ -33,6 +33,7 @@ Navegación inferior: **Inicio · Cambios · [Escanear] · Lista · Perfil** (ba
 | Detalle de producto + agregar a lista | ✅ |
 | Vista "códigos de barras" en la lista | ✅ |
 | Escaneo con cámara (ZXing, cualquier dispositivo) | ✅ |
+| Lo escaneado en la sesión (panel con contador, sin persistir) | ✅ |
 | Dark mode (sigue al sistema + toggle manual en Perfil) | ✅ |
 | Cambios del catálogo (feed de los últimos 7 días) | ✅ (artefacto `catalogo-cambios.json` del refresh diario) |
 | Comparación entre almacenes / alertas | ⏳ **modelado**, sin datos (1 tienda) |

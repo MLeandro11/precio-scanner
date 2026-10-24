@@ -510,7 +510,8 @@ reported. A row with no EAN still shows everything it knows: it simply does not 
 
 ### Sheet
 
-The bottom sheet owns the filter surface and any secondary flow: full-width, `max-w-lg`,
+The bottom sheet owns the filter surface and any secondary flow — today the search filters and
+the scanner's session list (`ScannedSheet`) —: full-width, `max-w-lg`,
 `rounded-t-2xl`, 1px top border, `shelf` background, Floating shadow, `safe-bottom` padding.
 It animates in (fade 200ms + rise 240ms, `ease-out`) and is a real dialog: `role="dialog"`,
 `aria-modal`, `aria-labelledby`/`aria-describedby`, focus moved into the panel and trapped there
@@ -565,8 +566,27 @@ values so the overlay tracks the feed, not the theme:
   the dark shell so a slow scan-chunk fetch never flashes the page white before the camera
   view appears.
 
-Everything ELSE on the scan page — the no-camera compact layout, the detection card, the dock
-— is ordinary UI on ordinary surfaces and uses tokens like everywhere else. A raw value outside
+**The dock shows the last read, the panel holds the session.** The dock is not a history: it
+carries one detection (the newest) so the camera keeps running and the dock keeps fitting above the
+nav. Everything the catalog resolved accumulates in the session list, opened from the top bar
+counter (`data-scan-scanned-count`, absent while the list is empty — an affordance that cannot be
+honored is worse than its absence). That list is **session-scoped on purpose**: it is not persisted,
+it empties on reload, and the panel says so in its own description. Repeat scans count (`×N`) on one
+row instead of adding a second one, and removing a row is reversible through the toast's `Deshacer`,
+which restores the same row in the same position. The row reuses the `/lista` row geometry — removal as
+a 44px leading control, product in the middle, price and quantity on the right — because that is the
+surface the user already learned for "how many of this do I have": the quantity sits in a fixed
+24px `tabular-nums` slot inside a bordered pill, so 1, 2 or 3 digits never move the `+` (a
+variable-width counter was measured at 48px → 57px and misaligned the whole row). **The add control is
+an action, not a done badge**:
+it keeps the `+` and, once the product is in the list, carries the current quantity (`+3`), because a
+frozen checkmark reads as "already added, nothing more to do" and a tap on it gives no feedback.
+Repeat scans (`×N` on the code line) and list quantity (`+N` on the button) are different numbers and
+say so: one is what you scanned, the other is what you are buying.
+
+Everything ELSE on the scan page — the no-camera compact layout, the detection card, the dock,
+and the scanned panel, which sits on `shelf` — is ordinary UI on ordinary surfaces and uses tokens
+like everywhere else. A raw value outside
 the barcode and the camera surface listed above is a defect, not a choice.
 
 ### Barcode (deliberate exception)

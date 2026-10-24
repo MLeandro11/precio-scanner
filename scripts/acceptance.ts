@@ -873,6 +873,28 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
   )
 
   /*
+   * SCAN-scanned — el acumulado de la sesión no puede aparecer como afordancia
+   * antes de tener algo adentro. La cámara falsa entrega cuadros sin código de
+   * barras, así que en este arnés nunca se decodifica nada: lo único honesto que
+   * esta fila puede fijar es la ausencia (ni contador, ni filas, ni panel), que
+   * es justo la ley "una afordancia que no se puede honrar es peor que su
+   * ausencia". La acumulación en sí —dedupe, contador de repeticiones, agregar,
+   * quitar con Deshacer— la fijan los tests de jsdom (`ScanPage.test.tsx`,
+   * `ScannedSheet.test.tsx`), porque solo un decodificado real crea una fila.
+   */
+  const scannedInfo = await page.evaluate(() => ({
+    counter: !!document.querySelector('[data-scan-scanned-count]'),
+    rows: document.querySelectorAll('[data-scanned-row]').length,
+    dialog: !!document.querySelector('[role="dialog"]'),
+  }))
+  record(
+    'SCAN-scanned',
+    !scannedInfo.counter && scannedInfo.rows === 0 && !scannedInfo.dialog,
+    `nada escaneado -> contador ${scannedInfo.counter ? 'VISIBLE' : 'ausente'}, filas ${scannedInfo.rows}, panel ${scannedInfo.dialog ? 'ABIERTO' : 'cerrado'}`,
+    'la cámara falsa no decodifica códigos por diseño: la acumulación se fija en jsdom',
+  )
+
+  /*
    * SCAN-zxing-noise — the scanner must not flood the console with the upstream
    * @zxing/library 0.23.0 miss warning. The fake camera delivers frames with no
    * barcode, so every decode attempt is an ordinary miss; before the client-side
