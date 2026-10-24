@@ -70,7 +70,8 @@ describe('serieDe', () => {
     expect(serie.puntos).toEqual([{ fecha: '2026-10-21', precio: 1500 }])
   })
 
-  it('names the gaps instead of drawing continuity over them', () => {
+  it('names the days the artifact has no bucket for, which is when there is no data', () => {
+    // 16, 17 y 18 no están en el artefacto: no hubo corrida (o el producto no existía).
     const serie = serieDe(
       EAN,
       [dia('2026-10-15', [[EAN, 100]]), dia('2026-10-19', [[EAN, 200]])],
@@ -78,7 +79,26 @@ describe('serieDe', () => {
       '2026-10-21',
     )
 
-    expect(serie.huecos).toEqual([{ desde: '2026-10-15', hasta: '2026-10-19' }])
+    expect(serie.huecos).toEqual([{ desde: '2026-10-16', hasta: '2026-10-18' }])
+  })
+
+  it('does not call a gap a day that ran with no change for this product', () => {
+    // El log solo publica filas de lo que cambió: un día con bucket vacío es "corrió y
+    // el precio se mantuvo". Si eso contara como hueco, la línea nunca se dibujaría.
+    const serie = serieDe(
+      EAN,
+      [
+        dia('2026-10-15', [[EAN, 100]]),
+        dia('2026-10-16', []),
+        dia('2026-10-17', []),
+        dia('2026-10-18', [[EAN, 200]]),
+      ],
+      null,
+      '2026-10-21',
+    )
+
+    expect(serie.huecos).toEqual([])
+    expect(serie.puntos).toHaveLength(2)
   })
 
   it('reports no gap between consecutive days', () => {

@@ -2290,6 +2290,69 @@ async function runChecks(baseUrl: string, server?: GhPagesServer): Promise<void>
   await cambiosAusenteBrowser.close()
 
   /*
+   * HIST-screen — el historial de precio de un producto.
+   *
+   * La invariante que esta fila prueba es la que ninguna otra puede: la pantalla
+   * **nombra** su estado y **nunca dibuja un gráfico sin datos**. No exige `ready`,
+   * porque el log acumulativo se publica recién en la próxima corrida del refresh:
+   * antes de eso el estado honesto es `absent`, y ahí la fila verifica lo contrario
+   * (que no haya ni un punto inventado).
+   */
+  await page.goto(`${baseUrl}historial/7790895003943`, { waitUntil: 'domcontentloaded' })
+  const hist = await waitForVisible(page.locator('[data-history-state]'))
+    .then(async () => {
+      await page.waitForFunction(
+        () => {
+          const state = document
+            .querySelector('[data-history-state]')
+            ?.getAttribute('data-history-state')
+          return state !== 'loading'
+        },
+        undefined,
+        { timeout: 30000 },
+      )
+      return page.evaluate(() => {
+        const root = document.querySelector('[data-history-state]')
+        const state = root?.getAttribute('data-history-state') ?? ''
+        const puntos = Number(
+          document.querySelector('[data-history-points]')?.getAttribute('data-history-points') ?? '0',
+        )
+        const movimientos = document.querySelectorAll('[data-history-move]').length
+        const texto = (document.body.textContent ?? '').replace(/\s+/g, ' ')
+        return {
+          state,
+          puntos,
+          movimientos,
+          ausente: texto.includes('Todavía no hay historial publicado'),
+          ilegible: texto.includes('no se pudo leer'),
+          texto,
+        }
+      })
+    })
+    .catch(() => null)
+
+  const histConocido = !!hist && ['ready', 'cached', 'absent', 'invalid', 'offline', 'error'].includes(hist.state)
+  const histCoherente = !!hist
+    ? hist.state === 'ready' || hist.state === 'cached'
+      ? hist.puntos > 0
+      : hist.state === 'absent'
+        ? hist.ausente && hist.puntos === 0 && hist.movimientos === 0
+        : hist.puntos === 0
+    : false
+  record(
+    'HIST-screen',
+    histConocido && histCoherente,
+    hist
+      ? `GET /historial/:ean -> data-history-state="${hist.state}"; ${hist.puntos} punto(s), ${hist.movimientos} movimiento(s)`
+      : 'la pantalla del historial no expuso data-history-state',
+    hist
+      ? hist.state === 'absent'
+        ? `sin artefacto todavía, y la pantalla lo dice en vez de dibujar: "${hist.texto.slice(0, 80)}"`
+        : 'un gráfico sin datos o un estado inventado es el defecto que esta fila existe para atrapar'
+      : '',
+  )
+
+  /*
    * Offline boot (FR-11.2 / AC-9, WU9.4).
    *
    * The server is stopped for real rather than emulated with `context.setOffline`. If

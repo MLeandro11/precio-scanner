@@ -81,10 +81,12 @@ saved list, individually or all at once, one code per line; PWA install; offline
 **Not built, and not to be faked:**
 
 - **Price alerts have no data; price history does.** `AlmacenPrecio` is a type only and nothing
-  delivers an alert. The price history is real data: every catalog refresh commits a full daily
-  snapshot of the (single) store to the `datos` branch, so the series exists. What does not exist is
-  a per-EAN curve served to the app, multi-store prices, or any chart — so `/historial/:ean` stays an
-  honest placeholder (`HistorialPrecio` remains a type only). `/cambios` is real: it shows what moved
+  delivers an alert. Price history is real: every catalog refresh commits a full daily snapshot of
+  the (single) store to the `datos` branch, and the refresh also appends a cumulative
+  `historial.json` — one row per EAN per day, only for the days a price moved. `/historial/:ean`
+  reconstructs the series from that log (it never downloads the 3.3 MB snapshots) and draws it:
+  price, variation, the days it changed, and the gaps it cannot account for, named rather than
+  filled. What still does not exist is multi-store prices. `/cambios` is real: it shows what moved
   in the catalog over the last seven days, one day at a time — what was added and what changed price,
   each row one tap away from the list — out of the `catalogo-cambios.json` artifact the daily refresh
   already computes. The user confirmed price-watching is a real job of the product, and the repo

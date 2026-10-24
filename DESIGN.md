@@ -520,6 +520,20 @@ to the control that opened it on close, Escape and backdrop close, body scroll l
 uses the `--scrim` token (`bg-scrim/40`) — a scrim darkens, in both themes. Maximum height `70dvh`
 with an internal scroll.
 
+### Price chart (the history screen)
+
+Hand-drawn SVG, no charting dependency: the series is a polyline of the points the log has, and
+nothing is smoothed, sampled or animated. Three laws make it honest rather than pretty:
+
+- **A gap breaks the line.** A day the artifact has no bucket for is "no data" (the run did not
+  happen, or the product did not exist yet) and the segment stops there, with the range named in
+  text. A day the artifact HAS with no row for this product means "the run happened and the price
+  held", and the line crosses it. Merging the two is what turns a chart into wallpaper.
+- **A single point is a level mark, not a line.** One dot with a short tick, so the eye reads
+  "this price on this day" instead of a stray blob.
+- **Direction is stated once**: an arrow plus the magnitude (`↓ 3,33 %`), never an arrow beside a
+  signed number (`↓ +3,33 %` contradicts itself), and never color alone (R3 of `/cambios`).
+
 ### Toasts
 
 One `<Toaster />` in `src/main.tsx`, bottom-centre, offset **`calc(6.5rem + env(safe-area-inset-bottom, 0px))`** — measured against the ~87px nav, leaving ~21px of gap; re-measure if the nav

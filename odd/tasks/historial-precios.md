@@ -38,10 +38,10 @@ un log acumulativo de cambios, **nunca** copiando los snapshots completos (3.309
 | --- | --- | --- | --- | --- |
 | **T1** | S2, R4 | `scripts/historial.ts` (puro): append del día al log acumulativo, con dedupe por EAN y validación de forma; tests | inline | `bd3a00a` |
 | **T2** | S2, R4 | `refresh-catalog.ts` publica `historial.json` (baseline separado del destino, sin force) + `fetch-data` lo baja | inline | `bd3a00a` |
-| **T3** | S3, R1 | Cliente: tipos + loader del archivo (network-first + fallback, sin `?v=`) | inline | |
-| **T4** | S2, S3, R2 | `src/lib/historial/serie.ts` (puro): reconstruir la serie de un EAN desde el precio de hoy + log, con huecos explícitos; tests | inline | |
+| **T3** | S3, R1 | Cliente: tipos + loader del archivo (network-first + fallback, sin `?v=`) | inline | `8c3bae8` |
+| **T4** | S2, S3, R2 | `src/lib/historial.ts` (puro): reconstruir la serie de un EAN desde el log, con huecos explícitos; tests | inline | `8c3bae8` |
 | **T5** | S3 | Pantalla real de `/historial/:ean`: gráfico SVG a mano, precio, variación y lista de movimientos; reemplaza el placeholder | inline | |
-| **T6** | S4 | Acceso desde el detalle del producto | inline | |
+| **T6** | S4 | Acceso desde el detalle del producto | inline | ya existía (`ProductPage.tsx:129`): verificado, sin cambios |
 | **T7** | todas | Verificación: focal, suite, typecheck, acceptance (fila nueva) y navegador real con datos servidos | verify | |
 
 ## Log
@@ -81,3 +81,21 @@ un log acumulativo de cambios, **nunca** copiando los snapshots completos (3.309
   apenas exista). Exigirlo antes deja el deploy rojo por un archivo que todavía no nació. Hay un test
   que fija esa tolerancia para que el cambio a "exigido" sea deliberado. El workflow no necesitó
   cambios: publica `public/data/*.json` por glob.
+
+- **L7** (orquestador, 2026-10-23, lo que destapó ver la pantalla con datos): el gráfico, medido en
+  Chromium a 390×844 con un artefacto de 8 días, mostró **5 puntos, 0 líneas y 4 avisos de "sin
+  datos"**. La causa era de diseño, no de CSS: el log **solo publica los días en que el precio
+  cambió**, así que marcar como hueco cualquier salto de días convertía cada serie en puntos sueltos.
+  La distinción correcta la tiene el propio artefacto: un día con bucket y sin fila para ese EAN es
+  **"corrió y el precio se mantuvo"** (la línea lo cruza), y un día **ausente** es **"no hay dato"**
+  (la línea se corta y el rango se nombra). Después del arreglo: 5 puntos, **2 tramos**, 2 huecos
+  nombrados. Otras tres correcciones de la misma revisión visual: el precio suelto sin etiqueta pasó a
+  "Último precio registrado" + número grande; `Sin datos del 15 oct al 15 oct` colapsó a `Sin datos
+  del 15 oct`; y `↓ +3,33 %` (flecha y signo contradiciéndose) pasó a `↓ 3,33 %` (flecha + magnitud),
+  con un test que prohíbe `↓ +`. **Lección**: un gráfico no se verifica con tests de DOM; hay que
+  mirarlo con datos reales, porque el defecto estaba en la semántica de los datos.
+- **L8** (orquestador, 2026-10-23): la fila de aceptación **`HIST-screen`** no exige `ready`, porque el
+  log se publica recién en la próxima corrida: verifica que la pantalla **nombre su estado** y que
+  **nunca dibuje un gráfico sin datos** (si `absent`, cero puntos y el copy honesto; si `ready`,
+  puntos > 0). El fixture visual usado para medir se inyectó en `public/data/historial.json` y se borró
+  al terminar: dejarlo habría hecho que la app mintiera con datos inventados.

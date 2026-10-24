@@ -37,7 +37,7 @@ Navegación inferior: **Inicio · Cambios · [Escanear] · Lista · Perfil** (ba
 | Dark mode (sigue al sistema + toggle manual en Perfil) | ✅ |
 | Cambios del catálogo (feed de los últimos 7 días) | ✅ (artefacto `catalogo-cambios.json` del refresh diario) |
 | Comparación entre almacenes / alertas | ⏳ **modelado**, sin datos (1 tienda) |
-| Historial de precios | ✅ **el dato existe** (un snapshot por corrida, 1 tienda) · ⏳ sin pantalla |
+| Historial de precios por producto | ✅ gráfico + movimientos, con log acumulativo (1 tienda) |
 
 ## Stack
 

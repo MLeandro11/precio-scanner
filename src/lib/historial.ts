@@ -208,10 +208,11 @@ export interface Serie {
   /** Del más viejo al más nuevo. */
   puntos: PuntoSerie[]
   /**
-   * Tramos entre puntos consecutivos donde pasó más de un día sin dato. No se
-   * rellenan: un día sin fila no significa "el precio no cambió" (puede ser una
-   * corrida que falló), así que la pantalla los nombra en vez de dibujar una línea
-   * que afirme continuidad.
+   * Días **sin dato** entre dos puntos, como rangos. La distinción es la clave del
+   * gráfico: un día con bucket en el artefacto y sin filas para este EAN significa
+   * "la corrida pasó y el precio no cambió" (la línea lo cruza), mientras que un día
+   * **ausente** del artefacto significa que no hay dato (la línea se corta y el hueco
+   * se nombra). Confundirlos pintaba una serie de puntos sueltos.
    */
   huecos: Array<{ desde: string; hasta: string }>
 }
@@ -262,12 +263,22 @@ export function serieDe(
     }
   }
 
+  // Solo los días que el ARTEFACTO conoce: un bucket vacío es "corrió y no cambió".
+  const diasConCorrida = new Set(dias.map((d) => d.fecha))
   const huecos: Array<{ desde: string; hasta: string }> = []
   for (let i = 1; i < puntos.length; i++) {
-    const anterior = puntos[i - 1]!
-    const actual = puntos[i]!
-    if (dayNumber(actual.fecha) - dayNumber(anterior.fecha) > 1) {
-      huecos.push({ desde: anterior.fecha, hasta: actual.fecha })
+    const desde = dayNumber(puntos[i - 1]!.fecha)
+    const hasta = dayNumber(puntos[i]!.fecha)
+    let primeroSinDato: string | null = null
+    let ultimoSinDato: string | null = null
+    for (let n = desde + 1; n < hasta; n++) {
+      const fecha = new Date(n * 86_400_000).toISOString().slice(0, 10)
+      if (diasConCorrida.has(fecha)) continue
+      if (primeroSinDato === null) primeroSinDato = fecha
+      ultimoSinDato = fecha
+    }
+    if (primeroSinDato !== null && ultimoSinDato !== null) {
+      huecos.push({ desde: primeroSinDato, hasta: ultimoSinDato })
     }
   }
 
