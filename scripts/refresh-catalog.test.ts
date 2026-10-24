@@ -659,6 +659,52 @@ describe('scripts/refresh-catalog.ts — changes artifact', () => {
   )
 
   it(
+    'fails loudly instead of dropping the published history when the previous log is unreadable',
+    () => {
+      // R4 de `historial-precios`: el log es acumulativo. Si existe y no se puede leer,
+      // arrancar de nuevo borraría toda la historia publicada de una sola corrida, y en
+      // silencio. El mismo criterio que este CLI ya aplica al artefacto de cambios.
+      const dir = makeDir()
+      mkdirSync(join(dir, 'historial-es-un-directorio'), { recursive: true })
+      writeFileSync(join(dir, 'raw-catalog.json'), JSON.stringify(rawDelDia()))
+
+      const r = runRefresh(dir, [
+        '--esperado',
+        '20001',
+        '--historial-previo',
+        join(dir, 'historial-es-un-directorio'),
+      ])
+
+      expect(r.code).toBe(3)
+      expect(r.err).toContain('historial anterior')
+      expect(existsSync(join(dir, ...DATA_DIR, 'historial.json'))).toBe(false)
+    },
+    120_000,
+  )
+
+  it(
+    'keeps the log across runs and does not duplicate the day it already has',
+    () => {
+      const dir = makeDir({ withCatalog: false })
+      writeFileSync(join(dir, 'raw-catalog.json'), JSON.stringify(rawDelDia()))
+
+      const primera = runRefresh(dir, ['--esperado', '20001'])
+      expect(primera.code).toBe(0)
+      const segunda = runRefresh(dir, ['--esperado', '20001'])
+      expect(segunda.code).toBe(0)
+
+      const historial = JSON.parse(
+        readFileSync(join(dir, ...DATA_DIR, 'historial.json'), 'utf8'),
+      ) as { dias: Array<{ fecha: string; cambios: unknown[] }> }
+      expect(historial.dias.map((d) => d.fecha)).toEqual(['2026-10-15'])
+      // La prosa del reporte va a stdout en modo no-JSON; stderr lleva la validación.
+      expect(segunda.out).toContain('historial: acumulativo')
+      expect(primera.out).toContain('historial: reiniciado')
+    },
+    120_000,
+  )
+
+  it(
     'a previous artifact that is absent restarts the window without failing',
     () => {
       const dir = makeDir({ withCatalog: false })

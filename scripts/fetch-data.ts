@@ -63,6 +63,7 @@ export const ARCHIVOS = [
   { nombre: 'catalogo-index.json', ruta: 'public/data/catalogo-index.json' },
   { nombre: 'catalogo-facets.json', ruta: 'public/data/catalogo-facets.json' },
   { nombre: 'catalogo-cambios.json', ruta: 'public/data/catalogo-cambios.json' },
+  { nombre: 'historial.json', ruta: 'public/data/historial.json' },
 ] as const
 
 /**
@@ -70,6 +71,15 @@ export const ARCHIVOS = [
  * `--check` requires all of `ARCHIVOS`, this set included.
  */
 const OPCIONALES = new Set<string>(['catalogo-cambios.json'])
+
+/**
+ * Archivos que el guard de build TOLERA hasta que el branch los publique por
+ * primera vez (secuencia, no laxitud): exigirlos antes de que existan deja el
+ * deploy en rojo por un artefacto que recién va a nacer en la próxima corrida.
+ * **Cada entrada se borra cuando `datos` ya lo tiene** — dejarla ahí para siempre
+ * convierte el guard en un adorno.
+ */
+const PENDIENTES_DE_PUBLICAR = new Set<string>(['historial.json'])
 
 /** The `version` that must be a string; the catalog's is not required, and the
  * changes artifact's is a number. */
@@ -185,6 +195,7 @@ export function validarContenidos(
     const buf = leer(archivo.nombre)
     if (buf === null) {
       if (OPCIONALES.has(archivo.nombre) && !opts.requireOptional) continue
+      if (PENDIENTES_DE_PUBLICAR.has(archivo.nombre)) continue
       throw new FetchDataError(`${archivo.nombre} no existe`)
     }
     if (buf.length === 0) throw new FetchDataError(`${archivo.nombre} está vacío`)
@@ -261,8 +272,10 @@ export function descargarDatos(
     const r = run(['show', `${commit}:${archivo.ruta}`], cwd)
     if (r.code !== 0) {
       // The optional files may not be in the commit yet: that is the "fresh
-      // window" case, not a broken fetch (H2/R6).
+      // window" case, not a broken fetch (H2/R6). A pending-publish file is the
+      // same situation for a different reason: nobody has published it yet.
       if (OPCIONALES.has(archivo.nombre)) continue
+      if (PENDIENTES_DE_PUBLICAR.has(archivo.nombre)) continue
       throw new FetchDataError(
         `el archivo ${archivo.ruta} no está en el branch ${opts.branch} (${commit.slice(0, 12)})${detalle(r.stderr)}`,
       )

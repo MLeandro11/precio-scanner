@@ -57,11 +57,14 @@ import {
   parseChangesArtifact,
 } from './catalog-changes.ts'
 import type { ChangesArtifact, DegradationReason } from './catalog-changes.ts'
+import { buildHistorialArtifact, parseHistorialArtifact } from './historial.ts'
+import type { HistorialArtifact } from './historial.ts'
 import type { FechasDelRaw, ProductoLite, ReporteDiff, ResultadoValidacion } from './catalog-diff.ts'
 
 const DEFAULT_RAW = 'raw-catalog.json'
 const DEFAULT_CATALOGO = 'public/data/catalogo.json'
 const DEFAULT_CAMBIOS = 'public/data/catalogo-cambios.json'
+const DEFAULT_HISTORIAL = 'public/data/historial.json'
 const SCRIPT_DIR = import.meta.dirname
 
 interface Opciones {
@@ -69,6 +72,7 @@ interface Opciones {
   catalogo: string
   baseline: string | null
   cambiosPrevios: string | null
+  historialPrevio: string | null
   esperado: number | null
   json: boolean
 }
@@ -88,6 +92,10 @@ Opciones:
                       (default: hermano de --baseline, o ${DEFAULT_CAMBIOS}).
                       Si falta, no se puede leer o no es un artefacto válido, la ventana
                       arranca de nuevo con el día de hoy; nunca es fatal
+  --historial-previo <p>  log acumulativo de precios previo, para no perder historia
+                      (default: hermano de --baseline, o ${DEFAULT_HISTORIAL}).
+                      Si EXISTE y no se puede leer, el CLI falla (exit 3): degradar acá
+                      borraría toda la historia ya publicada
   --esperado <N>      conteo del oráculo GET /api/productos-cuantos; si el raw difiere, exit 2
   --json              imprime el reporte como un único objeto JSON (la prosa del pipeline va a stderr)
   --help              muestra esta ayuda y no ejecuta nada
@@ -109,6 +117,7 @@ function parseArgs(argv: string[]): Opciones | { help: true } {
     catalogo: DEFAULT_CATALOGO,
     baseline: null,
     cambiosPrevios: null,
+    historialPrevio: null,
     esperado: null,
     json: false,
   }
@@ -137,6 +146,10 @@ function parseArgs(argv: string[]): Opciones | { help: true } {
       const value = argv[++i]
       if (!value) fail(1, '--cambios-previos necesita un path')
       opts.cambiosPrevios = value
+    } else if (arg === '--historial-previo') {
+      const value = argv[++i]
+      if (!value) fail(1, '--historial-previo necesita un path')
+      opts.historialPrevio = value
     } else if (arg === '--esperado') {
       const value = argv[++i]
       const n = Number(value)
@@ -356,7 +369,30 @@ function escribirCambios(path: string, artifact: ChangesArtifact): void {
   }
 }
 
-function imprimirReporte(r: ReporteDiff, cambios: EstadoCambios): void {
+/** Dónde quedó el log acumulativo y si conservó sus días anteriores. */
+interface EstadoHistorial {
+  path: string
+  dias: number
+  degraded: string | null
+}
+
+/** Una línea de prosa para el historial: es acumulativo, así que "días" es el titular. */
+function describirHistorial(estado: EstadoHistorial): string {
+  const continuidad = estado.degraded === null ? 'acumulativo' : `reiniciado (${estado.degraded})`
+  return `historial: ${continuidad} · ${estado.dias} día(s) · ${estado.path}`
+}
+
+/** Escribe el log junto a los otros archivos publicados. Un fallo de escritura es ruidoso. */
+function escribirHistorial(path: string, artifact: HistorialArtifact): void {
+  try {
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, JSON.stringify(artifact))
+  } catch {
+    fail(3, `no se pudo escribir el historial: ${path}`)
+  }
+}
+
+function imprimirReporte(r: ReporteDiff, cambios: EstadoCambios, historial: EstadoHistorial): void {
   const lineas: string[] = []
   if (r.primeraCarga) {
     lineas.push('refresh-catalog: primer refresh (no había catálogo previo para comparar)')
@@ -415,6 +451,7 @@ function imprimirReporte(r: ReporteDiff, cambios: EstadoCambios): void {
     lineas.push(`  categorias desaparecidas: ${r.categoriasBajas.length ? r.categoriasBajas.join(', ') : '—'}`)
   }
   lineas.push(describirCambios(cambios))
+  lineas.push(describirHistorial(historial))
   console.log(lineas.join('\n'))
 }
 
@@ -536,12 +573,58 @@ function main(): void {
     degraded: cambios.degraded,
   }
 
+  // 7. El log acumulativo del historial. Misma disciplina que el artefacto de cambios, con
+  //    una diferencia deliberada: acá un archivo previo que EXISTE y no se puede leer es
+  //    fatal (exit 3). El log es acumulativo — degradar borraría toda la historia publicada.
+  const historialPath = resolve(join(dirname(catalogoPath), 'historial.json'))
+  const historialPrevioPath =
+    opts.historialPrevio !== null
+      ? resolve(opts.historialPrevio)
+      : opts.baseline === null
+        ? resolve(DEFAULT_HISTORIAL)
+        : resolve(join(dirname(baselinePath), 'historial.json'))
+  let historialPrevioTexto: string | null = null
+  if (existsSync(historialPrevioPath)) {
+    try {
+      historialPrevioTexto = readFileSync(historialPrevioPath, 'utf8')
+    } catch {
+      fail(3, `el historial anterior no se puede usar (ilegible): ${historialPrevioPath}`)
+    }
+  }
+  let historialPrevioJson: unknown = null
+  if (historialPrevioTexto !== null) {
+    try {
+      historialPrevioJson = JSON.parse(historialPrevioTexto)
+    } catch {
+      fail(3, `el historial anterior no es JSON válido: ${historialPrevioPath}`)
+    }
+  }
+  const historialPrevio = parseHistorialArtifact(historialPrevioJson)
+  if (historialPrevioTexto !== null && !historialPrevio.ok) {
+    fail(3, `el historial anterior no se puede usar (${historialPrevio.reason}): ${historialPrevioPath}`)
+  }
+
+  const historial = buildHistorialArtifact({
+    previous: prev,
+    current: next,
+    previousArtifact: historialPrevio,
+    generatedAt,
+  })
+  escribirHistorial(historialPath, historial.artifact)
+
+  const estadoHistorial: EstadoHistorial = {
+    path: historialPath,
+    dias: historial.artifact.dias.length,
+    degraded: historial.degraded,
+  }
+
   if (opts.json) {
     // The prose goes to stderr so stdout stays a single JSON object.
     console.error(describirCambios(estadoCambios))
+    console.error(describirHistorial(estadoHistorial))
     console.log(JSON.stringify(reporte))
   } else {
-    imprimirReporte(reporte, estadoCambios)
+    imprimirReporte(reporte, estadoCambios, estadoHistorial)
   }
 }
 

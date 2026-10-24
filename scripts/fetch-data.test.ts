@@ -47,6 +47,11 @@ const FACETS = JSON.stringify({
   brands: [],
   priceBounds: { min: 0, max: 100 },
 })
+const HISTORIAL = JSON.stringify({
+  version: 1,
+  generado: '2026-10-15T12:00:00Z',
+  dias: [{ fecha: '2026-10-15', cambios: [{ ean: '7790895000001', precio: 3450 }] }],
+})
 const CAMBIOS = JSON.stringify({
   version: 1,
   ventanaDias: 7,
@@ -73,6 +78,7 @@ function archivosDelBranch(over: Partial<Record<string, string>> = {}): Map<stri
     'public/data/catalogo-index.json': INDEX,
     'public/data/catalogo-facets.json': FACETS,
     'public/data/catalogo-cambios.json': CAMBIOS,
+    'public/data/historial.json': HISTORIAL,
   }
   const m = new Map<string, Buffer>()
   for (const a of ARCHIVOS) {
@@ -203,6 +209,7 @@ describe('scripts/fetch-data.ts — core', () => {
       `${COMMIT}:public/data/catalogo-index.json`,
       `${COMMIT}:public/data/catalogo-facets.json`,
       `${COMMIT}:public/data/catalogo-cambios.json`,
+      `${COMMIT}:public/data/historial.json`,
     ])
   })
 
@@ -212,6 +219,7 @@ describe('scripts/fetch-data.ts — core', () => {
     const dest = tmp()
     const archivos = archivosDelBranch()
     archivos.delete('public/data/catalogo-cambios.json')
+    archivos.delete('public/data/historial.json')
     const { run } = runnerFalso(archivos)
 
     const res = descargarDatos(run, { branch: 'datos', dest, cwd: '/x' })
@@ -221,6 +229,24 @@ describe('scripts/fetch-data.ts — core', () => {
       expect(existsSync(join(dest, nombre))).toBe(true)
     }
     expect(existsSync(join(dest, 'catalogo-cambios.json'))).toBe(false)
+    expect(existsSync(join(dest, 'historial.json'))).toBe(false)
+  })
+
+  it('tolerates the history log being absent on demand, because it is not published yet', () => {
+    // `--check` exige todo `ARCHIVOS`; el historial entra a `datos` recién en la
+    // próxima corrida del refresh. Exigirlo antes deja el deploy rojo por un
+    // artefacto que todavía no nació. Cuando `datos` lo tenga, se borra la
+    // entrada de `PENDIENTES_DE_PUBLICAR` y este test se invierte a "lo exige".
+    const sinHistorial = new Map<string, Buffer>([
+      ['catalogo.json', bytes(CATALOGO)],
+      ['catalogo-index.json', bytes(INDEX)],
+      ['catalogo-facets.json', bytes(FACETS)],
+      ['catalogo-cambios.json', bytes(CAMBIOS)],
+    ])
+
+    expect(() =>
+      validarContenidos((n) => sinHistorial.get(n) ?? null, { requireOptional: true }),
+    ).not.toThrow()
   })
 
   it('honours --branch: fetches origin <branch> and names it in the result', () => {
@@ -403,6 +429,7 @@ describe('scripts/fetch-data.ts — --check', () => {
       'catalogo-index.json': INDEX,
       'catalogo-facets.json': FACETS,
       'catalogo-cambios.json': CAMBIOS,
+      'historial.json': HISTORIAL,
     }
     const antes = new Map<string, Buffer>()
     for (const a of ARCHIVOS) {
@@ -556,6 +583,7 @@ describe('scripts/fetch-data.ts — real git, no network', () => {
         writeFileSync(join(seed, 'public', 'data', 'catalogo.json'), CATALOGO)
         writeFileSync(join(seed, 'public', 'data', 'catalogo-index.json'), INDEX)
         writeFileSync(join(seed, 'public', 'data', 'catalogo-facets.json'), FACETS)
+        writeFileSync(join(seed, 'public', 'data', 'historial.json'), HISTORIAL)
         git(['-C', seed, 'add', 'public/data'], root)
         git(['-C', seed, 'commit', '-m', 'datos'], root)
         git(['-C', seed, 'branch', '-M', 'datos'], root)
@@ -575,9 +603,11 @@ describe('scripts/fetch-data.ts — real git, no network', () => {
         expect(ok.out).toContain('v-dataset-123')
         expect(ok.out).toContain('1')
 
-        // The branch carries three files, not four: fetching the baseline must
-        // tolerate the missing artifact, or the first deploy after T2 breaks.
+        // The branch carries the three core files and the history log, but not
+        // the changes artifact: fetching the baseline must tolerate the missing
+        // artifact, or the first deploy after T2 breaks.
         expect(existsSync(join(dest, 'catalogo-cambios.json'))).toBe(false)
+        expect(readFileSync(join(dest, 'historial.json'), 'utf8')).toBe(HISTORIAL)
 
         // ...and `--check`, the build guard, refuses that same tree.
         const guard = await correrCli(dest, ['--check', '--dest', '.'])
