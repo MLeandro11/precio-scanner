@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, LineChart, TriangleAlert } from 'lucide-react'
 import Brand from '../components/Brand'
@@ -339,7 +339,12 @@ export default function HistoryPage() {
   const codigo = normalizeEan(ean ?? '')
   const [estado, setEstado] = useState<HistorialEstado>({ status: 'loading' })
   const [intento, setIntento] = useState(0)
-  const productos = useResolveEans(client, codigo ? [codigo] : [])
+  // La identidad importa: `useResolveEans` memoiza y reinicia su efecto por el array
+  // de EANs. Un literal acá (`[codigo]`) es un array nuevo en cada render, el efecto
+  // vuelve a correr, `setResolved({})` re-renderiza y se arma un loop infinito que
+  // consulta al worker una vez por vuelta.
+  const eans = useMemo(() => (codigo ? [codigo] : []), [codigo])
+  const productos = useResolveEans(client, eans)
   const nombre = productos[0]?.nombre
 
   useEffect(() => {
