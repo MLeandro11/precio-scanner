@@ -76,6 +76,17 @@ on:
   # Corrida manual. Es la que se mira la primera vez: si el login funciona
   # desde la IP del runner es el riesgo abierto R1.
   workflow_dispatch:
+    inputs:
+      # Palanca de diagnóstico (R8), no una opción de operación: un recorrido
+      # con otra página mueve todos los bordes. Si un duplicado desaparece al
+      # cambiar el tope, la causa es el corrimiento de offsets; si persiste en
+      # el mismo par de filas, el catálogo del POS tiene dos registros con el
+      # mismo id. Vacío = 500, el comportamiento de siempre.
+      tope:
+        description: 'Registros por página (diagnóstico; vacío = 500)'
+        required: false
+        default: ''
+        type: string
 
 # Mínimo privilegio: `contents: write` solo para empujar el branch `datos`, e
 # `issues: write` solo para abrir el issue de fallo. Nada más.
@@ -127,9 +138,17 @@ jobs:
         env:
           KIOSKOS_EMAIL: ${{ secrets.KIOSKOS_EMAIL }}
           KIOSKOS_CLAVE: ${{ secrets.KIOSKOS_CLAVE }}
+          # Solo llega con `workflow_dispatch`: en una corrida programada llega
+          # vacío y el CLI rechazaría `--tope ""` (exit 1).
+          TOPE: ${{ inputs.tope }}
         run: |
           set +e
-          npm run extract 2>&1 | tee "$RUNNER_TEMP/extract.log"
+          args=()
+          if [ -n "${TOPE:-}" ]; then
+            args+=(--tope "$TOPE")
+            echo "extract-catalog: tope de diagnóstico ${TOPE}"
+          fi
+          npm run extract -- "${args[@]}" 2>&1 | tee "$RUNNER_TEMP/extract.log"
           status=${PIPESTATUS[0]}
           echo "extract exit ${status}"
           exit "$status"
