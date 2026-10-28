@@ -127,3 +127,16 @@ un log acumulativo de cambios, **nunca** copiando los snapshots completos (3.309
 
 - **L10** (usuario, 2026-10-28, respuestas del selector, verbatim): **alcance** *"Los dos bloqueantes,
   completo"* · **precio de hoy** *"La última lectura del catálogo"*.
+
+- **L11** (orquestador, 2026-10-28, T8 implementado y verificado): commit `d518eb8` (work unit de 9 archivos).
+  **Verificación independiente** (por falsación, sin tocar el árbol): R4 — un baseline con una fila basura no se
+  rechaza, conserva todos los días y filas válidas, y un baseline estructuralmente roto da el mismo resultado que
+  antes (byte-idéntico en 13 casos); R1 — el cliente rechaza versión, `generado`, `dias` y fecha de día inválidos,
+  y descarta la fila mala sin tirar el archivo; S6 — `precioDeHoy` y el resolver del worker coinciden en **87/87**
+  EANs duplicados reales (la última fila del arreglo); serie con el artefacto real — 5 días / **816** filas y las
+  tres series sin fechas repetidas (5 / 2 / 1 puntos); diferencial de entrada limpia contra HEAD idéntico;
+  `npm test` 679/679 y typecheck limpio. **Avisos preexistentes** (no del cambio): `serieDe` usa el primer renglón
+  de un día si el log trae dos (el pipeline dedupea), `isFecha` acepta fechas con rollover (`2026-02-30`), y el
+  encabezado "Movimientos" se dibuja sin filas cuando la serie tiene un solo punto. **Deuda declarada**: 88 EANs
+  con más de una fila en `catalogo.json` — 87 numéricos resueltos por la regla "gana la última lectura", más `2Q`,
+  que no es un EAN y por lo tanto no tiene serie.
