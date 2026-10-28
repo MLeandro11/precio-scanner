@@ -98,20 +98,35 @@ function isCambio(value: unknown): value is HistorialCambio {
   return isEan(value.ean) && typeof value.precio === 'number' && Number.isFinite(value.precio)
 }
 
-function isDia(value: unknown): value is HistorialDia {
-  if (!isPlainObject(value)) return false
-  if (!isFecha(value.fecha)) return false
-  if (!Array.isArray(value.cambios)) return false
-  return value.cambios.every(isCambio)
-}
-
-/** Valida la forma completa. Devuelve `null` cuando no es utilizable. */
+/**
+ * Valida la forma y **descarta las filas ilegibles** en vez de tirar el archivo.
+ *
+ * La ley que ordena esto (S5) nació de una medición con el archivo real: 7 de sus
+ * 823 filas traen un barcode que no es EAN (`HG`, `AM`, `2Q`, …). Exigir que *todas*
+ * las filas fueran válidas devolvía `null` y la pantalla quedaba en "no se pudo
+ * leer" para todos los productos. Una fila mala se descarta; el archivo entero se
+ * rechaza solo cuando su estructura no es la que este build entiende (versión,
+ * fecha de generación, `dias` que no es un arreglo, un día con `fecha` ilegible).
+ * Un día cuyo `cambios` no es un arreglo también se descarta, sin lanzar: el resto
+ * del log sigue siendo utilizable.
+ */
 export function parseHistorialArtifact(value: unknown): HistorialArtifact | null {
   if (!isPlainObject(value)) return null
   if (value.version !== HISTORIAL_VERSION) return null
   if (typeof value.generado !== 'string' || !isFecha(value.generado.slice(0, 10))) return null
-  if (!Array.isArray(value.dias) || !value.dias.every(isDia)) return null
-  return value as unknown as HistorialArtifact
+  if (!Array.isArray(value.dias)) return null
+
+  const dias: HistorialDia[] = []
+  for (const dia of value.dias) {
+    if (!isPlainObject(dia)) return null
+    // Una fecha rota no es una fila mala: es la estructura del archivo la que no se
+    // entiende, y ninguna serie puede confiar en sus buckets.
+    if (!isFecha(dia.fecha)) return null
+    if (!Array.isArray(dia.cambios)) continue
+    dias.push({ fecha: dia.fecha, cambios: dia.cambios.filter(isCambio) })
+  }
+
+  return { version: HISTORIAL_VERSION, generado: value.generado, dias }
 }
 
 function cacheKey(baseUrl: string): string {
@@ -254,13 +269,16 @@ export function serieDe(
   if (precioHoy !== null && Number.isFinite(precioHoy)) {
     if (!ultimo) {
       puntos.push({ fecha: hoy, precio: precioHoy })
-    } else if (ultimo.fecha !== hoy || ultimo.precio !== precioHoy) {
-      if (ultimo.fecha > hoy) {
-        // Un punto del futuro es un artefacto roto, no un dato: no se dibuja.
-      } else {
-        puntos.push({ fecha: hoy, precio: precioHoy })
-      }
+    } else if (ultimo.fecha === hoy) {
+      // Mismo día y precios distintos (catálogo cacheado viejo, historial fresco):
+      // gana el catálogo, que es la lectura más nueva, y la serie conserva UN punto
+      // por fecha — dos puntos en la misma fecha rompen las claves del gráfico y de
+      // la lista de movimientos.
+      if (ultimo.precio !== precioHoy) ultimo.precio = precioHoy
+    } else if (ultimo.fecha < hoy) {
+      puntos.push({ fecha: hoy, precio: precioHoy })
     }
+    // `ultimo.fecha > hoy`: un punto del futuro es un artefacto roto, no se dibuja.
   }
 
   // Solo los días que el ARTEFACTO conoce: un bucket vacío es "corrió y no cambió".
@@ -283,6 +301,34 @@ export function serieDe(
   }
 
   return { ean, puntos, huecos }
+}
+
+/**
+ * El precio de hoy de un EAN: la **última** fila del catálogo que lo menciona.
+ *
+ * El catálogo real trae el mismo EAN en varios registros con precios distintos (88
+ * casos en la medición del 2026-10-28), así que "cuál precio es el de hoy" necesita
+ * una regla determinista. Es la misma que el pipeline aplica al escribir cada día del
+ * log: gana la última lectura del catálogo, no el primer registro que aparezca.
+ *
+ * Devuelve `null` cuando ninguna fila corresponde al EAN — incluyendo el catálogo
+ * vacío — para que la serie no invente un punto.
+ */
+export function precioDeHoy(
+  filas: ReadonlyArray<{ barcode: string; precio: number } | null | undefined>,
+  ean: string,
+): number | null {
+  const buscado = ean.replace(/\D/g, '')
+  if (!buscado) return null
+  let precio: number | null = null
+  for (const fila of filas) {
+    if (!fila) continue
+    if (typeof fila.barcode !== 'string') continue
+    if (fila.barcode.replace(/\D/g, '') !== buscado) continue
+    if (typeof fila.precio !== 'number' || !Number.isFinite(fila.precio)) continue
+    precio = fila.precio
+  }
+  return precio
 }
 
 export interface Variacion {

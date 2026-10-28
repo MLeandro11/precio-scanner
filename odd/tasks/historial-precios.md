@@ -16,6 +16,14 @@ un log acumulativo de cambios, **nunca** copiando los snapshots completos (3.309
   gráfico de la serie **y** la lista de los días en que el precio cambió, cada uno con fecha, precio y %.
 - **S4** (decisión del usuario, L3, verbatim): *"Solo desde el detalle del producto"* — el único acceso es
   `/producto/:ean → Ver historial`; `/cambios` y el panel de escaneados no enlazan en esta entrega.
+- **S5** (hallazgo del 2026-10-28, ver L9): *una fila malformada no puede tirar el archivo entero.* El
+  cliente y el pipeline **descartan la fila y conservan las válidas**; ninguno rechaza el artefacto
+  completo por una fila. Un barcode que no es EAN (dígitos, ≥6) no entra al log ni se dibuja.
+  Prohibido "arreglar" esto rechazando el archivo actual: el log es acumulativo y reiniciarlo borra la
+  historia (R4).
+- **S6** (decisión del usuario, L10, verbatim): *"La última lectura del catálogo"* — cuando el catálogo
+  trae varias filas del mismo EAN con precios distintos, el "precio de hoy" que cierra la serie es el de
+  la **última** fila del arreglo, la misma regla que ya aplica el log al escribir cada día.
 
 ## Reglas que el sistema exige (no son pedidos: son las leyes ya escritas del repo)
 
@@ -43,6 +51,7 @@ un log acumulativo de cambios, **nunca** copiando los snapshots completos (3.309
 | **T5** | S3 | Pantalla real de `/historial/:ean`: gráfico SVG a mano, precio, variación y lista de movimientos; reemplaza el placeholder | inline | |
 | **T6** | S4 | Acceso desde el detalle del producto | inline | ya existía (`ProductPage.tsx:129`): verificado, sin cambios |
 | **T7** | todas | Verificación: focal, suite, typecheck, acceptance (fila nueva) y navegador real con datos servidos | verify | |
+| **T8** | S5, S6, R2, R4 | Tolerancia de fila malformada en cliente y pipeline (sin rechazar el archivo), filtro de barcodes no-EAN al escribir y al releer el baseline, y precio de hoy en la pantalla | worker + verify | |
 
 ## Log
 
@@ -99,3 +108,22 @@ un log acumulativo de cambios, **nunca** copiando los snapshots completos (3.309
   **nunca dibuje un gráfico sin datos** (si `absent`, cero puntos y el copy honesto; si `ready`,
   puntos > 0). El fixture visual usado para medir se inyectó en `public/data/historial.json` y se borró
   al terminar: dejarlo habría hecho que la app mintiera con datos inventados.
+
+- **L9** (orquestador, 2026-10-28, verificación en Chromium con el artefacto **real** publicado, no con
+  fixtures): la pantalla está **rota en producción para todos los productos**, y no por el gráfico: el
+  `historial.json` publicado tiene 823 filas y **7 con barcode que no es EAN** (`HG`, `1890X4`, `AM`,
+  `SPAM`, `2BH`, `2BR`, `2Q` — basura que existe en el catálogo del POS). El cliente valida el archivo
+  completo (`src/lib/historial.ts:113`, `dias.every(isDia)` → `cambios.every(isCambio)` → `isEan`), así
+  que una fila mala devuelve `null` y la pantalla queda en `invalid`: 3 EANs × 2 viewports dieron **0
+  puntos y 0 movimientos** con el copy "El historial publicado no se pudo leer". Quitando esas 7 filas,
+  el mismo archivo renderiza `ready` con 5 puntos y 3 movimientos. El pipeline sigue publicándolas
+  (`scripts/historial.ts:108` acepta cualquier barcode no vacío). **Segundo defecto de la misma
+  medición**: `HistoryPage.tsx:229` pasa `null` como precio de hoy, así que el punto de hoy es código
+  muerto y un producto sin filas en el log (7UP LATA 354, $1.500) dibuja 0 puntos, muestra `—` y afirma
+  "Todavía hay un solo día registrado". Avisos: copy "no cambió de precio" duplicado con 0 puntos, eje de
+  un solo punto con `27 oct` en ambos extremos, y **88 EANs con más de una fila en `catalogo.json`** (el
+  peluche del ejemplo tiene 6: cinco a 19.500 y una a 19.496). **Lección repetida de L5/L7**: los fixtures
+  limpios y el DOM no ven esto; el dato real sí.
+
+- **L10** (usuario, 2026-10-28, respuestas del selector, verbatim): **alcance** *"Los dos bloqueantes,
+  completo"* · **precio de hoy** *"La última lectura del catálogo"*.

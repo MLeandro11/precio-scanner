@@ -41,10 +41,16 @@ ctx.onmessage = (e: MessageEvent<WorkerInMessage>) => {
     // barcode digits, so this is the same exact match the search pipeline's
     // barcode branch uses — no fuzzy, no scoring, no inventing near-misses.
     // Incoming EANs are reduced to digits first (the search path's rule).
+    //
+    // A repeated barcode can carry several rows (88 EANs in the published
+    // catalog do, sometimes at different prices), so the LAST row wins: it is
+    // the catalog's last reading of that product, the same rule the history log
+    // applies when it writes a day (scripts/historial.ts) and the one the
+    // history screen uses to close its series with today's price (spec S6).
     for (const ean of msg.eans ?? []) {
       const digits = ean.replace(/\D/g, '')
       const hit = digits ? engine.barcodeMap.get(digits) : undefined
-      if (hit && hit.length) products[ean] = hit[0]!
+      if (hit && hit.length) products[ean] = hit[hit.length - 1]!
     }
     // Catalog-id path: same identity lookup the favorites-mode filter uses.
     for (const id of msg.ids ?? []) {

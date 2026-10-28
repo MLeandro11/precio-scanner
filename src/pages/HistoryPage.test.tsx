@@ -36,7 +36,10 @@ function ready(dias: HistorialDia[], source: 'network' | 'cache' = 'network'): H
 let container: HTMLDivElement
 let root: ReturnType<typeof createRoot>
 
-function render(estado: HistorialEstado, extra: { nombre?: string; onRetry?: () => void } = {}) {
+function render(
+  estado: HistorialEstado,
+  extra: { nombre?: string; onRetry?: () => void; precioHoy?: number | null } = {},
+) {
   act(() => {
     root.render(
       createElement(
@@ -176,5 +179,26 @@ describe('HistoryView — huecos y series cortas', () => {
 
     expect(container.textContent).toContain('Sin cambios')
     expect(container.querySelectorAll('[data-history-move]')).toHaveLength(0)
+  })
+
+  it('closes the series with today\'s price for a product the log never saw', () => {
+    // 7UP LATA: existe en el catálogo ($1.500) y no tiene filas en el log. Sin el
+    // precio de hoy la pantalla dibujaba 0 puntos y mostraba `—`.
+    render(ready([sinCambio('2026-10-20')]), { precioHoy: 1500 })
+
+    expect(container.querySelector('[data-history-points]')?.getAttribute('data-history-points')).toBe('1')
+    expect(container.querySelectorAll('[data-history-point]')).toHaveLength(1)
+    expect(container.textContent).toContain('$ 1.500')
+    expect(container.textContent).not.toContain('—')
+  })
+
+  it('says there is no history yet with 0 points, without claiming a single day or repeating itself', () => {
+    render(ready([sinCambio('2026-10-20')]))
+
+    const texto = (container.textContent ?? '').replace(/\s+/g, ' ')
+    expect(container.querySelector('[data-history-points]')?.getAttribute('data-history-points')).toBe('0')
+    expect(texto.toLowerCase()).toContain('todavía no hay historial')
+    expect(texto).not.toContain('un solo día registrado')
+    expect(texto.match(/no cambió de precio/gi) ?? []).toHaveLength(0)
   })
 })

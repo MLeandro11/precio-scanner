@@ -73,7 +73,24 @@ function dayNumber(fecha: string): number | null {
   return Math.floor(ms / 86_400_000)
 }
 
-/** Valida la forma de un archivo leído del disco, sin confiar en su contenido. */
+/**
+ * El recorte de un EAN, el mismo del cliente y la lista: solo dígitos, mínimo 6.
+ * El catálogo del POS trae barcodes que no son códigos (`HG`, `1890X4`, `AM`, `2Q`):
+ * esos no tienen serie que anclar y no entran al log.
+ */
+function isEan(value: unknown): value is string {
+  return typeof value === 'string' && /^\d+$/.test(value) && value.length >= 6
+}
+
+/**
+ * Valida la forma de un archivo leído del disco, sin confiar en su contenido.
+ *
+ * Tolerante con una FILA, estricto con el archivo (S5): una fila cuyo barcode no es
+ * un EAN se descarta y el log se conserva entero. Rechazar el baseline por una fila
+ * de basura lo reiniciaría, y el log es acumulativo (R4): reiniciarlo borra la
+ * historia. Un archivo estructuralmente roto (no-objeto, versión, `dias`, fecha de
+ * un día, precio no finito) sigue reportándose igual que antes.
+ */
 export function parseHistorialArtifact(
   value: unknown,
 ): { ok: true; artifact: HistorialArtifact } | { ok: false; reason: string } {
@@ -85,6 +102,7 @@ export function parseHistorialArtifact(
   if (raw.version !== HISTORIAL_VERSION) return { ok: false, reason: 'unknown-version' }
   if (typeof raw.generado !== 'string') return { ok: false, reason: 'missing-generado' }
   if (!Array.isArray(raw.dias)) return { ok: false, reason: 'invalid-shape' }
+  const dias: HistorialDia[] = []
   for (const day of raw.dias) {
     if (typeof day !== 'object' || day === null) return { ok: false, reason: 'invalid-shape' }
     const d = day as Record<string, unknown>
@@ -92,6 +110,7 @@ export function parseHistorialArtifact(
       return { ok: false, reason: 'invalid-shape' }
     }
     if (!Array.isArray(d.cambios)) return { ok: false, reason: 'invalid-shape' }
+    const cambios: HistorialCambio[] = []
     for (const cambio of d.cambios) {
       if (typeof cambio !== 'object' || cambio === null) return { ok: false, reason: 'invalid-shape' }
       const c = cambio as Record<string, unknown>
@@ -99,15 +118,26 @@ export function parseHistorialArtifact(
       if (typeof c.precio !== 'number' || !Number.isFinite(c.precio)) {
         return { ok: false, reason: 'invalid-shape' }
       }
+      // La fila mala se descarta; el día (y el archivo) se conservan.
+      if (!isEan(c.ean)) continue
+      cambios.push({ ean: c.ean, precio: c.precio })
     }
+    dias.push({ fecha: d.fecha, cambios })
   }
-  return { ok: true, artifact: raw as unknown as HistorialArtifact }
+  return {
+    ok: true,
+    artifact: {
+      version: HISTORIAL_VERSION,
+      generado: raw.generado,
+      dias,
+    },
+  }
 }
 
 /** La clave de identidad de una fila, la misma de la lista: el EAN. */
 function eanKey(producto: ProductoLite): string | null {
   const ean = typeof producto.barcode === 'string' ? producto.barcode.trim() : ''
-  return ean ? ean : null
+  return isEan(ean) ? ean : null
 }
 
 /**

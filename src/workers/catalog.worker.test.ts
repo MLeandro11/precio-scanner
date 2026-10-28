@@ -70,4 +70,18 @@ describe('catalog worker adapter', () => {
     expect(posted.map((m) => m.type)).toEqual(['ready', 'resolved'])
     expect((posted[1] as unknown as { products: Record<string, unknown> }).products).toEqual({})
   })
+
+  it('resolve takes the LAST catalog row for a repeated EAN, the rule the history log writes with', () => {
+    // 88 EANs ship more than one row in catalogo.json, sometimes with different
+    // prices. The history series closes with "today's price" chosen as the last
+    // row (spec S6), so the resolver has to hand that row over, not the first.
+    const viejo = { ...P1, id: '1-viejo', precio: 19496 }
+    const nuevo = { ...P1, id: '1-nuevo', precio: 19500 }
+    send({ type: 'init', products: [viejo, nuevo], index: seedIndex([viejo, nuevo]), facets: { version: 'v' } })
+    send({ type: 'resolve', id: 11, eans: [P1.barcode] })
+    const resolved = posted[posted.length - 1] as unknown as {
+      products: Record<string, Producto>
+    }
+    expect(resolved.products[P1.barcode]).toEqual(nuevo)
+  })
 })

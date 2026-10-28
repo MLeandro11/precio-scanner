@@ -3,6 +3,7 @@ import {
   HISTORIAL_VERSION,
   loadHistorial,
   parseHistorialArtifact,
+  precioDeHoy,
   serieDe,
   variacionDe,
 } from './historial'
@@ -55,6 +56,15 @@ describe('serieDe', () => {
     const serie = serieDe(EAN, [dia('2026-10-21', [[EAN, 3450]])], 3450, '2026-10-21')
 
     expect(serie.puntos).toEqual([{ fecha: '2026-10-21', precio: 3450 }])
+  })
+
+  it('replaces today\'s log price with the catalog when the same day disagrees, instead of drawing two points', () => {
+    // Un catálogo cacheado viejo y un historial fresco pueden discrepar sobre HOY.
+    // Dos puntos con la misma fecha rompen las claves del gráfico y de la lista, y
+    // el catálogo es la lectura más nueva: gana el catálogo.
+    const serie = serieDe(EAN, [dia('2026-10-21', [[EAN, 3450]])], 3500, '2026-10-21')
+
+    expect(serie.puntos).toEqual([{ fecha: '2026-10-21', precio: 3500 }])
   })
 
   it('adds no point at all for a product the log never saw and with an unknown price', () => {
@@ -278,22 +288,106 @@ describe('loadHistorial', () => {
 })
 
 describe('parseHistorialArtifact', () => {
-  it('accepts what the pipeline writes and rejects a broken day', () => {
+  it('accepts what the pipeline writes', () => {
     expect(parseHistorialArtifact(artifact([dia('2026-10-20', [[EAN, 3450]])]))).not.toBeNull()
-    expect(parseHistorialArtifact({ version: 1, generado: 'x', dias: [] })).toBeNull()
+  })
+
+  it('rejects a structurally broken artifact, day date included', () => {
+    const generado = '2026-10-20T00:00:00Z'
+    expect(parseHistorialArtifact({ version: 2, generado, dias: [] })).toBeNull()
+    expect(parseHistorialArtifact({ version: 1, dias: [] })).toBeNull()
+    expect(parseHistorialArtifact({ version: 1, generado: 'ayer', dias: [] })).toBeNull()
+    expect(parseHistorialArtifact({ version: 1, generado, dias: {} })).toBeNull()
     expect(
-      parseHistorialArtifact({
-        version: 1,
-        generado: '2026-10-20T00:00:00Z',
-        dias: [{ fecha: '2026-10-20', cambios: [{ ean: '12', precio: 1 }] }],
-      }),
+      parseHistorialArtifact({ version: 1, generado, dias: [{ fecha: '2026-13-45', cambios: [] }] }),
     ).toBeNull()
+    expect(parseHistorialArtifact(['no', 'es', 'un', 'artefacto'])).toBeNull()
+  })
+
+  it('drops a single malformed row instead of invalidating the whole artifact', async () => {
+    // El archivo real lleva 7 filas con barcode que no es EAN (`HG`, `AM`, …) entre
+    // 823. Rechazar el archivo por una fila dejaba la pantalla entera en `invalid`.
+    const body = JSON.stringify({
+      version: HISTORIAL_VERSION,
+      generado: '2026-10-20T12:00:00Z',
+      dias: [
+        dia('2026-10-18', [[EAN, 3600]]),
+        {
+          fecha: '2026-10-20',
+          cambios: [
+            { ean: 'HG', precio: 10 },
+            { ean: EAN, precio: 3450 },
+            { ean: '0000000000000', precio: 'caro' },
+          ],
+        },
+      ],
+    })
+
+    const result = await loadHistorial({
+      baseUrl,
+      caches: null,
+      fetchFn: (async () => new Response(body, { status: 200 })) as unknown as typeof fetch,
+    })
+
+    expect(result.status).toBe('ready')
+    if (result.status !== 'ready') return
+    // La fila mala nunca llega a una serie, y las válidas siguen ahí.
+    expect(serieDe('HG', result.artifact.dias, null, '2026-10-21').puntos).toEqual([])
+    expect(serieDe(EAN, result.artifact.dias, null, '2026-10-21').puntos).toEqual([
+      { fecha: '2026-10-18', precio: 3600 },
+      { fecha: '2026-10-20', precio: 3450 },
+    ])
+    expect(result.artifact.dias.flatMap((d) => d.cambios).map((c) => c.ean)).toEqual([EAN, EAN])
+  })
+
+  it('drops a day whose cambios is not an array and keeps the other days', () => {
+    const parsed = parseHistorialArtifact({
+      version: 1,
+      generado: '2026-10-20T12:00:00Z',
+      dias: [
+        dia('2026-10-18', [[EAN, 3600]]),
+        { fecha: '2026-10-19', cambios: 'roto' },
+        dia('2026-10-20', [[EAN, 3450]]),
+      ],
+    })
+
+    expect(parsed?.dias.map((d) => d.fecha)).toEqual(['2026-10-18', '2026-10-20'])
+    expect(serieDe(EAN, parsed!.dias, null, '2026-10-21').puntos).toHaveLength(2)
+  })
+
+  it('never accepts a non-finite price', () => {
+    const parsed = parseHistorialArtifact({
+      version: 1,
+      generado: '2026-10-20T12:00:00Z',
+      dias: [
+        {
+          fecha: '2026-10-20',
+          cambios: [
+            { ean: EAN, precio: null },
+            { ean: EAN, precio: 3450 },
+          ],
+        },
+      ],
+    })
+
+    expect(parsed?.dias[0]?.cambios).toEqual([{ ean: EAN, precio: 3450 }])
+  })
+})
+
+describe('precioDeHoy', () => {
+  const fila = (barcode: string, precio: number) => ({ barcode, precio })
+
+  it('takes the last catalog row for the EAN, the same rule the log writes with', () => {
+    // El catálogo repite EANs con precios distintos (88 casos en el archivo real):
+    // gana la última lectura, igual que al escribir cada día del log.
     expect(
-      parseHistorialArtifact({
-        version: 1,
-        generado: '2026-10-20T00:00:00Z',
-        dias: [{ fecha: '2026-10-20', cambios: [{ ean: EAN, precio: 'caro' }] }],
-      }),
-    ).toBeNull()
+      precioDeHoy([fila(EAN, 19500), fila('0000000000000', 100), fila(EAN, 19496)], EAN),
+    ).toBe(19496)
+    expect(precioDeHoy([fila(` ${EAN} `, 19496)], EAN)).toBe(19496)
+  })
+
+  it('returns null when no row matches and when there is no catalog at all', () => {
+    expect(precioDeHoy([fila('0000000000000', 100)], EAN)).toBeNull()
+    expect(precioDeHoy([], EAN)).toBeNull()
   })
 })

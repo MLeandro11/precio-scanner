@@ -5,7 +5,7 @@ import Brand from '../components/Brand'
 import Button from '../components/ui/Button'
 import { useCatalog } from '../App'
 import { useResolveEans } from '../hooks/useResolveEans'
-import { loadHistorial, serieDe, variacionDe } from '../lib/historial'
+import { loadHistorial, precioDeHoy, serieDe, variacionDe } from '../lib/historial'
 import type { HistorialArtifact, HistorialDia, HistorialLoadResult, PuntoSerie } from '../lib/historial'
 import { normalizeEan } from '../lib/lupa/list'
 
@@ -41,6 +41,7 @@ const COPY = {
   error: 'No pudimos traer el historial ahora.',
   reintentar: 'Reintentar',
   ultimoPrecio: 'Último precio registrado',
+  sinPuntos: 'Todavía no hay historial para este producto.',
   unPunto: 'Todavía hay un solo día registrado para este producto.',
   sinCambios: (dias: number) => `Sin cambios en los últimos ${dias} días registrados.`,
   hueco: (desde: string, hasta: string) =>
@@ -215,18 +216,41 @@ function Movimientos({ puntos }: { puntos: PuntoSerie[] }) {
 /** El estado de la pantalla: el del loader más el "todavía estoy pidiendo". */
 export type HistorialEstado = HistorialLoadResult | { status: 'loading' }
 
+/**
+ * La fecha del punto que cierra la serie.
+ *
+ * `HistoryView` no recibe un reloj ni lo consulta: la última lectura del catálogo es
+ * la corrida que el artefacto declara en `generado`, y esa fecha es la del punto de
+ * hoy. Así la vista se ve igual para todos los husos horarios y para cualquier
+ * lector, que es lo que un bucket `YYYY-MM-DD` significa. Si el artefacto no trajera
+ * una fecha legible -el loader ya la valida, así que es defensivo-, cae al día más
+ * nuevo del propio log.
+ */
+function fechaDeLectura(artifact: HistorialArtifact): string {
+  const generado = artifact.generado.slice(0, 10)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(generado) && !Number.isNaN(Date.parse(`${generado}T00:00:00Z`))) {
+    return generado
+  }
+  return artifact.dias.reduce((nuevo, dia) => (dia.fecha > nuevo ? dia.fecha : nuevo), '')
+}
+
 export interface HistoryViewProps {
   ean: string
   estado: HistorialEstado
   nombre?: string
+  /** El precio de hoy del catálogo (`precioDeHoy`), que cierra la serie. */
+  precioHoy?: number | null
   onRetry?: () => void
 }
 
 /** La vista pura: recibe un resultado del loader y no sabe de red, rutas ni catálogo. */
-export function HistoryView({ ean, estado, nombre, onRetry }: HistoryViewProps) {
+export function HistoryView({ ean, estado, nombre, precioHoy = null, onRetry }: HistoryViewProps) {
   const navigate = useNavigate()
   const dias: HistorialDia[] = estado.status === 'ready' ? estado.artifact.dias : []
-  const serie = serieDe(ean, dias, null, '')
+  // El precio de hoy es la última lectura del catálogo: sin él, un producto que
+  // existe pero todavía no cambió de precio no tenía ningún punto que dibujar.
+  const hoy = estado.status === 'ready' ? fechaDeLectura(estado.artifact) : ''
+  const serie = serieDe(ean, dias, precioHoy, hoy)
   const variacion = variacionDe(serie.puntos)
   const ultimo = serie.puntos[serie.puntos.length - 1]
 
@@ -288,14 +312,18 @@ export function HistoryView({ ean, estado, nombre, onRetry }: HistoryViewProps) 
               <p className="tnum text-2xl font-bold text-text-primary">
                 {ultimo ? COPY.precio(ultimo.precio) : '—'}
               </p>
+              {/* Un estado por renglón: 0 puntos no es "un solo día" —no hay ningún
+                  día— y no puede repetir la frase de "no cambió de precio". */}
               <p className="text-xs text-text-secondary">
-                {variacion === null
-                  ? COPY.unPunto
-                  : variacion.absoluta === 0
-                    ? COPY.sinCambios(serie.puntos.length)
-                    : `${variacion.absoluta < 0 ? '↓' : '↑'} ${pctMagnitud(
-                        variacion.pct,
-                      )} desde ${fechaCorta(serie.puntos[0]!.fecha)}`}
+                {serie.puntos.length === 0
+                  ? COPY.sinPuntos
+                  : variacion === null
+                    ? COPY.unPunto
+                    : variacion.absoluta === 0
+                      ? COPY.sinCambios(serie.puntos.length)
+                      : `${variacion.absoluta < 0 ? '↓' : '↑'} ${pctMagnitud(
+                          variacion.pct,
+                        )} desde ${fechaCorta(serie.puntos[0]!.fecha)}`}
               </p>
             </div>
           </div>
@@ -309,9 +337,7 @@ export function HistoryView({ ean, estado, nombre, onRetry }: HistoryViewProps) 
               <span>{fechaCorta(serie.puntos[0]!.fecha)}</span>
               <span>{fechaCorta(ultimo!.fecha)}</span>
             </p>
-          ) : (
-            <p className="mt-4 text-sm text-text-secondary">{COPY.sinMovimientos}</p>
-          )}
+          ) : null}
 
           {serie.huecos.map((h) => (
             <p
@@ -323,8 +349,14 @@ export function HistoryView({ ean, estado, nombre, onRetry }: HistoryViewProps) 
             </p>
           ))}
 
-          <h2 className="mt-6 text-sm font-semibold text-text-primary">{COPY.movimientos}</h2>
-          <Movimientos puntos={serie.puntos} />
+          {/* Con 0 puntos no hay movimientos que listar: el estado ya lo dice arriba,
+              y la lista vacía repetiría la misma frase una segunda vez. */}
+          {serie.puntos.length > 0 ? (
+            <>
+              <h2 className="mt-6 text-sm font-semibold text-text-primary">{COPY.movimientos}</h2>
+              <Movimientos puntos={serie.puntos} />
+            </>
+          ) : null}
 
           <p className="mt-6 text-xs text-text-secondary">{COPY.actualizado(fechaLarga(estado.artifact.generado.slice(0, 10)))}</p>
         </>
@@ -346,6 +378,10 @@ export default function HistoryPage() {
   const eans = useMemo(() => (codigo ? [codigo] : []), [codigo])
   const productos = useResolveEans(client, eans)
   const nombre = productos[0]?.nombre
+  // "La última lectura del catálogo": la última fila del arreglo para este EAN, la
+  // misma regla con la que el log escribe cada día. Sin esto el punto de hoy era
+  // código muerto y un producto sin filas en el log se dibujaba en cero.
+  const precioHoy = precioDeHoy(productos, codigo)
 
   useEffect(() => {
     if (!codigo) return
@@ -386,6 +422,7 @@ export default function HistoryPage() {
       ean={codigo}
       estado={estado}
       nombre={nombre}
+      precioHoy={precioHoy}
       onRetry={() => setIntento((n) => n + 1)}
     />
   )
