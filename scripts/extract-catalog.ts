@@ -24,13 +24,16 @@
  * when a COMPLETED walk fails validation — never for a login or a request
  * failure. Walking `desde=N` offsets over a catalog whose order is not a
  * stable total order (risk R8) can make a row appear twice or be skipped even
- * though the walk finishes. The retry therefore moves the page size by one row
- * (`topeDelIntento`): repeating the same `tope` would put every boundary back
- * on the same row and come back with the same duplicate — the failure observed
- * in production on 2026-10-27, where four walks at `tope=500` failed on the
- * same id at indices 2999/3000 while the same catalog walked clean at 431. It
- * is not a retry of the login: it re-walks with the same session and never
- * sends the credential again, so it cannot contribute to an account lockout.
+ * though the walk finishes. The retry therefore moves the page size DOWN by one
+ * row (`topeDelIntento`): repeating the same `tope` would put every boundary
+ * back on the same row and come back with the same duplicate — the failure
+ * observed in production on 2026-10-27, where four walks at `tope=500` failed
+ * on the same id at indices 2999/3000 while the same catalog walked clean at
+ * 431. The shift is downward because the API caps a page at 500 rows and
+ * silently serves 500 when asked for more, which the client reads as a short
+ * page: a retry at 501 walked 500 rows and stopped. It is not a retry of the
+ * login: it re-walks with the same session and never sends the credential
+ * again, so it cannot contribute to an account lockout.
  *
  * Log hygiene (the repo is public and `raw-catalog.json` carries the user's
  * cost and margin): this script never prints the password, the token, the
@@ -68,13 +71,18 @@ const INTENTOS_MAXIMOS = 2
 
 /**
  * The page size for one walk attempt. The first attempt uses the caller's
- * `tope`; every retry moves the page by one row, so all the `desde` boundaries
- * land somewhere else. The duplicate this retry exists for is anchored to the
- * boundary itself (R8), so a retry with the same `tope` is not an independent
- * draw: it rebuilds the exact window that failed.
+ * `tope`; every retry moves the page DOWN by one row, so all the `desde`
+ * boundaries land somewhere else. The duplicate this retry exists for is
+ * anchored to the boundary itself (R8), so a retry with the same `tope` is not
+ * an independent draw: it rebuilds the exact window that failed.
+ *
+ * Downward, never upward: the API caps a page at 500 rows, so a retry at
+ * `tope + 1` comes back as a 500-row short page and the walk ends after one
+ * page (observed in production on 2026-10-27). The floor of 1 keeps a
+ * degenerate `--tope 1` from asking for a zero-row page.
  */
 function topeDelIntento(tope: number, intento: number): number {
-  return tope + intento - 1
+  return Math.max(1, tope - (intento - 1))
 }
 
 interface Opciones {

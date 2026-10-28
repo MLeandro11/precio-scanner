@@ -32,7 +32,12 @@
 /** Milliseconds any single request is allowed to take before it aborts. */
 export const TIMEOUT_MS = 15_000
 
-/** Page size the site's own client uses for the catalog walk. */
+/**
+ * Page size the site's own client uses for the catalog walk, and the server's
+ * cap: asking for `tope=501` silently returns 500 rows (observed 2026-10-27),
+ * which the walk reads as a short page and treats as the end of the catalog.
+ * Nothing may walk with a page larger than this.
+ */
 export const TOPE_DEFAULT = 500
 
 /**

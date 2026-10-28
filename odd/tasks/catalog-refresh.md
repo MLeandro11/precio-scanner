@@ -436,9 +436,14 @@ cron empieza a correr sin credenciales, va a fallar y a abrir un issue por día.
   recorrido del **mismo catálogo** con `tope=431` pasó limpio (23.781 filas, oráculo 23.781). O sea:
   el duplicado está anclado al **borde de página**, no al paso del tiempo, y un reintento con el
   mismo `tope` no es un intento independiente — reconstruye la misma ventana que falló. Desde
-  entonces el reintento recorre con `tope + 1` (`topeDelIntento` en `scripts/extract-catalog.ts`),
-  que mueve todos los `desde`. El workflow ganó un input `tope` en `workflow_dispatch` como palanca
-  de diagnóstico: es lo que distinguió "dos filas reales con el mismo id" de "borde inestable".
+  entonces el reintento recorre con `tope - 1` (`topeDelIntento` en `scripts/extract-catalog.ts`),
+  que mueve todos los `desde`. **Hacia abajo y no hacia arriba, y eso costó una corrida de prueba en
+  producción:** la API capa la página en 500 filas y sirve 500 cuando se le piden 501, así que un
+  reintento con `tope + 1` se leyó como página corta y terminó el recorrido con 500 registros. El
+  fake de los tests ahora modela ese capa (`TOPE_MAX_API`), que es lo que impide que la versión
+  ascendente vuelva a parecer correcta. El workflow ganó un input `tope` en `workflow_dispatch` como
+  palanca de diagnóstico: es lo que distinguió "dos filas reales con el mismo id" de "borde
+  inestable".
 - **R9 — El cron de GitHub corre ~7 horas tarde.** Las corridas programadas cayeron a las 14:07,
   14:22 y 14:12 UTC en vez de a las 07:00: el scheduler de Actions es best-effort y posterga los
   repos de baja actividad. Consecuencia práctica: los precios se actualizan alrededor de las 11 de la

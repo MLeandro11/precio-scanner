@@ -60,6 +60,14 @@ interface EstadoServidor {
   walk: number
 }
 
+/**
+ * The API's real page-size cap, observed in production on 2026-10-27: asking
+ * for `tope=501` silently returns 500 rows, which the client reads as a SHORT
+ * page and takes as the end of the walk. Modelling the cap here is what stops
+ * a retry that shifts the page UPWARD from looking correct in tests.
+ */
+const TOPE_MAX_API = 500
+
 function manejador(cfg: Fake, estado: EstadoServidor) {
   return (req: IncomingMessage, res: ServerResponse): void => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
@@ -98,7 +106,8 @@ function manejador(cfg: Fake, estado: EstadoServidor) {
     }
 
     if (url.pathname === '/api/productos') {
-      const tope = Number(url.searchParams.get('tope'))
+      const pedido = Number(url.searchParams.get('tope'))
+      const tope = Math.min(pedido, TOPE_MAX_API)
       const desde = Number(url.searchParams.get('desde'))
       // A walk always opens with desde=0, so this is a walk counter, not a
       // page counter: the retry's first page starts walk #2.
@@ -500,14 +509,15 @@ describe('scripts/extract-catalog.ts', () => {
           expect(escrito.products).toEqual(limpio)
 
           // Exactly TWO full walks: the first is two pages (500 + 100), the
-          // retry is two pages of 501 (501 + 99) because it moves the boundary.
+          // retry is two pages of 499 (499 + 101) because it moves the boundary
+          // DOWN: the API caps a page at 500, so asking for more reads as short.
           // A retry loop or a missing retry both break this exact list.
           const paginas = peticiones.filter((p) => p.startsWith('/api/productos?'))
           expect(paginas).toEqual([
             '/api/productos?tope=500&desde=0',
             '/api/productos?tope=500&desde=500',
-            '/api/productos?tope=501&desde=0',
-            '/api/productos?tope=501&desde=501',
+            '/api/productos?tope=499&desde=0',
+            '/api/productos?tope=499&desde=499',
           ])
           // The retry re-walks the catalog without authenticating again.
           expect(peticiones.filter((p) => p === '/api/entrar')).toHaveLength(1)
@@ -548,8 +558,8 @@ describe('scripts/extract-catalog.ts', () => {
           expect(paginas).toEqual([
             '/api/productos?tope=500&desde=0',
             '/api/productos?tope=500&desde=500',
-            '/api/productos?tope=501&desde=0',
-            '/api/productos?tope=501&desde=501',
+            '/api/productos?tope=499&desde=0',
+            '/api/productos?tope=499&desde=499',
           ])
           // The retry re-walks the catalog without authenticating again.
           expect(peticiones.filter((p) => p === '/api/entrar')).toHaveLength(1)
@@ -585,8 +595,8 @@ describe('scripts/extract-catalog.ts', () => {
           expect(paginas).toEqual([
             '/api/productos?tope=500&desde=0',
             '/api/productos?tope=500&desde=500',
-            '/api/productos?tope=501&desde=0',
-            '/api/productos?tope=501&desde=501',
+            '/api/productos?tope=499&desde=0',
+            '/api/productos?tope=499&desde=499',
           ])
           expect(r.err).toContain('conteo-esperado')
         },
@@ -618,8 +628,8 @@ describe('scripts/extract-catalog.ts', () => {
           expect(paginas).toEqual([
             '/api/productos?tope=500&desde=0',
             '/api/productos?tope=500&desde=500',
-            '/api/productos?tope=501&desde=0',
-            '/api/productos?tope=501&desde=501',
+            '/api/productos?tope=499&desde=0',
+            '/api/productos?tope=499&desde=499',
           ])
           // Still one login for the whole run, and the reason is announced.
           expect(peticiones.filter((p) => p === '/api/entrar')).toHaveLength(1)
