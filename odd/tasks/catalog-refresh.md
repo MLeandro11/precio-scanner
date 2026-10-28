@@ -430,6 +430,15 @@ cron empieza a correr sin credenciales, va a fallar y a abrir un issue por día.
   salteo es la silenciosa, y la validación es lo único que lo delata.** Pasó 1 de cada 3 corridas
   programadas hasta ahora. **Las tres direcciones del corrimiento quedaron cubiertas por T13**
   (duplicado con salteo, salteo solo, y una fila de más por un producto agregado a mitad de camino).
+  **Revisado el 2026-10-27, y la causa no era (solo) el catálogo cambiando.** Ese día el reintento
+  de T13 no salvó la corrida: dos recorridos con `tope=500` fallaron con el **mismo** id en los
+  índices 2999/3001 y 2999/3000. La corrida manual repitió el duplicado una tercera vez, y un cuarto
+  recorrido del **mismo catálogo** con `tope=431` pasó limpio (23.781 filas, oráculo 23.781). O sea:
+  el duplicado está anclado al **borde de página**, no al paso del tiempo, y un reintento con el
+  mismo `tope` no es un intento independiente — reconstruye la misma ventana que falló. Desde
+  entonces el reintento recorre con `tope + 1` (`topeDelIntento` en `scripts/extract-catalog.ts`),
+  que mueve todos los `desde`. El workflow ganó un input `tope` en `workflow_dispatch` como palanca
+  de diagnóstico: es lo que distinguió "dos filas reales con el mismo id" de "borde inestable".
 - **R9 — El cron de GitHub corre ~7 horas tarde.** Las corridas programadas cayeron a las 14:07,
   14:22 y 14:12 UTC en vez de a las 07:00: el scheduler de Actions es best-effort y posterga los
   repos de baja actividad. Consecuencia práctica: los precios se actualizan alrededor de las 11 de la

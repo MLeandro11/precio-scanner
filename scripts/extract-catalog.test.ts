@@ -39,6 +39,13 @@ interface Fake {
    * `catalogo` for every walk when omitted.
    */
   catalogos?: unknown[][]
+  /**
+   * Models the production failure of 2026-10-27: the catalog does NOT change,
+   * but any walk whose page size is exactly this value repeats the previous
+   * page's last row at the start of the next one and drops the row at the far
+   * end, so the total still equals the oracle and only `id-duplicado` shows it.
+   */
+  bordeInestable?: number
   token?: string
   negocio?: unknown
   negocios?: unknown[]
@@ -99,6 +106,12 @@ function manejador(cfg: Fake, estado: EstadoServidor) {
       const fuente = cfg.catalogos
         ? cfg.catalogos[Math.min(estado.walk - 1, cfg.catalogos.length - 1)]
         : cfg.catalogo
+      if (cfg.bordeInestable !== undefined && tope === cfg.bordeInestable && desde > 0) {
+        responder(200, {
+          productos: [fuente[desde - 1], ...fuente.slice(desde, desde + tope - 1)],
+        })
+        return
+      }
       responder(200, { productos: fuente.slice(desde, desde + tope) })
       return
     }
@@ -486,14 +499,15 @@ describe('scripts/extract-catalog.ts', () => {
           expect(escrito.products).toHaveLength(600)
           expect(escrito.products).toEqual(limpio)
 
-          // Exactly TWO full walks: each is two pages (500 + 100). A retry loop
-          // or a missing retry both break this exact list.
+          // Exactly TWO full walks: the first is two pages (500 + 100), the
+          // retry is two pages of 501 (501 + 99) because it moves the boundary.
+          // A retry loop or a missing retry both break this exact list.
           const paginas = peticiones.filter((p) => p.startsWith('/api/productos?'))
           expect(paginas).toEqual([
             '/api/productos?tope=500&desde=0',
             '/api/productos?tope=500&desde=500',
-            '/api/productos?tope=500&desde=0',
-            '/api/productos?tope=500&desde=500',
+            '/api/productos?tope=501&desde=0',
+            '/api/productos?tope=501&desde=501',
           ])
           // The retry re-walks the catalog without authenticating again.
           expect(peticiones.filter((p) => p === '/api/entrar')).toHaveLength(1)
@@ -534,8 +548,8 @@ describe('scripts/extract-catalog.ts', () => {
           expect(paginas).toEqual([
             '/api/productos?tope=500&desde=0',
             '/api/productos?tope=500&desde=500',
-            '/api/productos?tope=500&desde=0',
-            '/api/productos?tope=500&desde=500',
+            '/api/productos?tope=501&desde=0',
+            '/api/productos?tope=501&desde=501',
           ])
           // The retry re-walks the catalog without authenticating again.
           expect(peticiones.filter((p) => p === '/api/entrar')).toHaveLength(1)
@@ -571,10 +585,45 @@ describe('scripts/extract-catalog.ts', () => {
           expect(paginas).toEqual([
             '/api/productos?tope=500&desde=0',
             '/api/productos?tope=500&desde=500',
-            '/api/productos?tope=500&desde=0',
-            '/api/productos?tope=500&desde=500',
+            '/api/productos?tope=501&desde=0',
+            '/api/productos?tope=501&desde=501',
           ])
           expect(r.err).toContain('conteo-esperado')
+        },
+      )
+    },
+    30_000,
+  )
+
+  it(
+    'moves the page boundary on the retry, clearing a duplicate the page size itself causes',
+    async () => {
+      const dir = tmp()
+      const limpio = productos(600)
+
+      await conServidor(
+        { cuantos: 600, catalogo: limpio, bordeInestable: 500 },
+        async (baseUrl, peticiones) => {
+          const r = await correrCli(dir, { ...CREDENCIALES, KIOSKOS_BASE_URL: baseUrl })
+
+          expect(r.code).toBe(0)
+          const escrito = JSON.parse(readFileSync(join(dir, 'raw-catalog.json'), 'utf8')) as {
+            products: unknown[]
+          }
+          expect(escrito.products).toEqual(limpio)
+
+          // The retry walks with a DIFFERENT page size: repeating 500 would put
+          // the boundary back on the same row and come back duplicated again.
+          const paginas = peticiones.filter((p) => p.startsWith('/api/productos?'))
+          expect(paginas).toEqual([
+            '/api/productos?tope=500&desde=0',
+            '/api/productos?tope=500&desde=500',
+            '/api/productos?tope=501&desde=0',
+            '/api/productos?tope=501&desde=501',
+          ])
+          // Still one login for the whole run, and the reason is announced.
+          expect(peticiones.filter((p) => p === '/api/entrar')).toHaveLength(1)
+          expect(r.err).toContain('id-duplicado')
         },
       )
     },
